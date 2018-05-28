@@ -1,0 +1,81 @@
+<!--
+freezr Account App Mangement
+  app_list refers to app_mgmt_list.html
+  options:
+    'app_management': {
+        page_title: "Apps (freezr)",
+        css_files: ['info.freezr.public/freezr_style.css', 'account_app_management.css'],
+        page_url: 'account_app_management.html',
+        initial_data: {'url':'/account/v1/app_list.json'},
+        script_files: ['/app_files/info.freezr.account/account_app_management.js']
+    },
+-->
+<div class="freezer_texture_outer">
+  <div class="freezer_texture_inner">
+    <div class="freezer_top_app_menu" id="adminFunctions">
+      <a href="/account/Home">Home</a>
+      &nbsp;
+      <a href="/account/changePassword">Change Password</a>
+      &nbsp;
+      <a id="freezer_admin_butt" href="/admin/home">Admin</a>
+      &nbsp;
+      <a href="/account/logout">Log Out</a>
+    </div>    
+
+    <div class="freezer_dialogueTitle">freezr.info - App Management</div>
+
+    <div id="errorBox" class="errorBox"></div>
+
+    <table class="app_container">
+      <tr>
+        <td>
+            <div class="freezer_app_page_title">Upload a New App</div>
+            <div>Zip file name must be name of app</div>
+        </td>
+        <td width="50%">
+        </td>
+      </tr>
+      <tr>
+          <td>
+            <div class="button left" id="button_chooseFile">Choose</div>
+            <div class="choose_file_outer"> <input class="choose_file_inner" id="app_zipfile2" type='file' class="freezer_butt" name="app_zipfile2"/></div>
+          </td>
+          <td width="50%" >    
+            <div id="button_uploadZipFileApp" class="left button" style="display:none"><br/>upload</div>
+        </td>
+      </tr>
+    </table>
+
+    <div id="button_showDevOptions">show dev options</div>
+    <br/>
+
+    <table class="app_container dev_option" id="addFileTable" style="display:none">
+      <tr>
+        <td width="100%">
+          <div class="freezer_app_page_title">Add an existing folder to Apps list</div>
+            <div class="small">Enter app name if folder has been added manually</div>
+          <input type="text"  id="appNameFromFolder"/>
+          <div id="button_addAppInFolder" class="button left">Add</div>
+          <div>
+        </td>
+      </tr>
+    </table>
+
+
+    <div id="app_list">
+    </div>
+
+  <br/>
+  <br/>
+  <br/>
+  </div>
+</div>
+
+
+
+
+
+
+
+
+

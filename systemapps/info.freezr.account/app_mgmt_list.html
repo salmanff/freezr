@@ -1,0 +1,91 @@
+<!--
+  app_mgmt_list - part of freezr Account App Mangement
+-->
+
+    <div >
+        <div class="freezer_app_page_title"> {{#new_apps.length }}You have uploaded {{ new_apps.length }} apps you can install  {{/new_apps.length }}</div>
+      {{#new_apps}}
+        <table class="app_container">
+          <tr>
+            <td class="app_inner" width="40px">
+              <img src="{{logo}}" width="40px" class="logo_img" id="button_goto_1_{{app_name}}" >
+            </td>
+
+            <td class="app_inner" id="button_goto_2_{{app_name}}">
+              {{display_name}}
+              <br/>
+              <span class="small_text" id="button_goto_3_{{app_name}}" >{{app_name}}</span> 
+            </td>
+
+            <td width="50px"> 
+              <span id="button_installApp_{{app_name}}" class="right button" >
+                install and launch
+              </span>            
+            </td>
+
+            </td>
+
+          </tr>
+        </table>
+      {{/new_apps}}
+    </div>
+
+    <div >
+        <div class="freezer_app_page_title"> {{#user_apps.length }}You have {{ user_apps.length }} installed apps {{/user_apps.length }}{{^user_apps}}You have No Installed Apps.{{/user_apps}}</div>
+      {{#user_apps}}
+        <table class="app_container">
+          <tr>
+            <td class="app_inner" width="40px">
+              <img src="{{logo}}" width="40px" class="logo_img" id="button_goto_1_{{app_name}}"  >
+            </td>
+
+            <td class="app_inner" id="button_goto_2_{{app_name}}">
+              {{display_name}}
+              <br/>
+              <span class="small_text" id="button_goto_3_{{app_name}}">{{app_name}}</span> 
+            </td>
+
+            <td >
+                <span id="button_removeApp_{{app_name}}" class="right button">  
+                  remove app
+                </span>
+                <span class="right button dev_option" id="button_updateApp_{{app_name}}" style="display:none">
+                  refresh from files
+                </span>
+            </td>
+
+          </tr>
+        </table>
+      {{/user_apps}}
+    </div>
+
+
+    <div >
+        <div class="freezer_app_page_title"> {{#removed_apps.length }}You have removed {{ removed_apps.length }} apps.  {{/removed_apps.length }}</div>
+      {{#removed_apps}}
+        <table class="app_container">
+          <tr>
+            <td class="app_inner" width="40px">
+              <img src="{{logo}}" width="40px" id="button_notgoto_3_{{app_name}}" class="logo_img">
+            </td>
+
+            <td class="app_inner">
+              {{display_name}}
+              <br/>
+              <span class="small_text">({{app_name}})</span> 
+            </td>
+
+            <td id="button_deleteApp_{{app_name}}" class="button right">  
+              delete app
+            </td>
+
+            <td id="button_reinstallApp_{{app_name}}" class="button right">  
+              re-install app
+            </td>
+
+            </td>
+
+          </tr>
+        </table>
+      {{/removed_apps}}
+    </div>

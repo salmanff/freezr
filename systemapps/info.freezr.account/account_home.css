@@ -1,0 +1,38 @@
+
+
+
+
+.list_holder {
+	margin-top: 20px;
+}
+.app_container {
+	float:left;
+	margin:10px;
+	cursor: pointer;
+	color: blue;
+	background-color: rgba(255, 255, 255, 0.2);;
+	opacity: 50%;
+	border-radius:5px;
+	border: 1px solid #f1f1f1;
+	font-weight: normal;
+	padding:5px;
+	margin-top:-5px;
+	width:100px;
+	height:150px;
+	line-height: 12px;
+	overflow: hidden;
+	word-wrap: break-word;
+}
+.app_inner {
+	height:80px;
+	width:90px;
+	margin:5px;
+	text-align: center;
+	overflow: hidden;
+}
+.app_name{
+	font-size: 10px;
+	width: 90px;
+	text-align: center;
+}
+

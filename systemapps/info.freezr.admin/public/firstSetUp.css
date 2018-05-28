@@ -1,0 +1,66 @@
+
+/*  firstSetUp.css */
+.freezr_hiders {
+    display:none;
+}
+.bigText {
+    font-size: 20px;
+    margin-bottom: 5px;
+	font-weight: bold;
+	width:100%;
+	text-align: center;
+}
+.big_butt {
+    margin: 10px;
+    opacity: 0.9;
+    color: blue;
+    background-color: #E2E2E2;
+    text-align: center;
+    min-width: 60px;
+    padding: 20px;
+    margin-left:10%;
+    margin-right:10%;
+    border-radius: 5px;
+    font-weight: bold;
+    cursor: pointer;
+}
+.norm_text {
+    font-size: 14px; important!
+}
+.errorBox {
+    color: red;
+}
+.red{
+    color:red;
+}
+.spacer {
+    height:10px;
+    min-height: 10px;
+}
+.green {
+    color:green;
+}
+.bold {
+    font-weight: bold;
+}
+.small_butt {
+    padding: 5px;
+    min-width: 100px;
+    text-align: center;
+    margin: 10px;
+    font-weight: normal;
+    cursor: pointer;
+    border: solid 1px grey;
+    border-radius: 5px;
+}
+.butt_strng {
+    font-weight: bold;
+    opacity: 0.9;
+    color: blue;
+    background-color: #E2E2E2;
+}
+.butt_weak {
+    font-weight: normal;
+    background-color: #e8e8e8;
+    color: #505050;
+}

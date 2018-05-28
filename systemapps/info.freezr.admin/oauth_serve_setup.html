@@ -1,0 +1,82 @@
+
+<div class="freezer_texture_outer">
+  <div class="freezer_texture_inner norm_text">
+
+    <div class="freezer_top_app_menu" id="adminFunctions">
+      <a href="/account/home">Account Home</a>
+      &nbsp;
+      <a href="/admin/home">Admin Home</a>
+      &nbsp;
+      <a href="/admin/register">Register New users</a>
+      &nbsp;
+      <a href="/account/logout">Log Out</a>
+    </div>
+
+
+    <div class="freezer_dialogueTitle">
+      Preliminary Version of o-author
+    </div>
+
+    <div id="errorBox" class="errorBox"></div>
+    <br/>
+    <center id="loader" style="display:none" ><img src="/app_files/info.freezr.public/static/ajaxloaderBig.gif"></center>
+
+
+    <div id="auth_list">
+      <div class="freezer_dialogueTitle">
+        Existing o-auth permissions
+      </div>
+      <div class="freezer_app_page_title"> There are {{ oauths.length }} o-auths</div>
+      <ul id="oauths">
+        {{#oauths}}
+          <li>
+            <span class="freezer_top_app_menu editbutt" id="click_edit_{{_id}}">edit </span><span class="freezer_emphasis" id="source_{{_id}}">{{source}}</span> name: <span id="name_{{_id}}">{{name}}</span>  - redirect uri: <span id="redirecturi_{{_id}}">{{redirecturi}}</span> - type: <span id="type_{{_id}}">{{type}}</span> - key: <span id="key_{{_id}}">{{key}}</span> - app secret: <span id="secret_{{_id}}">{{secret}}</span> <span class="freezer_top_app_menu editbutt" id="click_{{#enabled}}dis{{/enabled}}{{^enabled}}en{{/enabled}}able_{{_id}}">{{#enabled}}dis{{/enabled}}{{^enabled}}en{{/enabled}}able</span>
+          </li>
+        {{/oauths}}
+        {{^oauths}}
+          <li> Sorry, there are currently no oauths </li>
+        {{/oauths}}
+      </ul>
+    </div>
+    <div class="freezer_top_app_menu" >view disabled</div>
+
+    <hr/>
+      <div class="freezer_dialogueTitle">
+        Make a new o-auth
+      </div>
+      <table>
+        <tr>
+          <td width="130px" align="right">Source:</td>
+          <td width="520px"><input type="text" size="40" id="oa_source" name="oa_source" value='dropbox'/> (Only option available)</td> 
+        </tr>
+        <tr>
+          <td width="130px" align="right">App type</td>
+          <td width="420px"><input type="text" size="40" id="oa_type" name="oa_type" value='file_env'/> (Only option available)</td> 
+        </tr>
+        <tr>
+          <td width="130px" align="right">App name:</td>
+          <td width="420px"><input type="text" size="40" id="oa_name" name="oa_name"/></td> 
+        </tr>
+        <tr>
+          <td width="130px" align="right">Redirect uri:</td>
+          <td width="420px"><input type="text" size="40" id="oa_redirecturi" name="oa_redirecturi"/></td> 
+        </tr>
+        <tr>
+          <td width="130px" align="right">App Key:</td>
+          <td width="420px"><input type="text" size="40" id="oa_key" name="oa_key"/></td> 
+        </tr>
+        <tr>
+          <td width="130px" align="right">App Secret:</td>
+          <td width="420px"><input type="text" size="40" id="oa_secret" name="oa_secret"/></td> 
+        </tr>
+      </table>
+
+      <div class="bigText">
+        <div id="makeOauth" class="big_butt">Create NEW o-auth Permission</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+

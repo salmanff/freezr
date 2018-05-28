@@ -1,0 +1,104 @@
+/* allmydata.css - 
+ * part of info.freezr.public */
+
+body {
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+}
+#toptitle {
+  font-size: 10px;
+  background-color: #EEE;
+  padding:3px;
+  padding-left: 10px;
+  font-weight: bold;
+  word-wrap:break-word;
+}
+#backToApp {
+  cursor: pointer;
+  float: right;
+  margin-right: 60px;
+  font-weight: normal;
+  color: blue;
+}
+#saveData, #gotoBackUp {
+  cursor: pointer;
+  margin-left: 60px;
+  font-weight: normal;
+  color: blue;
+}
+#user_id_note{
+  margin: 5px;
+  padding-left: 10px;
+  font-style: italic;
+}
+#collection_area {
+  padding-left: 15px;
+  margin-bottom: 10px;
+} 
+#collection_names {
+  width:100px;
+  margin-top: -5px;
+}
+ #warnings{
+  color:red;
+  font-size: 20px;
+  font-weight: bold;
+  padding-left: 8px;
+  padding-right: 20px;
+} 
+
+
+/* Tables */
+/* help from stackoverflow.com/questions/3053205/how-create-table-only-using-div-tag-and-css */
+#table_wrap {
+  width: 100%;
+  overflow-x: scroll;
+}
+
+.div-table{
+  display:table;         
+  width:1000px;         
+	font-size: 10px;
+	line-height: 110%;
+}
+.headrow{
+	font-weight: bold;
+	line-height: 110%;
+	background-color: #EEE;
+  max-height: 20px;
+  height: 25px;
+}
+.headcell {
+  padding-top: 5px;
+}
+.lineDiv {
+  border-bottom: 1px solid #EEE;
+  width: 100%;
+  float: left;
+}
+.div-table-row{
+  display:table-row;
+}
+.div-table-col{
+  float:left;
+  display:table-column;  
+  padding-left: 5px;      
+  overflow: scroll;
+  word-wrap:break-word;
+  max-height: 40px;
+}
+p {
+	margin: 0;
+} 
+#retrieve_more {
+  /*width: 100%;*/
+  text-align: right;
+  cursor: pointer;
+  color: blue;
+  margin-top: 5px;
+  margin-right: 10px;
+}
+
+
+

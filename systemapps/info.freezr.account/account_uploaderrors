@@ -1,0 +1,19 @@
+
+
+<div id="warnings_list">
+  <p> There are {{ data..length }} apps</p>
+  <ul id="apps">
+    {{#apps}}
+      <li class="freezer_list">
+        <a id="{{app_name}}" href="/apps/{{app_name}}">{{app_display_name}} ({{app_name}})</a> 
+        . . .  
+        <span id="freezerButton_updateApp_{{app_name}}" class="freezer_clickable">refresh from files</span>
+        . . .  
+        <span id="freezerButton_deleteApp_{{app_name}}" class="freezer_clickable">{{#userIsAdmin}}remove{{/userIsAdmin}}</span>
+      </li>
+    {{/apps}}
+    {{^apps}}
+      <li> Sorry, there are currently no apps </li>
+    {{/apps}}
+  </ul>
+</div>

@@ -1,0 +1,16 @@
+<!--
+options:
+        page_title: "Fatal Error  (Freezr)",
+        server_name: req.protocol+"://"+req.get('host'),
+        page_url: 'info.freezr.public/admin_fatalError.html',
+        other_variables: "var startup_errors = '"+JSON.stringify(req.freezr_fatal_error)+"'"
+-->
+<div class="freezer_texture_outer">
+  <div class="freezer_texture_inner">
+    <div class="freezer_dialogueTitle">Error</div> 
+
+    <div class="freezer_app_page_title errorBox freezer_spacer" style="padding-right:20px;">Critical Error: <br/><span id="error_message"></span></div>
+
+  </div>
+</div>
+

@@ -1,0 +1,88 @@
+body{
+	font-family: sans-serif;
+	font-size: 12px;
+}
+
+.app_container {
+	cursor: pointer;
+	text-align: left;
+	vertical-align: top;
+	background-color: rgba(255, 255, 255, 0.2);
+	border-radius:5px;
+	border: 2px solid #f1f1f1;
+	min-width:300px;
+	width:100%;
+	max-width: 600px;
+	padding-top: 5px;
+	padding-bottom: 5px;
+	margin-bottom: 20px;
+	margin-top: 10px;
+}
+.button {
+	width: 40px;
+	height:55px;
+	font-size: 12px;
+	vertical-align: top;	
+	cursor: pointer;
+	background-color:  rgba(255, 255, 255, 0.6);
+	color: blue;
+	border-radius:5px;
+	border: 1px solid #f1f1f1;
+	font-weight: normal;
+	padding:5px;
+	text-align: center;
+	margin-top:-5px;
+}
+.right{
+	float: right;
+}
+.left{
+	float: left;
+}
+#button_chooseFile {
+	padding-top: 15px;
+	max-height: 40px;
+}
+.app_inner{
+	padding: 10px;
+	border: 0px;
+	margin: 5px;
+	vertical-align: top;
+	cursor: pointer;
+}
+.logo_img {
+	width:40px;
+}
+.small_text {
+	font-size: 10px;
+	vertical-align: top;
+	text-overflow: ellipsis;	
+}
+#appNameFromFolder {
+	margin-top: 15px;
+	margin-left: 10px;
+	width: 250px;
+}
+.choose_file_outer{
+	size:12px;
+	overflow:hidden;
+	padding-left: 5px;
+}
+.choose_file_inner {
+	margin-left:-71px;
+	font-size: 10px;
+	padding-top: 10px;
+}
+#button_addAppInFolder{
+	padding-top: 20px;
+    max-height: 35px;
+}
+#button_showDevOptions {
+	width:100%;
+	max-width: 600px;
+	text-align: right;
+	cursor:pointer;
+	font-size: 12px;
+	color: blue;
+}
+

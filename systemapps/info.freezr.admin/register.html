@@ -1,0 +1,46 @@
+<!--
+options:
+  page_title: "Admin register" (Freezer)",
+  css_url: '/app_files/info.freezer.public/freezer_style.css',
+  page_url: '/app_files/info.freezer.admin/register.html',
+  other_scripts: '<script src="/app_files/info.freezer.admin/register.js" type="text/javascript"></script>',
+  json_url: null,
+  other_variables: userid
+-->
+<div class="freezer_texture_outer">
+  <div class="freezer_texture_inner">
+    <div class="freezer_top_app_menu" id="adminFunctions">
+      <a href="/account/home">Home</a>
+      &nbsp;
+      <a href="/account/changePassword">Change Password</a>
+      &nbsp;
+      <a href="/admin/list_users">List All Users</a>
+      &nbsp;
+      <a href="/account/logout">Log Out</a>
+    </div>
+
+    <div class="freezer_dialogueTitle">Freezr.info - Register New Users</div> 
+
+    <form name="register" id="register">
+      <div id="errorBox" class="errorBox"></div>
+      <dl>
+        <dt>User ID:</dt>
+        <dd><input type="text" size="30" id="user_id" name="user_id"/></dd>
+        <dt>Full Name (optional):</dt>
+        <dd><input type="text" size="30" id="full_name" name="full_name"/></dd>
+        <dt>email address (optional):</dt>
+        <dd><input type="text" size="30" id="email_address" name="email_address"/></dd>
+        <dt>Password:</dt>
+        <dd><input type="password" size="30" id="password" name="password"/></dd>
+        <dt>Password (confirm):</dt>
+        <dd><input type="password" size="30" id="password2" name="password2"/></dd>
+        <dt><input type="checkbox" name="isAdmin" id="isAdminId" value="isAdmin">User should have admininstrative privelages?</dt>
+        <dt></dt>
+        <dd><input class="freezer_dialogue_topTitle" type="submit" value="&nbsp; Register New User &nbsp; "/></dd>
+      </dl>
+    </form>
+  </div>
+</div>
+
+
+

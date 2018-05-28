@@ -1,0 +1,61 @@
+
+<div class="freezer_dialogue_topTitle"> {{meta.app_name}} was {{meta.didwhat}} successfully</div>
+
+<div id="flags_list">
+	<div id="illegal">
+	    {{#illegal.length}}
+		<p class="freezer_dialogueTitle freezer_emphasis"> DANGER: The App may be attempting to send your data to the Cloud. </p>
+		<p class="freezer_BoxTitle"> This app may be trying to do bad things with your data. Please proceed with caution and even remove the app, unless you are sure about the developer. Other wise, the app may be able to send your data to the cloud.</p>
+		{{/illegal.length}}
+	    
+	    {{#illegal}}
+	    <li class="freezer_list">
+	        <span >{{text}}</span>
+	    </li>
+	    {{/illegal}}
+	</div>
+
+	<div id="errors">
+	    {{#errors.length}}
+		<p class="freezer_dialogueTitle freezer_emphasis"> ERRORS Encountered. Watch Out! </p>
+		<p class="freezer_BoxTitle"> There are some errors in this app. Please proceed with caution.</p>
+		{{/errors.length}}
+
+	    {{#errors}}
+	    	<li class="freezer_list">
+		        <span >{{text}}</span>
+	    	</li>
+	    {{/errors}}
+	</div>
+
+  <div id="warnings">
+    {{#warnings.length}}
+		<p class="freezer_dialogueTitle"> Developer Warnings</p>
+	{{/warnings.length}}
+    {{#warnings}}
+    	<li class="freezer_list">
+ 			<span >{{text}}</span>
+    	</li>
+    {{/warnings}}
+  </div>
+    
+	<div id="notes">
+    {{#notes.length}}
+	 	<p class="freezer_dialogueTitle"> Developer Notes</p>
+	{{/notes.length}}
+    {{#notes}}
+    	<li class="freezer_list">
+ 			<span >{{text}}</span>
+    	</li>
+    {{/notes}}
+  </div>
+</div>
+
+<div style="text-align:center">
+	{{#errors}}
+		<div class="freezer_dialogue_topTitle freezer_clickable" id="button_closeMenu_1">Close</div>
+	{{/errors}}
+	{{^errors}}
+		<div class="freezer_dialogue_topTitle freezer_clickable" id="button_goto_4_{{meta.app_name}}">Finalise Installation</div>
+	{{/errors}}
+</div>

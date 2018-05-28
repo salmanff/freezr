@@ -1,0 +1,37 @@
+<!--
+options:
+            'pages':{
+                'allmydata_view': {
+                    "page_title":"View all my data for "+req.params.app_name,
+                    "html_file":"info.freezr.public/allmydata_view.html",
+                    "css_files": ["info.freezr.public/allmydata_view.css"],
+                    "script_files": ["info.freezr.public/allmydata_view.js","info.freezr.public/FileSaver.js"]
+                }
+-->
+<div id="toptitle">
+  View All Your Data from App: 
+  <span id="app_name"></span>
+  <span id="backToApp" >Back to App</span>
+</div>
+
+<div id="user_id_note">
+    User: <span id="freezr_user_id"></span>
+    <span id="saveData">Save the data below to a file</span>
+    <span id="gotoBackUp">Go to Backup and Restore page</span>
+</div>
+<div id="warnings"></div>
+
+<div id="collection_area">Collection:
+    <select id="collection_names"> 
+    </select>
+</div>
+
+<div id="table_wrap">
+  <div class='div-table' id="collection_sheet">
+    <img style="padding-left:120px" src="/app_files/info.freezr.public/static/ajaxloaderBig.gif"/>
+  </div>
+</div>
+
+<div id="retrieve_more">more data</div>
+
+

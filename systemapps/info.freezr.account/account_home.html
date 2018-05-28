@@ -1,0 +1,52 @@
+<!--
+freezr Account Home
+	app_list refers to app_list.html
+	options:
+	 'home': {
+        page_title: "Accounts Home (Freezr)",
+        css_files: ['info.freezr.public/freezr_style.css', 'account_home.css'],
+        page_url: 'account_home.html',
+        app_name: "info.freezr.account",
+        script_files: ['/app_files/info.freezr.account/account_home.js']
+    }, 
+
+-->
+
+<div class="freezer_texture_outer">
+  <div class="freezer_texture_inner">
+		<div class="freezer_top_app_menu" id="adminFunctions">
+			<a href="/account/app_management">App Management</a>
+			&nbsp;
+			<a href="/ppage">Public Page</a>
+			&nbsp;
+			<a id="freezer_admin_butt" href="/admin/home">Admin</a>
+			&nbsp;
+			<a href="/account/changePassword">Change Password</a>
+			&nbsp;
+			<a href="/account/logout">Log Out</a>
+		</div>    
+
+		<div class="freezer_dialogueTitle">freezr home</div> 
+
+		<div id="app_list">
+			<div class="page_title"> {{#user_apps.length }}You have {{ user_apps.length }} installed apps {{/user_apps.length }}{{^user_apps}}You have No Installed Apps.{{/user_apps}}
+			      </div>
+
+			<div class="list_holder">
+
+			      {{#user_apps}}
+			          <div class="app_container">
+			            <div class="app_inner" width="80px">
+			              <img src="{{logo}}" width="80px" class="logo_img" id="goto_2_{{app_name}}">
+			            </div>
+
+			            <div class="app_name" id="goto_4_{{app_name}}">
+			                {{display_name}}
+			            </div> 
+			          </div>
+			      {{/user_apps}}
+			</div>
+		</div>
+
+  </div>
+</div>

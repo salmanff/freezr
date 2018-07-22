@@ -585,11 +585,18 @@ exports.getDataObject= function(req, res) {
             own_record = (req.params.requestor_app == req.params.requestee_app  && (!request_file || (req.session.logged_in_user_id == req.params.user_id) ) );
             accessibles_collection_name = permission_type=="field_delegate"? "field_permissions": null;
 
+            console.log("requestor_app")
+            console.log(req.params.requestor_app)
+            console.log("requestee_app")
+            console.log(req.params.requestee_app)
 
             if (!req.session || !req.session.logged_in || !req.session.logged_in_user_id) {
                 cb(app_auth("Need to be logged in to access app"));
             } else if (!data_object_id){
                 cb(app_err("missing data_object_id"));
+            } else if (req.params.requestor_app == "info.freezr.admin" || req.params.requestee_app == "info.freezr.admin") {
+                // NB this should be redundant but adding it in any case
+                cb(app_auth("Should not access admin db via this interface"));
             } else if (own_record && request_file) {
                 cb(null); // no need to check for other issues - just app code
             } else if (!app_config){
@@ -778,7 +785,7 @@ exports.getDataObject= function(req, res) {
             }
         } else if (request_file){
             //onsole.log("sending getDataObject "+__dirname.replace("/freezr_system","/") + unescape(parts.join('/')));
-            console.log(flags)
+            if (flags.warnings) console.log("flags:",flags)
             file_handler.sendUserFile(res, unescape(parts.join('/')), req.freezr_environment );
         } else {
             //onsole.log("sending record:"+JSON.stringify(resulting_record));
@@ -839,6 +846,9 @@ exports.db_query = function (req, res){
                 cb(app_auth_err("Need to be logged in to access app"));
             } else if (!req.params.permission_name && !own_record) {
                 cb(app_err("Missing permission_name"));
+            } else if (req.params.requestor_app == "info.freezr.admin" || req.params.requestee_app == "info.freezr.admin") {
+                // NB this should be redundant but adding it in any case
+                cb(app_auth_err("Should not access admin db via this interface"));
             } else if (own_record) {
                 cb(null)
             } else if (!app_config || !app_config_permission_schema){

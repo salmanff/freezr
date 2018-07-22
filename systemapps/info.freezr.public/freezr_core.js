@@ -78,6 +78,7 @@ freezr.db.query = function(options, callback) {
     // permission_name
     // field_name, field_value (necessary for field_permissions and folder)
     // collection - default is to use the first in list for object_delegate
+    // app_name - Only used for info.freezr.admin for admin requests
     // Note:  permission will indicate requestee_app if it is different from freezr_app_name
     // query_params is any list of query parameters
 
@@ -85,6 +86,8 @@ freezr.db.query = function(options, callback) {
   var permission_string = options.permission_name? ('/'+options.permission_name):""
   var url = '/v1/db/query/'+freezr_app_name+'/'+freezr_app_code+'/'+freezr_app_name+permission_string;
 
+  if (options.app_name && options.app_name == "info.freezr.admin") url='/v1/admin/dbquery/'+options.collection
+    console.log("url is "+url)
   freezer_restricted.connect.send(url, JSON.stringify(options), callback, 'POST', 'application/json');
 }
 freezr.db.update = function(data, options, callback) {
@@ -233,7 +236,7 @@ freezr.utils.getHtml = function(part_path, app_name, callback) {
   }
 }
 freezr.utils.getAllAppList = function(callback) {
-  freezer_restricted.connect.read('/account/v1/app_list.json', null, callback)
+  freezer_restricted.connect.read('/v1/account/app_list.json', null, callback)
 }
 freezr.utils.filePathFromName = function(fileName, options) {
   // options are permission_name, requestee_app AND user_id

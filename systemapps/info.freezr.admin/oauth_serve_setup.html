@@ -26,16 +26,16 @@
       <div class="freezer_dialogueTitle">
         Existing o-auth permissions
       </div>
-      <div class="freezer_app_page_title"> There are {{ oauths.length }} o-auths</div>
+      <div class="freezer_app_page_title"> There are {{ results.length }} o-auths</div>
       <ul id="oauths">
-        {{#oauths}}
+        {{#results}}
           <li>
             <span class="freezer_top_app_menu editbutt" id="click_edit_{{_id}}">edit </span><span class="freezer_emphasis" id="source_{{_id}}">{{source}}</span> name: <span id="name_{{_id}}">{{name}}</span>  - redirect uri: <span id="redirecturi_{{_id}}">{{redirecturi}}</span> - type: <span id="type_{{_id}}">{{type}}</span> - key: <span id="key_{{_id}}">{{key}}</span> - app secret: <span id="secret_{{_id}}">{{secret}}</span> <span class="freezer_top_app_menu editbutt" id="click_{{#enabled}}dis{{/enabled}}{{^enabled}}en{{/enabled}}able_{{_id}}">{{#enabled}}dis{{/enabled}}{{^enabled}}en{{/enabled}}able</span>
           </li>
-        {{/oauths}}
-        {{^oauths}}
+        {{/results}}
+        {{^results}}
           <li> Sorry, there are currently no oauths </li>
-        {{/oauths}}
+        {{/results}}
       </ul>
     </div>
     <div class="freezer_top_app_menu" >view disabled</div>

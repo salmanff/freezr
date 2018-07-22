@@ -7,17 +7,18 @@ var async = require('async'),
 
 
 exports.log = function(req, message) {
-    console.log((new Date())+" - "+(req? ((req.session.logged_in_user_id || "no_user")+" - "+req.ip): " server ")+" - "+message)
+    console.log((new Date())+" - "+(req? (req.session.logged_in_user_id || "no_user"): " server ")+" - "+message)
 }
 
 // Valid names
-    exports.system_apps = ["info.freezr.account","info.freezr.admin","info.freezr.public","info.freezr.permissions","info.freezr.posts"];
+    exports.system_apps = ["info.freezr.account","info.freezr.admin","info.freezr.public","info.freezr.permissions","info.freezr.posts","info.freezr.logs"];
     exports.permitted_types = { 
         groups_for_objects: ["user","logged_in","public"],
         groups_for_fields: ["user","logged_in"],
         type_names: ["folder_delegate","field_delegate","object_delegate", "db_query"], // used in getDataObject
     }
     var reserved_collection_names = ["field_permissions", "accessible_objects"]; // "files" s also reserved but can write to it
+    const RESERVED_IDS =["freezr_admin"]
 
     // note - App_name and user_id etc could have spaces but need to deCodeUri when in url 
     exports.valid_app_name = function(app_name) {
@@ -60,7 +61,7 @@ exports.log = function(req, message) {
         return typeof dir == 'string' && dir.length > 0 && !(dir.match(re));
     }
     exports.user_id_is_valid = function(uid) {
-      return (uid.indexOf("@") < 0 && uid.indexOf("_") < 0 && uid.indexOf(" ") < 0 && uid.indexOf("/") < 0 && uid.indexOf("{") < 0 && uid.indexOf("}") < 0 )
+      return (RESERVED_IDS.indexOf(uid)<0 && uid.indexOf("@") < 0 && uid.indexOf("_") < 0 && uid.indexOf(" ") < 0 && uid.indexOf("/") < 0 && uid.indexOf("{") < 0 && uid.indexOf("}") < 0 )
     }
     exports.valid_permission_name = function(name) {
       return (name.indexOf(" ") < 0 && name.indexOf("/") < 0  && name.indexOf(" ") < 0 )

@@ -27,6 +27,9 @@ exports.resetFreezrEnvironment = function(env)  {db_main.resetFreezrEnvironment(
 exports.set_and_nulify_environment = function(env)  {db_main.set_and_nulify_environment(env) }
 exports.write_environment = function(env, callback)  {db_main.write_environment(env, callback) }
 exports.get_coll = db_main.get_coll;
+exports.getMainPrefs = function(callback) {db_main.getOrSetPrefs("main_prefs", null, false, callback)}
+exports.setMainPrefs = function(thePrefs, callback) {db_main.getOrSetPrefs("main_prefs", thePrefs, true , callback)}
+
 //exports.get_coll = function(app_name, collection_name, callback) { db_main.get_coll(app_name, collection_name, callback);}
 
 // DB calls
@@ -493,7 +496,7 @@ exports.getAllCollectionNames = db_main.getAllCollectionNames;
 
 exports.remove_user_records = function (user_id, app_name, callback) {
     var appDb, collection_names = [], other_data_exists = false;
-    console.log("remove_user_records for ",user_id,app_name)
+    helpers.log (req,("remove_user_records for "+user_id+" "+app_name));
 
     async.waterfall([
         // 1. get all collection names
@@ -504,7 +507,7 @@ exports.remove_user_records = function (user_id, app_name, callback) {
         // 2. for all colelctions, delete user data
         function (collection_names, cb){
             if (collection_names && collection_names.length>0) {
-                console.log("Coll names ",collection_names)
+                //onsole.log("Coll names ",collection_names)
                 var this_collection;
                 async.forEach(collection_names, function (collection_name, cb2) {
                     async.waterfall([
@@ -559,7 +562,7 @@ exports.remove_user_records = function (user_id, app_name, callback) {
         });
 }
 exports.try_to_delete_app = function (user_id, app_name, env_params, callback) { 
-    console.log("going to try_to_delete_app "+app_name);
+    helpers.log (req,("going to try_to_delete_app "+app_name));
     var other_data_exists = false;
     async.waterfall([
         // validate params ad remvoe all user data
@@ -909,8 +912,31 @@ exports.ungrant_all_user_record_access = function (permission_object, user_id, c
 exports.check_query_permissions = function(user_id, queryJson, app_name, source_app_code, callback) {
 }
 
-// OTHER / OAUTH
 
+
+// GENERAL Admin db 
+exports.admindb_query = function (collection, options, callback) {
+    //onsole.log("freezr_db admindb_query")
+
+    options = options || {};
+
+    db_main.get_coll ("info.freezr.admin", collection, function (err, db_coll) {
+        if (err) {
+            helpers.state_error ("freezr_db", exports.version, "admindb_query", err, "admindb_query_collection_unavailable -"+collection )
+        } else if (db_coll) {
+            var params = options.query_params? options.query_params:{};
+            db_coll.find(params)
+                .sort(options.sort? options.sort:{})
+                .limit(options.count? options.count:ARBITRARY_COUNT)
+                .skip(options.skip? options.skip: 0) 
+                .toArray(callback);
+        } else {
+            callback(helpers.internal_error("freezr_db", exports.version, "admindb_query", "admin database is unavailable - collection:"+theCollection ))
+        }
+    }) 
+};
+
+// OTHER / OAUTH
 exports.all_oauths = function (include_disabled, skip, count, callback) {
     var sort = {};
     skip = skip? skip: 0;
@@ -918,7 +944,7 @@ exports.all_oauths = function (include_disabled, skip, count, callback) {
     query = include_disabled? {}:{enabled:true}
     db_main.get_coll ("info.freezr.admin", "oauth_permissions", function (err, oauths) {
         if (err) {
-            console.log("got err in all_oauths "+err)
+            helpers.state_error ("freezr_db", exports.version, "all_oauths", err, "all_oauths - collection" )
         } else if (oauths) {
             oauths.find(query)
                 .sort(sort)
@@ -932,6 +958,8 @@ exports.all_oauths = function (include_disabled, skip, count, callback) {
 };
 
 
+
+
 // General comparison functions and mongo...
 var objectsAreSimilar = function(attribute_list, object1, object2 ) {
     // console.log - todo this is very simple - need to improve
@@ -939,7 +967,7 @@ var objectsAreSimilar = function(attribute_list, object1, object2 ) {
     //onsole.log("Checking similarity for 1:"+JSON.stringify(object1)+"  "+" VERSUS:  2:"+JSON.stringify(object2));
     for (var i=0; i<attribute_list.length; i++) {
         if ((JSON.stringify(object1[attribute_list[i]]) != JSON.stringify(object2[attribute_list[i]])) && (!isEmpty(object1[attribute_list[i]]) && !isEmpty(object2[attribute_list[i]]))) {
-            console.log("unequal objects found ", object1[attribute_list[i]] , " and ", object2[attribute_list[i]])
+            // console.log("unequal objects found ", object1[attribute_list[i]] , " and ", object2[attribute_list[i]])
             // todo - improve checking for lists
             foundUnequalObjects=true;
         };

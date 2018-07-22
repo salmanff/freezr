@@ -27,6 +27,7 @@ var db_main = require('./freezr_system/db_main.js'),
     file_handler = require('./freezr_system/file_handler.js'),
     app_handler = require('./freezr_system/app_handler.js'),
     async = require('async'),
+    visit_logger = require('./freezr_system/visit_logger.js'),
     public_handler = require('./freezr_system/public_handler.js');
 
 // stackoverflow.com/questions/26287968/meanjs-413-request-entity-too-large
@@ -34,19 +35,23 @@ app.use(bodyParser.json({limit:1024*1024*3, type:'application/json'}));
 app.use(bodyParser.urlencoded( { extended:true,limit:1024*1024*3,type:'application/x-www-form-urlencoding' } ) ); 
 app.use(cookieParser());
 
-var freezr_preferences;
+
+var freezr_prefs={};
+const DEFAULT_PREFS={
+    log_visits:true,
+    log_details:{each_visit:true, daily_db:true, include_sys_files:false, log_app_files:false},
+    redirect_public:false,
+    public_landing_page: ""
+};
+var freezr_secrets;
 var freezr_environment, custom_file_environment;
 
-if (fs.existsSync(file_handler.systemPathTo("freezr_preferences.js"))) {
-    freezr_preferences = require(file_handler.systemPathTo("freezr_preferences.js"))
+if (fs.existsSync(file_handler.systemPathTo("freezr_secrets.js"))) {
+    freezr_secrets = require(file_handler.systemPathTo("freezr_secrets.js"))
 } else {
-    freezr_preferences = {
+    freezr_secrets = {
         params:{
-            "session_cookie_secret":helpers.randomText(20),
-            "default_preference":true,
-
-            "connect_on_local_wifi_only":true,
-            "do_admin_on_local_wifi_only":true
+            "session_cookie_secret":helpers.randomText(20)
         }
     }
 }
@@ -56,7 +61,7 @@ if (fs.existsSync(file_handler.systemPathTo("freezr_preferences.js"))) {
 app.use(cookieSession(
     // todo - move to a metof (if possible) to be able to reset coookie secret programmatically?
     {
-    secret: freezr_preferences.params.session_cookie_secret,
+    secret: freezr_secrets.params.session_cookie_secret,
     maxAge: 15552000000,
     store: new session.MemoryStore() // review - perhaps change this to mongo
     }
@@ -86,8 +91,10 @@ var serveAppFile = function(req, res, next) {
     
     
     if (req.session && req.session.logged_in) {
+        visit_logger.record(req, freezr_prefs, {source:'serveAppFile'});
         file_handler.sendAppFile(res, fileUrl, freezr_environment);
     } else {
+        visit_logger.record(req, freezr_prefs, {source:'serveAppFile',auth_error:true});
         helpers.auth_warning("server.js", VERSION, "serveAppFile", "Unauthorized attempt to access file "+ fileUrl);
         res.sendStatus(401);
     }
@@ -98,6 +105,7 @@ var servePublicAppFile = function(req, res, next) {
     if (helpers.startsWith(fileUrl,'/apps/')) { fileUrl = fileUrl.replace('/apps/','app_files/')}
     if (fileUrl.indexOf('?')>1) { fileUrl = fileUrl.substr(0,fileUrl.indexOf('?'));} // solving slight problem when node.js adds a query param to some fetches
 
+    visit_logger.record(req, freezr_prefs, {source:'servePublicAppFile'});
     if (fileUrl.slice(1)=="favicon.ico") {
         res.sendFile(file_handler.systemPathTo("systemapps/info.freezr.public/static/" + fileUrl));
     } else {
@@ -106,6 +114,7 @@ var servePublicAppFile = function(req, res, next) {
 }
 var appPageAccessRights = function(req, res, next) {
     if ((freezr_environment.freezr_is_setup && req.session && req.session.logged_in) ){
+        visit_logger.record(req, freezr_prefs, {source:'appPageAccessRights'});
         if (req.params.page || helpers.endsWith(req.originalUrl,"/") ) {
             req.freezr_server_version = VERSION;
             req.freezrStatus = freezrStatus;
@@ -115,48 +124,42 @@ var appPageAccessRights = function(req, res, next) {
             res.redirect(req.originalUrl+'/');
         }
     } else {
+        visit_logger.record(req, freezr_prefs, {source:'appPageAccessRights', auth_error:true});
         if (freezr_environment && freezr_environment.freezr_is_setup) helpers.auth_warning("server.js", VERSION, "appPageAccessRights", "Unauthorized attempt to access page"+req.url+" without login ");
         res.redirect('/account/login')
     }
 }
-var userDataAccessRights = function(req, res, next) {
-    //onsole.log("userDataAccessRights sess "+(req.session?"Y":"N")+"  loggin in? "+(req.session.logged_in?"Y":"N"));
-    if (freezr_environment.freezr_is_setup && req.session && req.session.logged_in && req.session.logged_in_userid == req.params.userid){
-        req.freezr_environment = freezr_environment;
-        req.freezrStatus = freezrStatus;
-        next();
-    } else {
-        if (freezr_environment && freezr_environment.freezr_is_setup) helpers.auth_warning("server.js", VERSION, "userDataAccessRights", "Unauthorized attempt to access data "+req.url+" without login ");
-        res.sendStatus(401);
-    }
-}
 function requireAdminRights(req, res, next) {
-    //onsole.log("require admin login ");
+    console.log("require admin login "+req.session.logged_in_as_admin+" for "+req.session.logged_in_user_id);
     if (req.session && req.session.logged_in_as_admin) {
         req.freezr_server_version = VERSION;
         req.freezrStatus = freezrStatus;
         req.freezr_environment = freezr_environment;
+        visit_logger.record(req, freezr_prefs, {source:'requireAdminRights', auth_error:false});
         next();
     } else {
+        visit_logger.record(req, freezr_prefs, {source:'requireAdminRights', auth_error:true});
         helpers.auth_warning("server.js", VERSION, "requireAdminRights", "Unauthorized attempt to access admin area "+req.url+" - ");
         res.redirect("/account/login");
     }
 }
-function requireUserRights(req, res, next) {
-    //onsole.log("require user rights for "+req.originalUrl); //req.params.user_id+ " vs "+JSON.stringify(req.session));
-    if (req.session && (req.url == "/account/login" || helpers.startsWith(req.url,'/account/applogin') || req.session.logged_in_user_id )) {
+var userDataAccessRights = function(req, res, next) {
+    //onsole.log("userDataAccessRights sess "+(req.session?"Y":"N")+"  loggin in? "+req.session.logged_in_user_id+" param id"+req.params.userid);
+    if (freezr_environment.freezr_is_setup && req.session && req.session.logged_in && req.session.logged_in_user_id){
         req.freezr_environment = freezr_environment;
         req.freezrStatus = freezrStatus;
-        req.freezr_server_version = VERSION;
+        visit_logger.record(req, freezr_prefs, {source:'userDataAccessRights'});
         next();
     } else {
-        helpers.auth_warning("server.js", VERSION, "requireUserRights", "Unauthorized attempt to access data "+req.url+" without login ");
-        res.redirect("/account/login");
+        if (freezr_environment && freezr_environment.freezr_is_setup) helpers.auth_warning("server.js", VERSION, "userDataAccessRights", "Unauthorized attempt to access data "+req.url+" without login ");
+        visit_logger.record(req, freezr_prefs, {source:'userDataAccessRights', auth_error:true});
+        res.sendStatus(401);
     }
 }
 function uploadFile(req,res) {
     req.freezr_server_version = VERSION;
     req.freezr_environment = freezr_environment;
+    // visit_logger already done via userdatarights
     upload(req, res, function (err) {
         if (err) {
             helpers.send_failure(res, err, "server.js", VERSION, "uploadFile");
@@ -167,6 +170,7 @@ function uploadFile(req,res) {
 function uploadAppZipFile(req,res) {
     req.freezr_server_version = VERSION;
     req.freezr_environment = freezr_environment;
+    // visit_logger already done via 
     upload(req, res, function (err) {
         if (err) {
             helpers.send_failure(res, err, "server.js", VERSION, "uploadAppZipFile");
@@ -179,6 +183,9 @@ function addVersionNumber(req, res, next) {
     req.freezr_environment = freezr_environment;
     req.freezrStatus = freezrStatus;
     req.freezr_is_setup = freezr_environment.freezr_is_setup;
+    
+    visit_logger.record(req, freezr_prefs, {source:'addVersionNumber', auth_error:false});
+
     next();
 }
 
@@ -186,7 +193,7 @@ function addVersionNumber(req, res, next) {
     // app pages and files
         app.use("/app_files/info.freezr.public", servePublicAppFile);
         app.get('/app_files/:app_name/public/static/:file', servePublicAppFile);
-        app.get('/app_files/:app_name/public/:file', servePublicAppFile);
+        //app.get('/app_files/:app_name/public/:file', servePublicAppFile);
         app.use("/app_files/:app_name/:file", serveAppFile);
         app.get('/apps/:app_name', appPageAccessRights, app_handler.generatePage); 
         app.get('/apps/:app_name/static/:file', serveAppFile);
@@ -197,7 +204,6 @@ function addVersionNumber(req, res, next) {
     // app files and pages and user files
         app.get('/v1/db/getbyid/:permission_name/:collection_name/:requestor_app/:source_app_code/:requestee_app/:data_object_id', userDataAccessRights, app_handler.getDataObject); // here request type must be "one"
         app.get('/v1/userfiles/:permission_name/:collection_name/:requestor_app/:source_app_code/:requestee_app/:user_id/*', userDataAccessRights, app_handler.getDataObject); // collection_name is files
-
     // db
         app.put('/v1/db/upload/:app_name/:source_app_code',userDataAccessRights, uploadFile);
         app.put('/v1/db/write/:app_name/:source_app_code/:collection', userDataAccessRights, app_handler.putData);
@@ -215,8 +221,9 @@ function addVersionNumber(req, res, next) {
         app.get('/v1/pdbq/:app_name', addVersionNumber, public_handler.dbp_query); 
         app.post('/v1/pdbq', addVersionNumber, public_handler.dbp_query); 
 
-        app.get('/v1/pobject/:user_id/:app_name/:collection_name/:data_object_id', public_handler.generatePublicPage);  
+        app.get('/v1/pobject/:user_id/:app_name/:collection_name/:data_object_id', addVersionNumber, public_handler.generatePublicPage);  
         // todo: app.get('/v1/pfile/:user_id/:app_name/*', public_handler.getPublicDataObject); // collection_name is files 
+
 
     // permissions
         app.put('/v1/permissions/setobjectaccess/:requestor_app/:source_app_code/:permission_name', userDataAccessRights, app_handler.setObjectAccess);
@@ -233,19 +240,22 @@ function addVersionNumber(req, res, next) {
     // account pages
         app.get ('/account/logout', addVersionNumber, account_handler.logout_page);
         app.get ('/account/login', addVersionNumber, account_handler.generate_login_page);
+        app.get ('/login', addVersionNumber, account_handler.generate_login_page);
         app.get ('/account/applogin/login/:app_name', addVersionNumber, account_handler.generate_login_page);
-        app.get ('/account/applogin/results', account_handler.generate_applogin_results);
-        app.get ('/account/:sub_page', requireUserRights, account_handler.generateAccountPage);
+        app.get ('/account/applogin/results', addVersionNumber, account_handler.generate_applogin_results);
+        app.get ('/account/:page', appPageAccessRights, account_handler.generateAccountPage);
 
         app.get('/v1/account/ping', addVersionNumber, account_handler.ping);
-        app.post('/v1/account/login', account_handler.login);
-        app.post('/v1/account/applogin', account_handler.login);
-        app.post('/v1/account/applogout', account_handler.logout);
-        app.put ('/v1/account/changePassword.json', requireUserRights, account_handler.changePassword); 
-        app.put ('/v1/account/upload_app_zipfile.json', requireUserRights, uploadAppZipFile); 
+        app.post('/v1/account/login', addVersionNumber, account_handler.login);
+        app.post('/v1/account/applogin', addVersionNumber, account_handler.login);
+        app.post('/v1/account/applogout', addVersionNumber, account_handler.logout);
+        app.put ('/v1/account/changePassword.json', userDataAccessRights, account_handler.changePassword); 
+        app.put ('/v1/account/upload_app_zipfile.json', userDataAccessRights, uploadAppZipFile); 
 
-        app.get('/account/v1/app_list.json', requireUserRights, account_handler.list_all_user_apps);
-        app.post('/account/v1/appMgmtActions.json', requireUserRights, account_handler.appMgmtActions);
+        app.get('/v1/account/app_list.json', userDataAccessRights, account_handler.list_all_user_apps);
+        app.post('/v1/account/appMgmtActions.json', userDataAccessRights, account_handler.appMgmtActions);
+
+
 
     // admin pages
         app.put ('/v1/admin/oauth_perm', requireAdminRights, admin_handler.oauth_perm_make); 
@@ -255,8 +265,21 @@ function addVersionNumber(req, res, next) {
         app.get('/admin/:sub_page', requireAdminRights, admin_handler.generateAdminPage);
         app.get('/admin', requireAdminRights, admin_handler.generateAdminPage);
         
-        app.put ('/v1/admin/user_register', requireAdminRights, admin_handler.user_register); 
-        app.put ('/v1/admin/first_registration', addVersionNumber, function (req, res) {
+        app.put('/v1/admin/change_main_prefs', requireAdminRights, function (req, res) {
+            req.defaultPrefs = DEFAULT_PREFS;
+            admin_handler.change_main_prefs (req, function(err, returns) {
+                if (err) {
+                    helpers.send_auth_failure(res, "admin_handler", exports.version,"change_main_prefs",err.message, err.errCode); 
+                } else {
+                    freezr_prefs = returns.newPrefs;
+                    console.log("new freezr_prefs returns")
+                    console.log(returns)
+                    helpers.send_success(res, returns);
+                } 
+            })
+        })
+        app.put('/v1/admin/user_register', requireAdminRights, admin_handler.user_register); 
+        app.put('/v1/admin/first_registration', addVersionNumber, function (req, res) {
             admin_handler.first_registration(req, function(err, results) {
                 if (err || !results || !results.freezr_environment) { 
                     if (!err) err = {message:'unknown err', code:null}             
@@ -271,21 +294,31 @@ function addVersionNumber(req, res, next) {
                 }
             })
         }); 
+        app.post('/v1/admin/dbquery/:collection_name', requireAdminRights, admin_handler.dbquery);
         app.get('/v1/admin/user_list.json', requireAdminRights, admin_handler.list_all_users);
     
     // default redirects
+        function getPublicUrlFromPrefs () {
+            console.log(freezr_prefs)
+            if (!freezr_prefs.redirect_public) return "/account/login";
+            console.log("here")
+            if (!freezr_prefs.public_landing_page) return "/ppage";
+            return "/ppage/"+freezr_prefs.public_landing_page;
+        }
         app.get("/", function (req, res) {
             // to if allows public people coming in, then move to public page
             //onsole.log("redirecting to account/home as default for "+req.originalUrl);
-            var redirect_url = (req.session && req.session.logged_in)? "/account/home": (freezr_preferences.params.default_to_public? "/ppage":"/account/login");
+            visit_logger.record(req, freezr_prefs, {source:'home'});
+            var redirect_url = (req.session && req.session.logged_in)? "/account/home": getPublicUrlFromPrefs();
             helpers.log(req,"home url redirect")
             res.redirect( redirect_url);
             res.end();
         });
         app.get('*', function (req, res) {
             helpers.log(req,"unknown url redirect: "+req.url)
+            visit_logger.record(req, freezr_prefs, {source:'ridirect'});
             //onsole.log("redirecting to account/login as default or for non logged in "+req.originalUrl);
-            res.redirect( (req.session && req.session.logged_in)? "/account/home":"/account/login");
+            res.redirect( (req.session && req.session.logged_in)? "/account/home":getPublicUrlFromPrefs());
             res.end();
         });
 
@@ -381,7 +414,7 @@ async.waterfall([
                             freezrStatus.can_write_to_system_folder = false;
                             helpers.warning("server.js", exports.version, "startup_waterfall", "Strange inconsistency writing files to server root" )
                         }
-                        cb(null)
+                        cb(null);
                     })
                 } else {
                     console.log("3 - No freezr_environment on db or file - FIRST REGISTRATION WILL BE TRIGGERED")
@@ -405,12 +438,12 @@ async.waterfall([
             cb(null);
         }            
     }, 
-    // Wrtie freezr preferences if doesnt exist
+    // Wrtie freezr secrets if doesnt exist
     function (cb) { 
-        if (freezrStatus.can_write_to_system_folder && !fs.existsSync(file_handler.systemPathTo("freezr_preferences"))) {
-            fs.writeFile(file_handler.systemPathTo("freezr_preferences.js"), "exports.params=" + JSON.stringify(freezr_preferences.params), function(err) {
+        if (freezrStatus.can_write_to_system_folder && !fs.existsSync(file_handler.systemPathTo("freezr_secrets"))) {
+            fs.writeFile(file_handler.systemPathTo("freezr_secrets.js"), "exports.params=" + JSON.stringify(freezr_secrets.params), function(err) {
                 if(err) {
-                    helpers.warning("server.js", exports.version, "startup_waterfall", "Stransge inconsistency writing files (freezr_preferences) onto server" )
+                    helpers.warning("server.js", exports.version, "startup_waterfall", "Stransge inconsistency writing files (freezr_secrets) onto server" )
                 } else {
                     console.log("4 - Can write to system folders")                    
                 }
@@ -435,13 +468,27 @@ async.waterfall([
                 cb(null);
             }
         })
+    },
+
+    // Get freezr main preferences
+    function (cb) {
+        db_main.getOrSetPrefs("main_prefs", DEFAULT_PREFS, false ,function (err, main_prefs_on_db) {
+            freezr_prefs = main_prefs_on_db;
+            cb(err)
+        })
+    },
+
+    // reload visit_logger
+    function (cb) {
+        visit_logger.reloadDb(cb)
     }], 
     function (err) {
         console.log("Startup checks complete.")
-        console.log("freezr_environment: ")
-        console.log(freezr_environment)
+        console.log("freezr_prefs: ")
+        console.log(freezr_prefs)
         console.log("freezrStatus: ")
         console.log(freezrStatus)
+        //onsole.log(freezr_environment)
         if (err) { 
             helpers.warning("server.js", exports.version, "startup_waterfall", "STARTUP ERR "+JSON.stringify(err) )        
         }    

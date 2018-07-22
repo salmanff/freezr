@@ -1,0 +1,46 @@
+/* visitsummary.css  v0.0.1*/
+
+.tableTitle {
+	text-align: center;
+	max-width: 800px;
+}
+#mainTable {
+	margin-left: 20px;	
+}
+.bigtitle {
+	font-weight: bold;
+	text-decoration: underline;
+	font-size: 14px;
+	color: blue;
+} 
+.midnum {
+	text-align: center;
+}
+.red {
+	color: red;
+}
+.listTitle {
+	font-weight: bold;	
+	text-decoration: underline;
+}
+.dateHeader {
+	margin: 3px;
+    max-width: 80px;
+    text-align: center;
+    text-decoration: underline;
+
+}
+.topbutt {
+	margin-right:20px;
+	border-radius: 3px;
+	border:1px grey solid; 
+	padding:3px;
+	cursor: pointer;
+}
+#next_week {
+	margin-left:30px;
+}
+#prev_week {
+	float:right;
+	margin-right:10px;
+}

@@ -60,9 +60,12 @@ exports.generatePublicPage = function (req, res) {
     file_handler.async_app_config(app_name, req.freezr_environment, function (err, app_config) {
         if (allApps) app_config  = ALL_APPS_CONFIG;
         if (err) {
-            helpers.send_failure("public_handler", exports.version, "generatePublicPage", null, "problem getting app config while accessing public "+ (isCard?"card.":"page."));
+            helpers.send_failure(res, err, "public_handler", exports.version, "generatePublicPage");
+            //"problem getting app config while accessing public "+ (isCard?"card.":"page.")
         } else if (!app_config ){
-            helpers.send_failure("public_handler", exports.version, "generatePublicPage", null, "app config missing while accessing public "+ (isCard?"card.":"page."));
+            err = helpers.error("missing_app_config","app config missing while accessing public "+ (isCard?"card.":"page."))
+            helpers.send_failure(res, err, "public_handler", exports.version, "generatePublicPage");
+            // todo - consider landing on a "missing" page, but fo not redirect to default ppage as it could enter infinite loop
             // permissions for public access re given in the app_config so no app config means no pubic records
         } else {
             page_name   = req.params.page;

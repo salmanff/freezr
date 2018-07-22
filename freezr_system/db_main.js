@@ -99,6 +99,50 @@ exports.check_db = function (callback) {
     });
 }
 
+exports.getOrSetPrefs = function (prefName, prefsToSet, doSet, callback) {
+    var temp_admin_db, params_coll, pref_on_db={};
+    async.waterfall([        
+        // 1. open database connection
+        function (cb) {
+            MongoClient.connect('mongodb://'+exports.dbConnectionString('info_freezer_admin'), cb);
+        },
+
+        // 2. create collections for users, installed_app_list, user_installed_app_list, user_devices, permissions.
+        function (theclient, cb) {
+            theclient.db(theclient.s.options.dbName).collection(get_full_coll_name('info_freezer_admin',"params"), cb);
+        },
+
+        function (the_coll, cb) {
+            params_coll = the_coll
+            params_coll.find( {"_id":prefName} ).toArray(cb);
+        },
+
+        function (results, cb) {
+            if (!doSet && results && results.length>0) {
+                pref_on_db = results[0];
+                cb(null)
+            } else if (doSet && prefsToSet) {
+                pref_on_db = prefsToSet
+                if (results && results.length>0){
+                    console.log("inserting new prefs ", pref_on_db)
+                    params_coll.update({ _id: prefName },{$set: pref_on_db}, {safe: true }, cb); 
+                } else {
+                    pref_on_db._id = prefName
+                    params_coll.insert(pref_on_db, { w: 1, safe: true }, cb);
+                }
+            } else if (doSet || !prefsToSet){
+                cb(helpers.internal_error ("db_main", exports.version, "getOrSetPrefs",( "doset is set to true but nothing to replace prefs "+prefName) ) )
+            } else {
+                cb(null);
+            }
+        }
+    ], function(err, write_result) {
+        if (err) console.log("got err in getPrefs ",err)
+        if (err) callback(err, prefsToSet);
+        if (!err) callback(null, pref_on_db)
+    });
+}
+
 exports.get_coll = function (app_name, collection_name, callback) {
     //onsole.log("goign to open "+app_name+" coll:"+collection_name+" connection string: "+exports.dbConnectionString(app_name))
     

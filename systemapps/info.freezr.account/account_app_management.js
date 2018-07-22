@@ -52,11 +52,11 @@ var buttons = {
   },
   'removeApp': function(args) {
       userHasIntiatedAcions = true;
-      freezer_restricted.connect.ask('/account/v1/appMgmtActions.json', {'action':'removeApp', 'app_name':args[0]}, remove_app_callback)
+      freezer_restricted.connect.ask('/v1/account/appMgmtActions.json', {'action':'removeApp', 'app_name':args[0]}, remove_app_callback)
   },
   'deleteApp': function(args) {
       userHasIntiatedAcions = true;
-      freezer_restricted.connect.ask('/account/v1/appMgmtActions.json', {'action':'deleteApp', 'app_name':args[0]}, delete_app_callback)
+      freezer_restricted.connect.ask('/v1/account/appMgmtActions.json', {'action':'deleteApp', 'app_name':args[0]}, delete_app_callback)
   },
   'uploadZipFileApp': function (args) {
     userHasIntiatedAcions = true;
@@ -105,7 +105,7 @@ var buttons = {
     document.getElementById("freezer_dialogue_closeButt").style.display="none";
     document.getElementById("freezer_dialogue_homeButt").style.display="none";
     document.getElementById("freezer_dialogueScreen").onclick=null;
-    freezer_restricted.connect.ask('/account/v1/appMgmtActions.json', {'action':'updateApp', 'app_name':args[0]}, function(returndata) {
+    freezer_restricted.connect.ask('/v1/account/appMgmtActions.json', {'action':'updateApp', 'app_name':args[0]}, function(returndata) {
         var d = JSON.parse(returndata);
         document.getElementById("freezer_dialogue_closeButt").style.display="block";
         document.getElementById("freezer_dialogue_homeButt").style.display="block";

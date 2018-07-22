@@ -35,6 +35,12 @@ exports.generateAdminPage = function (req, res) {
             page_title = "freezr.info - Register";
             css_files = './info.freezr.public/freezr_style.css';
             break;
+        case "prefs":
+            script_files = ['./info.freezr.admin/prefs.js'];
+            page_title = "freezr.info - Main Preferences";
+            css_files = './info.freezr.public/freezr_style.css';
+            initial_query_func = exports.get_main_prefs
+            break;
         case "oauth_serve_setup":
             page_title = "freezr.info - Set up your freezr as an oauth server";
             css_files = ['oauth_serve_setup.css','./info.freezr.public/freezr_style.css'];
@@ -79,11 +85,8 @@ exports.generateAdminPage = function (req, res) {
             other_variables = "var startup_errors = "+JSON.stringify(req.freezrStatus);
             break;
         default:
-            req.params.sub_page = "starterror"
-            page_title = "Page Not Found",
-            script_files = ['./info.freezr.admin/public/starterror.js'];
-            css_files = './info.freezr.public/freezr_style.css';
-            other_variables = "var startup_errors = PageNotFound";
+            script_files = ['./info.freezr.admin/'+ req.params.sub_page +'.js'];
+            css_files = ['./info.freezr.admin/freezr_style.css', './info.freezr.admin/'+ req.params.sub_page +'.css'];
             break;            
     }
     
@@ -117,6 +120,7 @@ exports.generateAdminPage = function (req, res) {
                 options.success = false;
                 options.error = err;
             } else {
+                //onsole.log("queryresults ",results)
                 options.queryresults = results;
             }
             file_handler.load_data_html_and_page(res,options)
@@ -281,7 +285,7 @@ exports.first_registration = function (req, callback) {
             function (cb) {
                 freezr_db.resetFreezrEnvironment(temp_environment);
 
-                console.log("set env : "+JSON.stringify(temp_environment))
+                //onsole.log("set env : "+JSON.stringify(temp_environment))
                 freezr_db.init_admin_db(function (err, results) { // in case it has not been inited (and to make sure it exists)
                     if (err) {
                         // reset freezr environment
@@ -476,24 +480,114 @@ exports.list_all_users = function (req, res) {
         }
     });
 };
+exports.get_main_prefs = function (req, res) {
+    freezr_db.getMainPrefs(function (err, theprefs) {
+        //onsole.log("got prefs in get_main_prefs ",theprefs)
+        if (err) {
+            if (req.freezrInternalCallFwd) {
+                req.freezrInternalCallFwd(err, {})
+            } else {
+                helpers.send_internal_err_failure(res, "admin_handler", exports.version,"get_main_prefs","failure to get all user list - "+err);
+            }
+        } else {
+            if (req.freezrInternalCallFwd) {
+                req.freezrInternalCallFwd(null, theprefs)
+            } else {
+                helpers.send_success(res, theprefs);
+            }
+        }
+    });
+};
+exports.change_main_prefs = function (req, callback) {
+    helpers.log (req,("change_main_prefs :"+JSON.stringify (req.body)));
+    
+    var user_id = req.session.logged_in_user_id, freezr_prefs={};
+
+    async.waterfall([
+        // 0. checks
+        function (cb) {
+            if (!user_id || !req.session.logged_in_as_admin) {
+                cb(helpers.auth_failure("admin_handler.js",exports.version,"change_main_prefs","Not admin"));
+            } else if (!req.body.password) {
+                cb(helpers.missing_data("password"));        
+            } else {
+                cb(null)
+            }   
+        },
+
+        // 1. get user_id
+        function (cb) {
+            freezr_db.user_by_user_id(user_id, cb);
+        },
+
+        // 2. check the password
+        function (user_json, dummy_cb, cb) {
+            var u = new User(user_json);
+            if (u.check_passwordSync(req.body.password)) {
+                cb(null);
+            } else {
+                cb(helpers.auth_failure("admin_handler.js",exports.version,"change_main_prefs","Wrong password"));
+            }
+        },
+
+        // 1. sanitize and set the prefs
+        function (cb) {
+            Object.keys(req.defaultPrefs).forEach(function(key) {
+                freezr_prefs[key] = req.body[key] || req.defaultPrefs[key]
+                if (req.body[key]===false)freezr_prefs[key] =false;
+                //onsole.log(key, req.defaultPrefs[key]);
+            });
+            if (freezr_prefs.public_landing_page) freezr_prefs.public_landing_page = freezr_prefs.public_landing_page.trim();
+            //onsole.log("sanitised set ",freezr_prefs)
+            freezr_db.setMainPrefs(freezr_prefs, callback)
+            // todo - also check app list to make sure app exists
+        },
+
+    
+    ],
+    function (err) {
+        //onsole.log("sending from admin new prefs "+freezr_prefs)
+        callback(err, {message:"", newPrefs:freezr_prefs})
+    });
+
+}
+
+var ALLOWED_ADMIN_COLLECTIONS = ['visit_log_daysum','visitLogFiles']
+exports.dbquery = function(req,res) {
+    helpers.log (req,("dbquery :"+JSON.stringify (req.body)));
+    // need req.params.collection_name and req.body..
+    var query = req.body.query_params || {};
+
+    freezr_db.admindb_query( 
+        req.params.collection_name , 
+        {   count: req.body.count,
+            skip:  req.body.skip,
+            query_params: req.body.query_params
+        },  
+        function (err, results) {
+        if (err) {
+            helpers.send_internal_err_failure(res, "admin_handler", exports.version,"list_all_oauths","failure to get all user list - "+err);
+        } else {
+            if (!results) results = []
+            if (req.freezrInternalCallFwd) {
+                req.freezrInternalCallFwd(null, {results: results})
+            } else {
+                helpers.send_success(res, {results: results});
+            }
+        }
+    });
+};
+
 
 // o-auth
 var current_states = {};
 const MAX_TIME = 30000;
 var clean_intervaler = null;
 exports.list_all_oauths = function (req, res) {
-    freezr_db.all_oauths(true, 0, null, function (err, results) {
-        if (err) {
-            helpers.send_internal_err_failure(res, "admin_handler", exports.version,"list_all_users","failure to get all user list - "+err);
-        } else {
-            if (!results) results = []
-            if (req.freezrInternalCallFwd) {
-                req.freezrInternalCallFwd(null, {oauths: results})
-            } else {
-                helpers.send_success(res, {oauths: results});
-            }
-        }
-    });
+    //onsole.log("admin list_all_oauths via freezr_db.admindb_query")
+    req.params.collection_name="oauth_permissions"
+    req.body = {query_params:{enabled:true}  }
+    exports.dbquery(req,res);
 };
 exports.oauth_perm_make = function (req, res) {
     helpers.log (req,"New or updated oauth for source "+req.body.source+" type: "+req.body.type+" name: "+req.body.name);
@@ -653,7 +747,6 @@ exports.oauth_do = function (req, res) {
 
     }
 }
-
 var clearStatesTimeOut = function() {
     clean_unused_states();
     clearTimeout(clean_intervaler);
@@ -668,7 +761,6 @@ var get_auth_permission = function (params, callback) {
         }
     });
 }
-
 var clean_unused_states = function () {
     helpers.log (null,"Clean out old states - todo")
 }
@@ -700,4 +792,8 @@ var checkIsCorrectFirstUser = function(user_id,to_check_password,req, callback) 
         });  
     }
 }
+
+
+
+// query admin DBs
 

@@ -9,7 +9,7 @@ exports.autoConfigs = function() {
     ipaddress     : autoIpAddress(),
     port          : autoPort(), 
     dbParams      : autoDbParams(), //{oneDb , addAuth}
-    userDirParams : {name: null }           // 
+    userDirParams : userDirParams() // 
   }
   return autoConfigs
 }
@@ -32,8 +32,25 @@ var autoPort = function() {
 
 
 var autoDbParams = function() {
-  // from https://github.com/openshift/nodejs-ex/blob/master/server.js
-  if (  process && process.env                   // openshift v3
+  console.log("autoDbParams")
+  if (process && process.env) {
+    console.log(process.env.DB_USER)
+    console.log(process.env.DB_PASS)
+    console.log(process.env.DB_HOST)
+  }
+  if (  process && process.env && process.env.FREEZR_DB ) {  // manually set env variables
+        
+      return {
+            user : process.env.DB_USER, 
+            pass : process.env.DB_PASS,  
+            host : process.env.DB_HOST,
+            port : process.env.DB_PORT,
+            addAuth : (process.env.ADD_AUTH || false),
+            oneDb : ((process.env.ONE_DB && process.env.ONE_DB==false)? false : true),
+            unifiedDbName: process.env.UNIFIED_DB_NAME || "sampledb"
+        }
+  } else if (  process && process.env                   // openshift v3
+            // from https://github.com/openshift/nodejs-ex/blob/master/server.js
             && process.env.DATABASE_SERVICE_NAME 
             && process.env.MONGODB_USER 
             && process.env.MONGODB_PASSWORD) { 
@@ -57,4 +74,14 @@ var autoDbParams = function() {
             oneDb: false
         }
   }  
+}
+var userDirParams = function() {
+  if (  process && process.env && process.env.FREEZR_FS && process.env.FREEZR_FS =="dropbox") {
+    return {
+      name: process.env.FREEZR_FS,
+      access_token: process.env.FS_TOKEN,
+    }
+  } else {
+    return {name: null }  
+  }
 }

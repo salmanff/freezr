@@ -46,7 +46,7 @@ exports.generate_login_page = function (req, res) {
                     }
                     file_handler.load_data_html_and_page(res, options);
                 } else {
-                    helpers.send_failure(res, helpers.error("db failed","Could not find any users in the database. If you are a developer, this could be because you have deleted the database. If so, delete also the freezr_environment.js and freezr_preferences.js files. Other wise, your database may be corrupt, which is a very serious error."),"account_handler", exports.version,"generate_login_page");
+                    helpers.send_failure(res, helpers.error("db failed","Could not find any users in the database. If you are a developer, this could be because you have deleted the database. If so, delete also the freezr_environment.js file. Other wise, your database may be corrupt, which is a very serious error."),"account_handler", exports.version,"generate_login_page");
                 }
             }
         });
@@ -70,18 +70,17 @@ exports.generate_applogin_results = function (req, res) {
 };
 
 exports.generateAccountPage = function (req, res) {
-    // /account/:sub_page
-    // '/account/:sub_page/:to_do/:app_name'
+    // /account/:page
     helpers.log (req,"accountPage: "+req.url);
-    if (!req.params.sub_page) {req.params.sub_page="home"} else {req.params.sub_page= req.params.sub_page.toLowerCase();}
+    if (!req.params.page) {req.params.page="home"} else {req.params.page= req.params.page.toLowerCase();}
     
-    if (req.params.to_do) req.params.sub_page = req.params.sub_page + '_'+ req.params.to_do
-    if (accountPage_Config[req.params.sub_page]) {
-        var options = accountPage_Config[req.params.sub_page];
+    if (accountPage_Config[req.params.page]) {
+        var options = accountPage_Config[req.params.page];
         options.app_name = req.params.app_name? req.params.app_name: "info.freezr.account";
         options.user_id =req.session.logged_in_user_id;
         options.user_is_admin =req.session.logged_in_as_admin;
         options.server_name = req.protocol+"://"+req.get('host');
+
 
         if (!options.initial_query_func) {
             options.testfrom = "ACCOUNT"
@@ -288,7 +287,7 @@ exports.changePassword = function (req, res) {
     });
 };
 exports.list_all_user_apps = function (req, res) {
-    // /account/v1/app_list.json
+    // /v1/account/app_list.json
     var user_id = req.session.logged_in_user_id;
     var removed_apps = [], user_apps = [], new_apps = [];
     var user_app_names = [], removed_app_names = [];
@@ -496,7 +495,7 @@ exports.add_uploaded_app_zip_file = function (req, res) {
     });
 }
 exports.appMgmtActions  = function (req,res) /* deleteApp updateApp */ {
-    // /account/v1/appMgmtActions.json
+    // /v1/account/appMgmtActions.json
     console.log("At app mgmt actions "+JSON.stringify(req.body));
     var action = (req.body && req.body.action)? req.body.action: null;
     var app_name = (req.body && req.body.app_name)? req.body.app_name: null;
@@ -983,7 +982,7 @@ var accountPage_Config = { // config parameters for accounts pages
         css_files: ['./info.freezr.public/freezr_style.css', 'account_home.css'],
         page_url: 'account_home.html',
         initial_query_func: exports.list_all_user_apps,
-        //initial_query: {'url':'/account/v1/app_list.json'},
+        //initial_query: {'url':'/v1/account/app_list.json'},
         app_name: "info.freezr.account",
         script_files: ['account_home.js']
     }, 
@@ -997,7 +996,7 @@ var accountPage_Config = { // config parameters for accounts pages
         page_title: "Apps (freezr)",
         css_files: ['./info.freezr.public/freezr_style.css', 'account_app_management.css'],
         page_url: 'account_app_management.html',
-        //initial_query: {'url':'/account/v1/app_list.json'},
+        //initial_query: {'url':'/v1/account/app_list.json'},
         initial_query_func: exports.list_all_user_apps,
         script_files: ['account_app_management.js', './info.freezr.public/public/mustache.js']
     },

@@ -1,7 +1,7 @@
 // freezr.info - nodejs system files 
 // Default System environment variable - currently set up for own-servers and for Openshift
 // It can be customized for other environments
-exports.version = "0.0.11";
+exports.version = "0.0.122";
 
  
 exports.autoConfigs = function() {
@@ -24,7 +24,7 @@ var autoPort = function() {
   if ( process && process.env && process.env.DATABASE_SERVICE_NAME) {
       return 8080; // openshift v3
   }  else if (process && process.env && process.env.PORT) { // aws
-      console.log("auto port exists (AWS & other..)",    process.env.PORT)
+      //onsole.log("auto port exists (AWS & other..)",    process.env.PORT)
       return process.env.PORT;          
   }                                            // add other platforms here
   else return 3000;
@@ -32,12 +32,8 @@ var autoPort = function() {
 
 
 var autoDbParams = function() {
-  console.log("autoDbParams")
-  if (process && process.env) {
-    console.log(process.env.DB_USER)
-    console.log(process.env.DB_PASS)
-    console.log(process.env.DB_HOST)
-  }
+  if (process && process.env) console.log("autoDbParams",process.env.DB_USER,process.env.DB_PASS,process.env.DB_HOST)
+
   if (  process && process.env && process.env.FREEZR_DB ) {  // manually set env variables
         
       return {

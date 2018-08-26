@@ -1,5 +1,5 @@
 // freezr.info - nodejs system files - admin_handler.js
-exports.version = "0.0.1";
+exports.version = "0.0.122";
 
 var helpers = require('./helpers.js'),
     freezr_db = require("./freezr_db.js"),

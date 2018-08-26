@@ -3,6 +3,9 @@ body {
 	margin: 0;
 	padding: 0;
 }
+img {
+	overflow: hidden;
+}
 .public_records_top{
 	width:100%; 
 	font-size:18px; 

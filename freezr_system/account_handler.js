@@ -1,5 +1,5 @@
 // freezr.info - nodejs system files - account_handler
-exports.version = "0.0.1";
+exports.version = "0.0.122";
 
 var helpers = require('./helpers.js'),
     freezr_db = require("./freezr_db.js"),
@@ -83,7 +83,6 @@ exports.generateAccountPage = function (req, res) {
 
 
         if (!options.initial_query_func) {
-            options.testfrom = "ACCOUNT"
             file_handler.load_data_html_and_page(res,options)
         } else {
             req.freezrInternalCallFwd = function(err, results) {
@@ -627,7 +626,7 @@ exports.appMgmtActions  = function (req,res) /* deleteApp updateApp */ {
             if (err) {
                 flags.add('errors','err_unknown',{'function':'appMgmtActions update', 'text':JSON.stringify(err)});
             } 
-            console.log(flags)
+            console.warn(flags)
             helpers.send_success(res, flags.sentencify() );
         });
 
@@ -786,7 +785,7 @@ removeAllAccessibleObjects = function(user_id, requestor_app, requestee_app, per
                 },
                 function (err) {
                     if (err) {
-                        console.log("Got an err  of removeAllAccessibleObjects "+JSON.stringify(err))
+                        console.warn("Got an err  of removeAllAccessibleObjects "+JSON.stringify(err))
                         flags.add('major_warnings','accessibles_collection_update',{err:err,'function':'removeAllAccessibleObjects','async-part':3, 'message':'uknown error updating accessibles.'})
                     } 
                     cb(null)
@@ -842,7 +841,7 @@ removeAllAccessibleObjects = function(user_id, requestor_app, requestee_app, per
                                     },
                                     function (err) {
                                         if (err) {
-                                            console.log("Got an err in (a) within object retrieavel of removeAllAccessibleObjects "+JSON.stringify(err))
+                                            console.warn("Got an err in (a) within object retrieavel of removeAllAccessibleObjects "+JSON.stringify(err))
                                             warning_list.push("'unkown_error_removing_accessible_indiccator': "+JSON.stringify(err));
                                         } 
                                         cb2(null)
@@ -861,7 +860,7 @@ removeAllAccessibleObjects = function(user_id, requestor_app, requestee_app, per
         },
         function (err) {
             if (err) {
-                console.log("Got an err within collection getting of removeAllAccessibleObjects "+JSON.stringify(err))
+                console.warn("Got an err within collection getting of removeAllAccessibleObjects "+JSON.stringify(err))
                 flags.add('major_warnings','data_object_update',{err:err,'function':'removeAllAccessibleObjects','async-part':4, 'message':'uknown error updating data_object.'})
             } 
             cb(null)
@@ -944,7 +943,7 @@ exports.all_app_permissions = function(req, res) {
                         delete app_config_permissions[permission_name]; // delete from schemas so add unused ones later
                     } else {
                         // permission was granted but is no longer in app_config - this should not happen very often
-                        console.log("WARNING - permission no longer exists")
+                        console.warn("WARNING - permission no longer exists")
                         user_permissions_to_delete.push(aPermission);
                         helpers.warning("account_handler", exports.version, "all_app_permissions", "permission was granted but is no longer in app_config - this should not happen very often "+JSON.stringify(aPermission));
                     }

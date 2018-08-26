@@ -1,5 +1,5 @@
 // freezr.info - nodejs system files - db_main.js
-exports.version = "0.0.1";
+exports.version = "0.0.122";
 
 var async = require('async'),
     helpers = require('./helpers.js'),
@@ -27,7 +27,7 @@ exports.dbConnectionString = function(appName) {
             return connectionString
         }
     } else {
-        console.log("ERROR - NO DB HOST")
+        console.warn("ERROR - NO DB HOST")
         return null;
     }
 }
@@ -53,7 +53,7 @@ exports.get_real_object_id = function (data_object_id) {
     try {
         real_id = new ObjectID(data_object_id);
     } catch(e) {
-        console.log("error getting real_id possibly due to a mal-configured app_config file",e)
+        console.warn("error getting real_id possibly due to a mal-configured app_config file",e)
     }
     return real_id
 }
@@ -93,7 +93,7 @@ exports.check_db = function (callback) {
         }
 
     ], function(err, write_result) {
-        if (err) console.log("got err in check_db ",err)
+        if (err) console.warn("got err in check_db ",err)
         if (err) callback(err, env_on_db);
         if (!err) callback(null, env_on_db)
     });
@@ -124,7 +124,7 @@ exports.getOrSetPrefs = function (prefName, prefsToSet, doSet, callback) {
             } else if (doSet && prefsToSet) {
                 pref_on_db = prefsToSet
                 if (results && results.length>0){
-                    console.log("inserting new prefs ", pref_on_db)
+                    console.warn("inserting new prefs ", pref_on_db)
                     params_coll.update({ _id: prefName },{$set: pref_on_db}, {safe: true }, cb); 
                 } else {
                     pref_on_db._id = prefName
@@ -137,7 +137,7 @@ exports.getOrSetPrefs = function (prefName, prefsToSet, doSet, callback) {
             }
         }
     ], function(err, write_result) {
-        if (err) console.log("got err in getPrefs ",err)
+        if (err) console.warn("got err in getPrefs ",err)
         if (err) callback(err, prefsToSet);
         if (!err) callback(null, pref_on_db)
     });
@@ -159,7 +159,7 @@ exports.get_coll = function (app_name, collection_name, callback) {
           theclient.collection(get_full_coll_name(app_name,collection_name), cb);
         }
     ], function(err, collection) {
-        if (err) console.log("error getting "+app_name+" collection:"+collection_name+" in get coll")
+        if (err) console.warn("error getting "+app_name+" collection:"+collection_name+" in get coll")
         callback(err, collection);
     });
 }
@@ -384,7 +384,7 @@ exports.closeUnusedApps = function() {
         for (var twoAppName in running_apps_db) {
             if (running_apps_db.hasOwnProperty(twoAppName) ) {
                 unusedAppsExist = true;
-                console.log("unclosed dbs are "+twoAppName+" diff "+((running_apps_db[twoAppName] && running_apps_db[twoAppName].last_access)? (new Date().getTime() - running_apps_db[twoAppName].last_access ): "no last acces") )
+                //onsole.log("unclosed dbs are "+twoAppName+" diff "+((running_apps_db[twoAppName] && running_apps_db[twoAppName].last_access)? (new Date().getTime() - running_apps_db[twoAppName].last_access ): "no last acces") )
             }  
         }
     }

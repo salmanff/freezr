@@ -1,5 +1,5 @@
 // freezr.info - nodejs system files - file_handler
-exports.version = "0.0.1";
+exports.version = "0.0.122";
 
 var path = require('path'), 
     fs = require('fs'), 
@@ -42,7 +42,7 @@ exports.init_custom_env = function(env_params, callback) {
                 custom_environment =  require(exports.systemPathTo('freezr_system/environment/'+file_env_name));
             } catch (e) {
                 env_okay = false;     
-                console.log("got err in init_custom_env")
+                console.warn("got err in init_custom_env")
                 callback(helpers.state_error("file_handler",exports.version,"init_custom_env", ("error reading file "+file_env_name+" - "+e.message), "error_in_custom_file") )
             }
             if (env_okay) custom_environment.init_custom_env(env_params, callback);
@@ -190,7 +190,7 @@ exports.deleteAppFolderAndContents = function(app_name, env_params, callback){
             var path = exports.fullLocalPathToAppFiles(app_name);
             deleteLocalFolderAndContents(path, function(err) {
                 // ignores err of removing directories - todo shouldflag
-                if (err) console.log("ignoring ERROR in removing app files for "+app_name+ "err:"+err);
+                if (err) console.warn("ignoring ERROR in removing app files for "+app_name+ "err:"+err);
                 callback(null)
             });        // from http://stackoverflow.com/questions/18052762/in-node-js-how-to-remove-the-directory-which-is-not-empty
         } else { callback(null)}
@@ -280,14 +280,14 @@ exports.async_app_config = function(app_name, env_params, callback) {
 
         fs.readFile( configPath, function (err, app_config) {
             if (err) {
-                console.log("ERROR READING APP CONFIG (1) "+app_name)
+                console.warn("ERROR READING APP CONFIG (1) "+app_name)
                 callback(helpers.error("file_handler.js",exports.version,"async_app_config", "Error reading app_config file for "+app_name+": "+JSON.stringify(e)) );
             } else{
                 try {
                     app_config = json.parse(app_config, null, true);
                 } catch (e) {
-                    console.log("ERROR READING app config (2) "+app_name)
-                    console.log(e)
+                    console.warn("ERROR READING app config (2) "+app_name)
+                    console.warn(e)
                     err = helpers.app_config_error(exports.version, "file_handler:async_app_config", app_name,app_name+" app_config could not be parsed..."+e.message+" - parsing requires app config to have double quotes in keys.")
                     app_config = null;
                 }
@@ -553,7 +553,7 @@ var userAppsLocalPathTo = function(partialUrl) {
     partialUrl = partialUrl.replace("app_files","userapps");
     //onsole.log("userAppsLocalPathTo "+partialUrl)
     if (custom_environment) { // todo clean up - make sure custom env is needed
-        console.log("SNBH - tdodo - review - "+partialUrl)
+        console.warn("SNBH - tdodo - review - "+partialUrl)
         return exports.removeStartAndEndSlashes(partialUrl)
     } else {
         return exports.systemPathTo(partialUrl);
@@ -590,7 +590,7 @@ exports.load_page_html = function(res, opt) {
         opt.isPublic?'html_skeleton_public.html':'html_skeleton.html',
         function (err, contents) {
             if (err) {
-                console.log("err reading file "+err)
+                console.warn("err reading file "+err)
                 helpers.warning("file_handler", exports.version, "load_page_html", "got err reading skeleton "+(opt.isPublic?'html_skeleton_public.html':'html_skeleton.html'))
                 helpers.send_failure(res, 500, err);
                 return;
@@ -659,19 +659,29 @@ exports.load_page_html = function(res, opt) {
         }
     );
 }
+exports.load_page_xml = function(res, opt) {
+    //onsole.log("load page xml",opt.app_name+"... "+opt.page_url)
+    fs.readFile(
+        'freezr_xml_skeleton_public.xml',
+        function (err, contents) {
+            if (err) {
+                console.warn("err reading file "+err)
+                helpers.warning("file_handler", exports.version, "load_page_xml", "got err reading freezr_xml_skeleton_public ")
+                helpers.send_failure(res, 500, err);
+                return;
+            }
+            contents = contents.toString('utf8');
 
+            contents = contents.replace('{{XML_CONTENT}}', opt.page_xml? opt.page_xml: "");
 
-
-/* to remove
-    var wordcount = function (text, fragment) {
-        // http://stackoverflow.com/questions/18679576/counting-words-in-string
-        if (fragment && fragment.length >0 && text && text.length>0) {
-         return text.split(fragment).length;
-        } else {
-            return 0;
+            //res.writeHead(200, { "Content-Type": "text/html" });
+            res.type('application/xml')
+            res.end(contents);
         }
-    }
-*/
+    );
+}
+
+
 
 
 

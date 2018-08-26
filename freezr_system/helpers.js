@@ -1,5 +1,5 @@
 // freezr.info - nodejs system files - helpers.js
-exports.version = '0.0.1';
+exports.version = '0.0.122';
 
 
 var async = require('async'),
@@ -86,7 +86,7 @@ exports.log = function(req, message) {
 
     exports.send_failure = function(res, err, system_file, version, theFunction ) {
         // Note: SNBH = Should Not Be Here - ie unexpected error
-        console.log("* * * ERROR *** : Helpers send failure in system_file "+system_file+" function: "+theFunction+"  error"+JSON.stringify( err)+" - "+err.message);
+        console.warn("* * * ERROR *** : Helpers send failure in system_file "+system_file+" function: "+theFunction+"  error"+JSON.stringify( err)+" - "+err.message);
         var code = (typeof err == 'string')? err :(err.code ? err.code : err.name);
         var message = (typeof err == 'string')? err :(err.message ? err.message : code);
         res.writeHead(200, { "Content-Type" : "application/json" });
@@ -101,40 +101,40 @@ exports.log = function(req, message) {
     };
     exports.state_error = function (system_file, version, theFunction, error, errCode ) {
         if (!errCode && error.code) errCode = error.code
-        console.log ("* * * ERROR *** : Error in system_file "+system_file+" function: "+theFunction+" code: "+errCode+" message:"+error);
+        console.warn ("* * * ERROR *** : Error in system_file "+system_file+" function: "+theFunction+" code: "+errCode+" message:"+error);
         return exports.error((errCode? errCode : "uknown error"), error.message);
     };
 
     exports.auth_failure = function (system_file, version, theFunction, message, errCode ) {
-        console.log ("* * * ERROR *** :  Auth Error in system_file "+system_file+" function: "+theFunction+" message:"+message);
+        console.warn ("* * * ERROR *** :  Auth Error in system_file "+system_file+" function: "+theFunction+" message:"+message);
         return exports.error((errCode? errCode : "authentication"),
                              "Authentication error: "+message);
     };
     exports.internal_error = function (system_file, version, theFunction, message ) {
-        console.log ("* * * ERROR *** :  Internal Error in system_file "+system_file+" function: "+theFunction+" message:"+message);
+        console.warn ("* * * ERROR *** :  Internal Error in system_file "+system_file+" function: "+theFunction+" message:"+message);
         return exports.error("internal_error",
                              "Internal error: "+message);
     };    
     exports.warning = function (system_file, version, theFunction, message ) {
         //
-        console.log ("* * * WARNING *** :  "+(new Date())+" Possible malfunction in system_file "+system_file+" function: "+theFunction+" message:"+message);
+        console.warn ("* * * WARNING *** :  "+(new Date())+" Possible malfunction in system_file "+system_file+" function: "+theFunction+" message:"+message);
     };
     exports.auth_warning = function (system_file, version, theFunction, message ) {
         //
-        console.log ("* * * WARNING *** :  "+(new Date())+" Possible malfunction in system_file "+system_file+" function: "+theFunction+" message:"+message);
+        console.warn ("* * * WARNING *** :  "+(new Date())+" Possible malfunction in system_file "+system_file+" function: "+theFunction+" message:"+message);
     };
 
     exports.app_data_error = function(version, theFunction, app_name, message) {
-        console.log ("App Data ERROR in function: "+theFunction+" app_name: "+app_name+" message:"+message);
+        console.warn ("App Data ERROR in function: "+theFunction+" app_name: "+app_name+" message:"+message);
         return exports.error("app_data_error", message);
     }
     exports.app_config_error = function(version, theFunction, app_name, message) {
-        console.log ("App Config ERROR (from "+theFunction+") for app_name: "+app_name+":"+message);
+        console.warn ("App Config ERROR (from "+theFunction+") for app_name: "+app_name+":"+message);
         return exports.error("app_config_error", message);
     }
 
     exports.rec_missing_error = function(version, theFunction, app_name, message) {
-        console.log ("App Data ERROR in function: "+theFunction+" app_name: "+app_name+" message:"+message);
+        console.warn ("App Data ERROR in function: "+theFunction+" app_name: "+app_name+" message:"+message);
         return exports.error("rec_missing_error", message);
     }
 
@@ -151,12 +151,12 @@ exports.log = function(req, message) {
         res.redirect('/account/home?error=true&error_type=internal&file='+system_file+"&msg="+message)
     };
     exports.missing_data = function (what, system_file, version, theFunction) {
-        console.log ("WARNING - Missing Data err in system_file "+system_file+" function: "+theFunction+" missing:"+what);
+        console.warn ("WARNING - Missing Data err in system_file "+system_file+" function: "+theFunction+" missing:"+what);
         return exports.error("missing_data",
                              "You must include " + what);
     }    
     exports.invalid_data = function (what, system_file, version, theFunction) {
-        console.log ("WARNING - Invalid Data err in system_file "+system_file+" function: "+theFunction+" missing:"+what);
+        console.warn ("WARNING - Invalid Data err in system_file "+system_file+" function: "+theFunction+" missing:"+what);
         return exports.error("invalid_data",
                              "Data is invalid: " + what);
     }
@@ -333,7 +333,10 @@ var objects_are_similar = function (obj1, obj2) {
     }
 }
 
-
+exports.isEmpty = function(obj)  {
+    if (!obj) return true
+    return Object.keys(obj).length === 0;
+}
 
 
 

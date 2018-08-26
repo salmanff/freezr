@@ -14,7 +14,7 @@ var helpers = require('./helpers.js'),
 	file_handler = require('./file_handler.js');
 
 
-exports.version = '0.01'
+exports.version = '0.0.122'
 
 const MAX_NUM_DETAIL_REFS = 100;
 const MAX_NUM_FULL_LOGS_IN_FILE = 100;
@@ -48,7 +48,6 @@ exports.reloadDb = function (callback) {
             } else { 
             	day_db_log[today] = results[0]
             }
-            console.log("day_db_log init now is "+JSON.stringify(day_db_log))
         }
         callback(err)
     });
@@ -56,7 +55,7 @@ exports.reloadDb = function (callback) {
 
 exports.record = function(req, prefs, options){
 	//onsole.log("RECORD? "+get_app_name(req)+" "+req.originalUrl)
-	if (!prefs) console.log("PREFS NOT DEFINED ********************")
+	if (!prefs) console.warn("PREFS NOT DEFINED ********************")
 	if (prefs && prefs.log_visits) {
 
 		// init variables
@@ -77,8 +76,8 @@ exports.record = function(req, prefs, options){
 					(options.auth_error?"Auth-Err":"")
 					];
 				full_file_log.push(full_record)
-				console.log("full_record")
-				console.log(full_record)
+				//onsole.log("full_record")
+				//onsole.log(full_record)
 				if (full_record.length > MAX_NUM_FULL_LOGS_IN_FILE) {
 					write_full_log_file(req, function () {
 						addRecordToDailySummary(req, prefs, options);
@@ -104,10 +103,7 @@ function write_full_log_file (req, callback) {
 	if (!last_file_name) make_new_file=true;
 	if (make_new_file) last_file_name = "full_logs_"+current_date+".json";
 
-	console.log("last_file_name")
-	console.log(last_file_name)
 	var the_url = "userfiles/freezr_admin/daily_log_files/"+(new Date().getFullYear())
-	console.log(the_url)
 	file_handler.writeTextToUserFile (
 		file_handler.normUrl(the_url), 
 		last_file_name,
@@ -124,7 +120,7 @@ function write_full_log_file (req, callback) {
 				full_file_log = newLogFile;
 				if (err) {
 					helpers.state_error("visit_logger", exports.version, "write_full_log_file", err, "err_writing_logfile")
-					console.log(full_file_log)
+					console.warn(full_file_log)
 				}
 			}
 			current_date = dateString();
@@ -132,8 +128,8 @@ function write_full_log_file (req, callback) {
 		});           
 }
 function saveToDb() {
-	console.log("saveToDb")
-	console.log(JSON.stringify(day_db_log))
+	//onsole.log("saveToDb")
+	//onsole.log(JSON.stringify(day_db_log))
 	var dbCollection = null;
 	// iterate through records
 	// Find one  
@@ -205,6 +201,7 @@ function addRecordToDailySummary(req, prefs, options) {
 			numpcard:0,
 			numppage:0,
 			numpdb:0,
+			numPubFiles:0,
 			numredirect:0,
 			numpubadmin:0, // log in logout oauth
 		}
@@ -256,7 +253,7 @@ function addRecordToDailySummary(req, prefs, options) {
 	} else if (options.source == 'addVersionNumber') {
 		// todo later - conside streamlibing URLs to reduce if..else
 		var parts = req.originalUrl.split('?')[0].split("/");
-		if (parts[1]=="ppage" || parts[2]=="public") {
+		if (parts[1]=="ppage" || parts[1]=="papp" || parts[1]=="rss.xml" || parts[2]=="public") {
 			addTo("pageRefs",options.exteralRef);
 			addTo("pages", encodeURI(req.originalUrl.replace(/\./g,"_")));
 			day_db_log[today][user_type].numppage++
@@ -264,12 +261,14 @@ function addRecordToDailySummary(req, prefs, options) {
 			day_db_log[today][user_type].numpcard++
 		} else if (parts[2]=="pdbq" || parts[2]=="pobject") {
 				day_db_log[today][user_type].numpdb++
+		} else if (parts[2]=="publicfiles") {
+				if (!day_db_log[today][user_type].numPubFiles) day_db_log[today][user_type].numPubFiles=0;
+				day_db_log[today][user_type].numPubFiles++
 		} else if (parts[1]=="account" || parts[2]=="account" || parts[1]=="login"|| parts[2]=="admin") {
 			day_db_log[today][user_type].numpubadmin++
 		} else {
-			console.log(req.originalUrl)
-			console.log(parts)
-			throw new Error("unknown addVersionNumber category")
+			console.warn("unknown addVersionNumber category", req.originalUrl,parts)
+			throw helpers.error("unknown addVersionNumber category")
 		}
 	} else if (options.source == 'requireAdminRights') {
 		day_db_log[today][user_type].numpubadmin++
@@ -280,7 +279,6 @@ function addRecordToDailySummary(req, prefs, options) {
 	} else {
 		console.warn("visit_logger: No choices left on source "+req.originalUrl)
 	}
-	//console.log(user_type, day_db_log[today])
 }
 function getClientAddress(request){ 
 	// https://stackoverflow.com/questions/8107856/how-to-determine-a-users-ip-address-in-node
@@ -297,12 +295,12 @@ function get_app_name(req, options) {
 	if (req.originalUrl.split('?')[0] == "/") return "root"
 	var parts = req.originalUrl.split('?')[0].split("/");
 	const PARTS2URLS =  ['app_files', 'apps', 'v1']
-	const PARTS1URLS =  ['allmydata', 'favicon.ico', 'ppage', 'account', 'login', 'admin']
+	const PARTS1URLS =  ['allmydata', 'favicon.ico', 'ppage', 'papp', 'account', 'login', 'admin']
 	
 	if (parts.length<2) return "account"
 	if (PARTS2URLS.indexOf (parts[1]) >-1 ) return parts[2].replace(/\./g,"_");
 	if (PARTS1URLS.indexOf (parts[1]) >-1 )  return parts[1].replace(/\./g,"_");
-	console.log("NO APP: "+req.originalUrl+ " "+parts.length+" "+parts.join("P"))
+	console.warn("NO APP: "+req.originalUrl+ " "+parts.length+" "+parts.join("P"))
 	return "unknown_error "
 }
 function get_external_referer(req) {

@@ -1,5 +1,5 @@
 // freezr.info - nodejs system files - freezr_db.js
-exports.version = "0.0.1";
+exports.version = "0.0.122";
 
 var async = require('async'),
     bcrypt = require('bcryptjs'),

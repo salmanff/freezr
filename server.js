@@ -1,9 +1,9 @@
 // freezr.info - nodejs system files - main file: server.js 
-const VERSION = "0.0.121";
+const VERSION = "0.0.122";
 
 
 // INITALISATION / APP / EXPRESS
-console.log("=========================  VERSION April 2018  =======================")
+console.log("=========================  VERSION August 2018  =======================")
 const LISTEN_TO_LOCALHOST_ON_LOCAL = true; // for local development - set to true to access local site at http://localhost:3000, and false to access it at your local ip address - eg http://192.168.192.1:3000 (currently not working)
 
 
@@ -130,7 +130,7 @@ var appPageAccessRights = function(req, res, next) {
     }
 }
 function requireAdminRights(req, res, next) {
-    console.log("require admin login "+req.session.logged_in_as_admin+" for "+req.session.logged_in_user_id);
+    //onsole.log("require admin login "+req.session.logged_in_as_admin+" for "+req.session.logged_in_user_id);
     if (req.session && req.session.logged_in_as_admin) {
         req.freezr_server_version = VERSION;
         req.freezrStatus = freezrStatus;
@@ -193,7 +193,7 @@ function addVersionNumber(req, res, next) {
     // app pages and files
         app.use("/app_files/info.freezr.public", servePublicAppFile);
         app.get('/app_files/:app_name/public/static/:file', servePublicAppFile);
-        //app.get('/app_files/:app_name/public/:file', servePublicAppFile);
+        app.get('/app_files/:app_name/public/:file', servePublicAppFile);
         app.use("/app_files/:app_name/:file", serveAppFile);
         app.get('/apps/:app_name', appPageAccessRights, app_handler.generatePage); 
         app.get('/apps/:app_name/static/:file', serveAppFile);
@@ -213,17 +213,20 @@ function addVersionNumber(req, res, next) {
     // public 
         app.get('/pcard/:user_id/:requestor_app/:permission_name/:app_name/:collection_name/:data_object_id', addVersionNumber, public_handler.generatePublicPage); 
         app.get('/pcard/:user_id/:app_name/:collection_name/:data_object_id', addVersionNumber, public_handler.generatePublicPage); 
-        app.get('/ppage/:app_name/:page', addVersionNumber, public_handler.generatePublicPage); 
-        app.get('/ppage/:app_name', addVersionNumber, public_handler.generatePublicPage); 
+        app.get('/papp/:app_name/:page', addVersionNumber, public_handler.generatePublicPage); 
+        app.get('/papp/:app_name', addVersionNumber, public_handler.generatePublicPage); 
+        app.get('/ppage/:object_public_id', addVersionNumber, public_handler.generatePublicObjectPage); 
         app.get('/ppage', addVersionNumber, public_handler.generatePublicPage); 
+        app.get('/rss.xml', addVersionNumber, public_handler.generatePublicPage); 
         app.get('/apps/:app_name/public/static/:file', servePublicAppFile);
         app.get('/v1/pdbq', addVersionNumber, public_handler.dbp_query); 
         app.get('/v1/pdbq/:app_name', addVersionNumber, public_handler.dbp_query); 
         app.post('/v1/pdbq', addVersionNumber, public_handler.dbp_query); 
+        app.get('/v1/publicfiles/:requestee_app/:user_id/*', addVersionNumber, public_handler.get_data_object);
+        app.get('/v1/pdb/getbyid/:requestee_app/:collection_name/:data_object_id', app_handler.getDataObject); // here request type must be "one"
 
         app.get('/v1/pobject/:user_id/:app_name/:collection_name/:data_object_id', addVersionNumber, public_handler.generatePublicPage);  
-        // todo: app.get('/v1/pfile/:user_id/:app_name/*', public_handler.getPublicDataObject); // collection_name is files 
-
+        
 
     // permissions
         app.put('/v1/permissions/setobjectaccess/:requestor_app/:source_app_code/:permission_name', userDataAccessRights, app_handler.setObjectAccess);
@@ -299,11 +302,10 @@ function addVersionNumber(req, res, next) {
     
     // default redirects
         function getPublicUrlFromPrefs () {
-            console.log(freezr_prefs)
+            //onsole.log(freezr_prefs)
             if (!freezr_prefs.redirect_public) return "/account/login";
-            console.log("here")
             if (!freezr_prefs.public_landing_page) return "/ppage";
-            return "/ppage/"+freezr_prefs.public_landing_page;
+            return "/papp/"+freezr_prefs.public_landing_page;
         }
         app.get("/", function (req, res) {
             // to if allows public people coming in, then move to public page
@@ -342,7 +344,6 @@ async.waterfall([
     function (cb) { // todo - make async with errr coming back from init_custome_env
         if (fs.existsSync(file_handler.systemPathTo("freezr_environment.js"))) {
             try {
-                console.log("1 - Reading from freezr_environment file");
                 freezr_environment = require(file_handler.systemPathTo("freezr_environment.js"));
                 freezr_environment = freezr_environment.params;
                 freezrStatus.environment_file_exists_no_faults = true;
@@ -355,7 +356,7 @@ async.waterfall([
                 cb(helpers.error("1 - ERROR: could not read / parse freezr_environment file","freezr_environment_mal_formed"))
             }
         } else {
-            console.log("1 - freezr_environment file does NOT exist.");
+            console.warn("1 - freezr_environment file does NOT exist.");
             freezr_environment = environment_defaults.autoConfigs();
             freezr_environment.freezr_is_setup = false;
             freezr_environment.first_user = null;
@@ -372,7 +373,7 @@ async.waterfall([
             require('dns').lookup(require('os').hostname(), function (err, add, fam) {
                 // Priorities in choosing default address: 1. default ip from environment_defaults (if written) 2. localhost if relevant 3. address looked up.
                 freezr_environment.ipaddress = freezr_environment.ipaddress? freezr_environment.ipaddress: ((helpers.startsWith(add,"192.168") && LISTEN_TO_LOCALHOST_ON_LOCAL)? "localhost" :add);
-                console.log("hostname currently not working - Once working: Would be running on local ip Address: "+freezr_environment.ipaddress);
+                console.warn("hostname currently not working - Once working: Would be running on local ip Address: "+freezr_environment.ipaddress);
                 cb(null);
            }) 
         }
@@ -504,7 +505,5 @@ var getAllOkayStatus = function(aStatus) {
 
 }
         
-//var test_custom_file_env = require('./freezr_system/environment/file_env_dropbox.js'); //- use this to make sure custo file env does not have bugs
-//var test_custom_file_con = require('./test_config.js'); //- use this to make sure custo file env does not have bugs
-//console.log(test_custom_file_con)
+
 

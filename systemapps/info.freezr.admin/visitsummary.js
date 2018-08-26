@@ -24,6 +24,15 @@ freezr.initPageScripts = function() {
       console.log("post change "+shownData.last_date)
       runQuery();
     }
+    if (startsWith(evt.target.id,"showdetail")) {
+      wotToDo = (evt.target.className == "detailHidden")? "table-row":"none";
+      let els = document.getElementsByClassName("row_"+evt.target.id.split("_")[1]);
+      Array.prototype.forEach.call(els, function(anEl) {
+         anEl.style.display=wotToDo
+        console.log(anEl)
+      })
+      evt.target.className = (evt.target.className == "detailHidden"? "detailShown":"detailHidden")
+    }
   });
   shownData.last_date = new Date();
   runQuery();
@@ -108,8 +117,8 @@ var makeEl = function(type, text, parent, theClass) {
   return theEl;
 }
 var makeRow = function(parent, title,keys, headers, options) {
-  let gotAVal = false
-  let theRow = makeEl('tr', null);
+  let gotAVal = false;
+  let theRow = makeEl('tr', null,null, options.trClass);
   makeEl('td',title,theRow, options.titleClass);
   headers.forEach((aHeader) => {
     let theVal = valueInJSON(allLogs[aHeader],keys );
@@ -125,16 +134,28 @@ var valueInJSON = function(obj, keys) {
   if (keys.length==1) return obj[lastKey];
   return valueInJSON(obj[lastKey], keys.slice(1) )
 }
-var drawList = function(type, title, user_type, parent, headers){
-  makeRow(parent, title,null,headers, {showNullAsDash:false, ignoreEmptyRows:false, titleClass:'listTitle'})
-  let keyList = [];
+var drawList = function(listKey, title, user_type, parent, headers){
+  makeRow(parent, title+'<span class="detailHidden" id="showdetail_'+listKey+'"> details</span>',null,headers, {showNullAsDash:false, ignoreEmptyRows:false, titleClass:'listTitle'})
+  let keyList = [], keyCount ={};
+  console.log("Enumerating")
   headers.forEach((aHeader) => {
-    if (allLogs[aHeader] && allLogs[aHeader][user_type]&& allLogs[aHeader][user_type][type]){
-      Object.keys(allLogs[aHeader][user_type][type]).forEach(aKey => {keyList = addToListAsUnique(keyList,aKey)})
+    if (allLogs[aHeader] && allLogs[aHeader][user_type]&& allLogs[aHeader][user_type][listKey]){
+      Object.keys(allLogs[aHeader][user_type][listKey]).forEach(aKey => {
+        console.log(aHeader,user_type,listKey, aKey, allLogs[aHeader][user_type][listKey][aKey], allLogs[aHeader][user_type][listKey])
+        keyList = addToListAsUnique(keyList,aKey);
+        keyCount[aKey] = keyCount[aKey]? (keyCount[aKey]+(allLogs[aHeader][user_type][listKey][aKey] || 0)) : (allLogs[aHeader][user_type][listKey][aKey] || 0);
+        console.log("keyCount for "+aKey+" now "+keyCount[aKey] )
+      })
     }
   })
+  var keyListSorter = function (key1, key2) {return ((keyCount[key2]||0) - (keyCount[key1]||0))}
+  keyList.sort(keyListSorter)
+  console.log("keyList")
+  console.log(keyList)
   keyList.forEach((aKey) => {
-    makeRow(parent, aKey,[user_type,type,aKey],headers, mainCellOptions)
+    let theRow = makeRow(parent, aKey,[user_type,listKey,aKey],headers, mainCellOptions);
+    theRow.className = 'row_'+listKey;
+    theRow.style.display="none";
   })
 }
 
@@ -166,6 +187,10 @@ var addToListAsUnique = function(aList,anItem) {
   } 
   return aList
 }
-
+var startsWith = function(longertext, checktext) {
+  if (!longertext || !checktext || !(typeof longertext === 'string')|| !(typeof checktext === 'string')) {return false} else 
+  if (checktext.length > longertext.length) {return false} else {
+  return (checktext == longertext.slice(0,checktext.length));}
+}
 
 

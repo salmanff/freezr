@@ -12,7 +12,7 @@ var Dropbox = require('dropbox'),
     fs = require('fs'), path = require('path'), // for cached app files
     json = require('comment-json');
 
-exports.version = "0.0.11";
+exports.version = "0.0.122";
 
 var dbx = null;
 
@@ -72,8 +72,7 @@ exports.sendAppFile = function(res, filePath, env_params) {
 			} else {return;}
 		}) )
 		.catch(error => {
-			console.log("err in send app file")
-			console.log(error)
+			console.warn("err in send app file",error)
 		if (error && error.error && error.error.error_summary && helpers.startsWith(error.error.error_summary, 'path/not_found') ){
 		  	if (!helpers.endsWith(filePath,"logo.png")) helpers.warning("file_env_dropbox.js", exports.version, "sendAppFile", "Missing file:  "+filePath);
 		} else {
@@ -185,7 +184,7 @@ exports.clearFSAppCache = function (app_name, env_params, callback) {
     if (useAppFileFSCache() && fs.existsSync(systemPathTo ("userapps/"+app_name))) {
             deleteLocalFolderAndCacheAndContents(app_name, null, function(err) {
                 // ignores err of removing directories - todo shouldflag
-                if (err) console.log("ignoring ERROR in removing app files for "+app_name+ "err:"+err);
+                if (err) console.warn("ignoring ERROR in removing app files for "+app_name+ "err:"+err);
                 callback(null)
             });        // from http://stackoverflow.com/questions/18052762/in-node-js-how-to-remove-the-directory-which-is-not-empty		
 	} else {    
@@ -231,8 +230,7 @@ exports.get_file_content = function(filePath, env_params, callback) {
 			.catch(error => {
 				var errparse = JSON.parse(error.error);
 				if (errparse && errparse.error_summary && helpers.startsWith(errparse.error_summary, 'path/not_found') ){
-					console.log("errparse.error_summary")
-					console.log(errparse.error_summary)
+					console.warn("errparse.error_summary",errparse.error_summary)
 					FILE_CACHE[filePath] = {content: '', 'access_date' : new Date().getTime()};
 					callback(helpers.error("file_not_found","Could not get content for inexistant file at "+filePath) ,null)
 				} else {
@@ -370,14 +368,13 @@ exports.get_full_folder_file_list = function(partialUrl, iterate, env_params, ca
 	    		cb2(null);
 	    	}
         }, function(err){
-        	if (err) console.log("got err in get_full_folder_file_list",err)
+        	if (err) console.warn("got err in get_full_folder_file_list",err)
 		    callback(null,fulllist)
 	        // add to flags??
         })
 	  })
 	  .catch(function(error) {
-	    console.log("get_full_folder_file_list err:");
-	    console.log(error);
+	    console.warn("get_full_folder_file_list err:",error);
 	        // add to flags??
 	});
 }
@@ -430,7 +427,7 @@ exports.deleteAppFolderAndContents = function(app_name, env_params, callback){
 	dbx.filesDelete({path: "/"+filePath})
       .then( response => callback )
       .catch(error => {
-            if (error) console.log("ignoring ERROR in removing app files for "+app_name+ "err:"+error);
+            if (error) console.warn("ignoring ERROR in removing app files for "+app_name+ "err:"+error);
             callback(null)
       });
 }
@@ -527,7 +524,7 @@ var deleteLocalFolderAndCacheAndContents = function(app_name, subfolders, next) 
                     if (fs.existsSync(fullFilePath)){
                         fs.unlink(fullFilePath, function (err) {
                             if (err) {
-                            	console.log("got err "+err)
+                            	console.warn("got err "+err)
                                 return cb(err);
                             }
                             return cb();

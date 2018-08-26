@@ -2,10 +2,12 @@
 allpublicrecords
 */
 document.addEventListener('click', function(e) { 
-        var el = e.target
-        if (el.className=="freezr_expander") {
+    	var el = e.target
+    	if (el.className=="freezr_expander") {
             el.style.display="none";
-            el.parentElement.className="freezr_public_genericCardOuter";
+            while (el.tagName !="body" && el.className.indexOf("freezr_public_genericCardOuter")<0) {el=el.parentNode;}
+            if (el.tagName !="body") el.className="freezr_public_genericCardOuter";
+            adjustHeight(el)
         } else if (el.id=="searchButt") {
         	doSearch();
         }
@@ -16,14 +18,17 @@ document.onkeypress= function (evt) {
 		doSearch(); 
 	} 
 }
-
-
+window.onresize = function(event) {
+	let outers = document.getElementsByClassName("freezr_public_genericCardOuter");
+	Array.prototype.forEach.call(outers, function(anOuter) { 
+		if (anOuter.className.indexOf("freezr_public_genericCardOuter_overflower")<0) adjustHeight(anOuter);
+	})
+};
 var doSearch = function () {
 	terms = document.getElementById("searchBox").innerText.toLowerCase();
 	if (terms.length>0) terms = terms.split(" ")
 	var app=[], q=[], user=null 
 	if (terms.length>0) {
-		console.log("here")
 		terms.forEach(function(aterm) {
 			if (startsWith(aterm,"app:") ){
 				app = aterm.slice(4)
@@ -34,7 +39,6 @@ var doSearch = function () {
 			}
 		})
 	}
-	console.log( '/ppage?' + ((q && q.length>0)?("q="+q.join(" ")):"") + ((app && app.length>0)?("app="+app):"") + ((user && user.length>0)?("user="+user):"" ) );
 	window.open('/ppage?' +  ((q && q.length>0)?("q="+q.join(" ")):"") + ((app && app.length>0)?("app="+app):"") + ((user && user.length>0)?("user="+user):"" ),"_self" );
 }
 
@@ -42,3 +46,12 @@ var startsWith = function(longertext, checktext) {
         if (checktext.length > longertext.length) {return false} else {
         return (checktext == longertext.slice(0,checktext.length));}
     }
+
+var adjustHeight= function(originalEl, el) {
+	if (!el) el = originalEl
+	Array.from(el.children).forEach((aChild, index) => {
+		let diff = (aChild.offsetTop + aChild.offsetHeight) - (originalEl.offsetTop+originalEl.offsetHeight)
+		if (diff>0) {originalEl.style.minHeight= (originalEl.offsetHeight+diff) + "px"; }
+		adjustHeight(originalEl, aChild);
+	})
+}

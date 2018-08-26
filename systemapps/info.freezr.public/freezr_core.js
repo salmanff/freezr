@@ -1,4 +1,4 @@
-/* Core freezr API - v0.0.11 - 2017
+/* Core freezr API - v0.0.122 - 2018-08
 
 The following variables need to have been declared in index.html
     freezr_app_name, freezr_app_code, freezr_user_id, freezr_user_is_admin
@@ -87,7 +87,6 @@ freezr.db.query = function(options, callback) {
   var url = '/v1/db/query/'+freezr_app_name+'/'+freezr_app_code+'/'+freezr_app_name+permission_string;
 
   if (options.app_name && options.app_name == "info.freezr.admin") url='/v1/admin/dbquery/'+options.collection
-    console.log("url is "+url)
   freezer_restricted.connect.send(url, JSON.stringify(options), callback, 'POST', 'application/json');
 }
 freezr.db.update = function(data, options, callback) {
@@ -109,7 +108,7 @@ freezr.db.getByPublicId = function(data_object_id, callback) {
   freezer_restricted.connect.read(url, options, callback);
 }
 freezr.db.publicquery = function(options, callback) {
-  // options can be: app_name, skip, count, user_id
+  // options can be: app_name, skip, count, user_id, pid
   if (!options) options = {};
   var url = '/v1/pdbq';
   freezer_restricted.connect.send(url, JSON.stringify(options), callback, 'POST', 'application/json');
@@ -121,6 +120,18 @@ freezr.perms.getAllAppPermissions = function(callback) {
   // gets a list of permissions granted - this is mainly called on my freezr_core, but can also be accessed by apps
   var url = '/v1/permissions/getall/'+freezr_app_name+'/'+freezr_app_code;
   freezer_restricted.connect.read(url, null, callback);
+}
+freezr.perms.isGranted = function(permission_name, callback) {
+  // see if a permission has been granted by the user - callback(isGranted)
+  var url = '/v1/permissions/getall/'+freezr_app_name+'/'+freezr_app_code;
+  freezer_restricted.connect.read(url, null, function(ret){
+    ret = freezr.utils.parse(ret);
+    let isGranted = false;
+    ret.forEach((aPerm) => {
+      if (aPerm.permission_name == permission_name && aPerm.granted == true) isGranted=true;
+    })
+    callback(isGranted)
+  } );
 }
 freezr.perms.setFieldAccess = function(options, callback) {
   // todo - Currently not functional
@@ -151,8 +162,9 @@ freezr.perms.setObjectAccess = function(permission_name, idOrQuery, options, cal
         // can have one of:  'shared_with_group':'logged_in' or 'public' or 'shared_with_user':a user id  
         // 'requestee_app': app_name (defaults to self)
         // collection: defaults to first in list
-        // make_accessible (for public individual items, this is always true) - for others, this makes it accessible in a separate searchable collection (accessibles) so it can be more easily combined with otehr data sets searched
-          // if use query_criteria, make_accessible is false even for public items. 
+        // pid: sets a publid id instead of the automated accessible_id
+        // pubDate: sets the publish date
+        // not_accessible - for public items that dont need to be lsited separately in the accessibles database
        }
       }
   if (!options.action) {options.action = "grant";}
@@ -161,6 +173,7 @@ freezr.perms.setObjectAccess = function(permission_name, idOrQuery, options, cal
   } else {
     if (typeof idOrQuery == "string") options.data_object_id = idOrQuery;
     if (typeof idOrQuery == "object") options.query_criteria = idOrQuery;
+    if (idOrQuery.constructor === Array) options.object_id_list = idOrQuery;
     freezer_restricted.connect.write(url, options, callback);
   }
 }
@@ -207,14 +220,14 @@ freezr.utils.ping = function(options, callback) {
 }
 freezr.utils.logout = function() {
   if (freezr.app.isWebBased) {
-    console.log("Warning: On web based apps, logout from freezr home.")
+    console.warn("Warning: On web based apps, logout from freezr home.")
     if (freezr.app.logoutCallback) freezr.app.logoutCallback({logged_out:false});
   } else {
     freezer_restricted.connect.ask("/v1/account/applogout", null, function(resp) {
       resp = freezr.utils.parse(resp);
       freezer_restricted.menu.close()
       if (resp.error) {
-        console.log("ERROR Logging Out");
+        console.warn("ERROR Logging Out");
       } else { 
         freezr_app_code = null;
         freezr_user_id = null;
@@ -246,13 +259,29 @@ freezr.utils.filePathFromName = function(fileName, options) {
   else return freezr.utils.filePathFromId(user_id +"/"+fileName, options) 
 }
 freezr.utils.filePathFromId = function(fileId, options) {
-  // returns the full file path based on the file id so it can be referred to in html.
+  // returns the file path based on the file id so it can be referred to in html.
   // options are permission_name, requestee_app
   if (!fileId) return null;
-  var permission_name = options.permission_name? options.permission_name : "me";
-  var requestee_app   = options.requestee_app ?  options.requestee_app   : freezr_app_name;
+  var permission_name = (options && options.permission_name)? options.permission_name : "me";
+  var requestee_app   = (options &&   options.requestee_app)?  options.requestee_app   : freezr_app_name;
   if (freezr.utils.startsWith(fileId,"/")) fileId = fileId.slice(1);
   return "/v1/userfiles/"+permission_name+"/files/"+freezr_app_name+"/"+ freezr_app_code +"/"+requestee_app+"/"+fileId;
+}
+freezr.utils.publicPathFromId = function(fileId, requestee_app) {
+  // returns the public file path based on the file id so it can be referred to in html.
+  // params are permission_name, requestee_app
+  if (!fileId || !requestee_app) return null;
+  if (freezr.utils.startsWith(fileId,"/")) fileId = fileId.slice(1);
+  return "/v1/publicfiles/"+requestee_app+"/"+fileId;
+}
+freezr.utils.fileIdFromPath = function(filePath) {
+  // returns the id given a private or public url of a freezr file path 
+  if (!filePath) return null;
+  let parts = filePath.split("/");
+  let type =  ( parts[4]=="userfiles"?"private":(parts[4]=="publicfiles"?"public":null)  )
+  if (!type) return null;
+  parts = parts.slice( (type=="private"?10:6) )
+  return decodeURI(parts.join("/"));
 }
 freezr.utils.parse = function(dataString) {
   if (typeof dataString == "string") {
@@ -529,7 +558,7 @@ freezer_restricted.permissions= {};
             innerElText.innerHTML+= '<div align="center"><div class="freezer_butt" style="float:none; max-width:100px;" id="freezr_server_logout_butt">log out</div></div><br/>'
             setTimeout(function() { document.getElementById("freezr_server_logout_butt").onclick= function() {freezr.utils.logout(); } },10);
         }
-    } else {console.log("INTERNAL ERROR - NO DIV AT addLoginInfoToDialogue FOR "+aDivName)}
+    } else {console.warn("INTERNAL ERROR - NO DIV AT addLoginInfoToDialogue FOR "+aDivName)}
   }
   freezer_restricted.menu.add_standAlonApp_login_dialogue = function(divToInsertInId) {
     var divToInsertIn = document.getElementById(divToInsertInId);
@@ -565,16 +594,16 @@ freezer_restricted.permissions= {};
             //onsole.log("got login "+JSON.stringify(resp));
             if (resp.error) {
               document.getElementById('freezer_dialogueInnerText').innerHTML= "Error logging you in: "+(resp.message? resp.message: resp.error);
-              freezr.app.loginCallback? freezr.app.loginCallback(resp): console.log("Error " + JSON.stringify(resp));
+              freezr.app.loginCallback? freezr.app.loginCallback(resp): console.warn("Error " + JSON.stringify(resp));
             } else if (!resp.source_app_code) {
               document.getElementById('freezer_dialogueInnerText').innerHTML= "Error logging you in: You need to install the app on your freezr first.";
-              freezr.app.loginCallback? freezr.app.loginCallback(resp): console.log("Error " + JSON.stringify(resp));              
+              freezr.app.loginCallback? freezr.app.loginCallback(resp): console.warn("Error " + JSON.stringify(resp));              
             } else if (resp.login_for_app_name == freezr_app_name) {
               freezer_restricted.menu.close()
               freezr_app_code = resp.source_app_code;
               freezr_server_version = resp.freezr_server_version;
               freezr.app.offlineCredentialsExpired = false;
-              freezr.app.loginCallback? freezr.app.loginCallback(resp): console.log("Warning: Set freezr.app.loginCallback to handle log in response: " + JSON.stringify(resp));
+              freezr.app.loginCallback? freezr.app.loginCallback(resp): console.warn("Warning: Set freezr.app.loginCallback to handle log in response: " + JSON.stringify(resp));
             } else {
                 document.getElementById('freezer_dialogueInnerText').innerHTML= 'developper error  2- loggedin_app_name '+resp.login_for_app_name+' is not correct.';
             }
@@ -683,7 +712,7 @@ freezer_restricted.permissions= {};
 
 
         } else {
-          console.log("ERROR - why this . uknown permission "+JSON.stringify(aPerm));
+          console.warn("ERROR - why this . uknown permission "+JSON.stringify(aPerm));
         }
       }
 

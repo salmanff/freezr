@@ -277,7 +277,7 @@ function addRecordToDailySummary(req, prefs, options) {
 	} else if (options.source == 'redirect') {
 		day_db_log[today][user_type].numredirect++
 	} else {
-		console.warn("visit_logger: No choices left on source "+req.originalUrl)
+		console.warn("visit_logger: No choices left on source "+req.originalUrl+" source:"+options.source)
 	}
 }
 function getClientAddress(request){ 
@@ -290,7 +290,7 @@ function getClientAddress(request){
 function get_app_name(req, options) {
 	if (req.params.app_name) return req.params.app_name.replace(/\./g,"_")
 	if (req.params.requestor_app) return req.params.requestor_app.replace(/\./g,"_")
-	if (options.source == "home") return "home_ridirect"
+	if (options.source == "home") return "home_redirect"
 	
 	if (req.originalUrl.split('?')[0] == "/") return "root"
 	var parts = req.originalUrl.split('?')[0].split("/");
@@ -301,7 +301,7 @@ function get_app_name(req, options) {
 	if (PARTS2URLS.indexOf (parts[1]) >-1 ) return parts[2].replace(/\./g,"_");
 	if (PARTS1URLS.indexOf (parts[1]) >-1 )  return parts[1].replace(/\./g,"_");
 	console.warn("NO APP: "+req.originalUrl+ " "+parts.length+" "+parts.join("P"))
-	return "unknown_error "
+	return "unknown_error"
 }
 function get_external_referer(req) {
 	if (!req.header('Referer')) return null;

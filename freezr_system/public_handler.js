@@ -118,6 +118,7 @@ exports.generatePublicPage = function (req, res) {
                     isRss: isRss,
                     useGenericFreezrPage: useGenericFreezrPage   
                 }     
+
                 // query_params can come from req.query and initial query
                 Object.keys(req.query).forEach(function(key) {
                     options.query_params[key] = req.query[key]
@@ -195,6 +196,7 @@ exports.generatePublicPage = function (req, res) {
 };
 gotoShowInitialData = function(res, freezr_environment, options) {
     // used when generating a page of accessible items
+    //onsole.log("gotoShowInitialData")
     var req= {freezr_environment: freezr_environment}
     if (!options) options = {};
     if (!options.query_params) options.query_params = {};
@@ -444,6 +446,12 @@ gotoShowInitialData = function(res, freezr_environment, options) {
                                 results.results[i] = formatFields(results.results[i], app_config)
                             }
                         }
+                        if (app_config && app_config.public_pages && app_config.public_pages[options.page_name] && app_config.public_pages[options.page_name].header_map) {
+                            options.meta_tags = createHeaderTags(app_config.public_pages[options.page_name].header_map, results.results)
+                        } else {
+                            options.meta_tags =createHeaderTags(null,results.results)
+                        }
+
                         var html_file = (app_config && app_config.public_pages && app_config.public_pages[options.page_name] && app_config.public_pages[options.page_name].html_file)? app_config.public_pages[options.page_name].html_file: null;
                         if (!html_file) {
                             helpers.send_failure(res, helpers.error("file missing","html file missing - cannot generate page without file page_url 2 ("+html_file+")in app:"+options.app_name+" publc folder."), "public_handler", exports.version, "gotoShowInitialData" )
@@ -534,6 +542,13 @@ exports.generatePublicObjectPage = function (req, res) {
                             } catch (e) {
                                 options.page_html = "Error in processing mustached app html - "+JSON.stringify(e)+"</br>"+html_content
                             }
+                            
+                            if (app_config && app_config.public_pages && app_config.public_pages[options.page_name] && app_config.public_pages[options.page_name].header_map) {
+                                options.meta_tags = createHeaderTags(app_config.public_pages[options.page_name].header_map, [theObj])
+                            } else {
+                                options.meta_tags =createHeaderTags(null,[theObj])
+                            }
+
                             parse_attached_files(
                                 options, 
                                 page_params, 
@@ -811,7 +826,7 @@ exports.get_data_object= function(req, res) {
                 cb(app_err("no related records"))
             } else {
                 if (results.length>1) {
-                    console.log('MoreThanOneRecordRetrieved - SNBH')
+                    console.warn('MoreThanOneRecordRetrieved - SNBH')
                     flags.add('warnings','MoreThanOneRecordRetrieved - SNBH');
                 }
                 resulting_record = results[0];
@@ -873,7 +888,7 @@ exports.get_data_object= function(req, res) {
             }
         } else if (request_file){
             var filePath = "userfiles/"+parts[0]+"/"+req.params.requestee_app+"/"+unescape(parts.slice(1).join("/"));
-            if (flags.warnings) console.log("flags:"+JSON.stringify(flags))
+            if (flags.warnings) console.warn("flags:"+JSON.stringify(flags))
             file_handler.sendUserFile(res, filePath, req.freezr_environment );
         } else {
             var send_record = {};
@@ -996,6 +1011,20 @@ var recheckPermissionExists = function(permission_record, freezr_environment, ca
             }
         }
         return permission_record;
+    }
+    var createHeaderTags = function(header_map,results) {
+        // Creates header meta tags for the page - if more than one results is passed, only text fields will be used.
+        var headertext = (results && results[0] && results[0]._app_name)? '<meta name="application-name" content="'+results[0]._app_name+' - a freezr app" >':'';
+        if (header_map){
+            Object.keys(header_map).forEach(function(aHeader) {
+                var keyObj = header_map[aHeader];
+                if (keyObj.field_name && results && results[0] && results[0][keyObj.field_name]) {
+                    headertext+='<meta name="'+aHeader+'" content="'+(keyObj.text? (keyObj.text+" "):"")+results[0][keyObj.field_name]+'" >'
+                } else if (keyObj.text) {
+                    headertext+='<meta name="'+aHeader+'" content="'+keyObj.text+' - a freezr app" >'
+                }
+            })}
+        return headertext;
     }
 
 

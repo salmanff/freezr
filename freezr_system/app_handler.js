@@ -534,8 +534,8 @@ exports.putData = function (req, res){
             //onsole.log({final_object})
             if (final_object && final_object._id) returned_confirm_fields._id = final_object._id; // new document
             if (final_object && final_object._date_Created) returned_confirm_fields._date_Created = final_object._date_Created;
-            if (flags) console.warn("=== putData FLAGS === "+JSON.stringify(flags))
-            helpers.send_success(res, {'success':true, 'confirmed_fields':returned_confirm_fields,  'duplicated_file':fileParams.duplicated_file, 'flags':flags});
+            if (flags && flags.warnings) console.warn("=== putData FLAG WARNINGS === "+JSON.stringify(flags))
+            helpers.send_success(res, {"success":true, "error":null, "confirmed_fields":returned_confirm_fields,  'duplicated_file':fileParams.duplicated_file, 'flags':flags});
         }
     });
 }
@@ -1429,7 +1429,7 @@ exports.setObjectAccess = function (req, res) {
             console.warn(err)
             helpers.send_failure(res, err, "app_handler", exports.version, "setObjectAccess");
         } else { // sending back data_object_id
-            helpers.send_success(res, {'data_object_id':the_one_public_data_object[0]._id, '_publicid': (doGrant? accessibles_object_id: null),'accessibles_object_id':accessibles_object_id, '_date_Published':date_Published, 'grant':doGrant,'issues':issues, 'query_criteria':query_criteria, 'records_changed':records_changed});
+            helpers.send_success(res, {"data_object_id":the_one_public_data_object[0]._id, "_publicid": (doGrant? accessibles_object_id: null),'accessibles_object_id':accessibles_object_id, '_date_Published':date_Published, 'grant':doGrant,'issues':issues, 'query_criteria':query_criteria, 'records_changed':records_changed});
         }
     });
 }

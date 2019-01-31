@@ -43,17 +43,22 @@ const DEFAULT_PREFS={
     redirect_public:false,
     public_landing_page: ""
 };
-var freezr_secrets;
+var freezr_secrets = {params: {
+                        session_cookie_secret:null
+                     }};
 var freezr_environment, custom_file_environment;
 
-if (fs.existsSync(file_handler.systemPathTo("freezr_secrets.js"))) {
+
+function has_cookie_in_environment() {
+    return (process && process.env && process.env.COOKIE_SECRET);
+}
+if (has_cookie_in_environment()) {
+    freezr_secrets.params.session_cookie_secret = process.env.COOKIE_SECRET
+} else if (fs.existsSync(file_handler.systemPathTo("freezr_secrets.js"))) {
     freezr_secrets = require(file_handler.systemPathTo("freezr_secrets.js"))
-} else {
-    freezr_secrets = {
-        params:{
-            "session_cookie_secret":helpers.randomText(20)
-        }
-    }
+} 
+if (!freezr_secrets.params.session_cookie_secret) {
+    freezr_secrets.params.session_cookie_secret = helpers.randomText(20)
 }
 
 
@@ -318,7 +323,7 @@ function addVersionNumber(req, res, next) {
         });
         app.get('*', function (req, res) {
             helpers.log(req,"unknown url redirect: "+req.url)
-            visit_logger.record(req, freezr_prefs, {source:'ridirect'});
+            visit_logger.record(req, freezr_prefs, {source:'redirect'});
             //onsole.log("redirecting to account/login as default or for non logged in "+req.originalUrl);
             res.redirect( (req.session && req.session.logged_in)? "/account/home":getPublicUrlFromPrefs());
             res.end();
@@ -440,9 +445,10 @@ async.waterfall([
         }            
     }, 
     // Wrtie freezr secrets if doesnt exist
-    function (cb) { 
+    function (cb) {
         if (freezrStatus.can_write_to_system_folder && !fs.existsSync(file_handler.systemPathTo("freezr_secrets"))) {
-            fs.writeFile(file_handler.systemPathTo("freezr_secrets.js"), "exports.params=" + JSON.stringify(freezr_secrets.params), function(err) {
+            var file_text = has_cookie_in_environment()? "exports.params={}" : "exports.params=" + JSON.stringify(freezr_secrets.params);
+            fs.writeFile(file_handler.systemPathTo("freezr_secrets.js"), file_text, function(err) {
                 if(err) {
                     helpers.warning("server.js", exports.version, "startup_waterfall", "Stransge inconsistency writing files (freezr_secrets) onto server" )
                 } else {

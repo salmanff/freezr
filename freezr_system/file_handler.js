@@ -620,6 +620,7 @@ exports.load_page_html = function(res, opt) {
             var nonce = helpers.randomText(10)
             contents = contents.replace('{{FREEEZR-SCRIPT-NONCE}}', nonce);
             contents = contents.replace('{{FREEEZR-SCRIPT-NONCE}}', nonce); // 2nd instance
+            contents = contents.replace('{{META_TAGS}}', opt.meta_tags? opt.meta_tags: ''); 
 
             contents = contents.replace('{{HTML-BODY}}', opt.page_html? opt.page_html: "Page Not found");
 

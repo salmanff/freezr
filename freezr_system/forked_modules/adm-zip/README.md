@@ -1,4 +1,4 @@
-# ADM-ZIP for NodeJS
+# ADM-ZIP for NodeJS with added support for electron original-fs
 
 ADM-ZIP is a pure JavaScript implementation for zip data compression for [NodeJS](http://nodejs.org/). 
 
@@ -32,7 +32,7 @@ There are no other nodeJS libraries that ADM-ZIP is dependent of
 	zipEntries.forEach(function(zipEntry) {
 	    console.log(zipEntry.toString()); // outputs zip entries information
 		if (zipEntry.entryName == "my_file.txt") {
-		     console.log(zipEntry.data.toString('utf8')); 
+		     console.log(zipEntry.getData().toString('utf8')); 
 		}
 	});
 	// outputs the content of some_folder/my_file.txt
@@ -47,7 +47,8 @@ There are no other nodeJS libraries that ADM-ZIP is dependent of
 	var zip = new AdmZip();
 	
 	// add file directly
-	zip.addFile("test.txt", new Buffer("inner content of the file"), "entry comment goes here");
+	var content = "inner content of the file";
+	zip.addFile("test.txt", Buffer.alloc(content.length, content), "entry comment goes here");
 	// add local file
 	zip.addLocalFile("/home/me/some_picture.png");
 	// get everything as a buffer

@@ -8,7 +8,8 @@ var allLogs = {},
     allDatesList = [],
     shownData = {
       last_date: new Date(),
-    };
+    },
+    detailShown = {};
 
 const MAX_COLS = 7;
 
@@ -19,17 +20,17 @@ freezr.initPageScripts = function() {
       runQuery();
     }
     if(evt.target.id=="next_week") {
-      console.log("pressed next "+shownData.last_date)
       shownData.last_date = new Date(shownData.last_date.setDate(shownData.last_date.getDate() + MAX_COLS)); 
-      console.log("post change "+shownData.last_date)
       runQuery();
     }
     if (startsWith(evt.target.id,"showdetail")) {
-      wotToDo = (evt.target.className == "detailHidden")? "table-row":"none";
-      let els = document.getElementsByClassName("row_"+evt.target.id.split("_")[1]);
+      let wotToDo = (evt.target.className == "detailHidden")? "table-row":"none";
+      let splits = evt.target.id.split("_")
+      let rowToShowHide = "row_"+splits[1]+"_"+splits[2]+(splits.length>3?("_"+splits[3]):"");
+      detailShown[rowToShowHide] = (evt.target.className == "detailHidden")?true:false;
+      let els = document.getElementsByClassName(rowToShowHide);
       Array.prototype.forEach.call(els, function(anEl) {
          anEl.style.display=wotToDo
-        console.log(anEl)
       })
       evt.target.className = (evt.target.className == "detailHidden"? "detailShown":"detailHidden")
     }
@@ -48,7 +49,7 @@ var runQuery = function(options) {
   options.sort ={'_date_Modified': -1}
   options.count=MAX_COLS;
   freezr.db.query(options, function(ret){
-    console.log(ret);
+    //onsole.log(ret);
     ret = JSON.parse(ret)
     ret.results.forEach((anItem) => {
       allLogs[anItem._id] = anItem;  
@@ -60,7 +61,7 @@ var runQuery = function(options) {
 }
 
 
-let mainCellOptions = {showNullAsDash:true, ignoreEmptyRows:true, cellClass:'midnum'};
+let mainCellOptions = {showNullAsDash:true, ignoreEmptyRows:true, cellClass:'midnum', titleClass:'rowtitle'};
 var showTable = function(headers) {
   var theTable = document.getElementById('mainTable');
   if (allDatesList.length==0) {
@@ -92,6 +93,9 @@ var showTable = function(headers) {
     drawList('users', 'Users', 'logged_in', theBody, headers);
     drawList('apps', 'Applications', 'logged_in', theBody, headers);
     drawList('visitIps', 'IPs (logged in)', 'logged_in', theBody, headers);
+    drawList('pages', 'Pages', 'logged_in', theBody, headers);
+    drawList('someUnauthUrls', 'Unauthorized URLs', 'logged_in', theBody, headers);
+    drawList('pageRefs', 'Page references', 'logged_in', theBody, headers);
   
     makeRow(theBody, 'Anonymous / Public Visits',null,headers, {showNullAsDash:false, ignoreEmptyRows:false, titleClass:'bigtitle'})
     makeRow(theBody, ' Public Page Views',['anon','numppage'],headers, mainCellOptions)
@@ -104,6 +108,10 @@ var showTable = function(headers) {
   
     drawList('visitIps', 'IPs (public)', 'anon', theBody, headers);
     drawList('apps', 'Applications', 'anon', theBody, headers);
+    drawList('pages', 'Pages', 'anon', theBody, headers);
+    drawList('someUnauthUrls', 'Unauthorized URLs', 'anon', theBody, headers);
+    drawList('pageRefs', 'page references', 'anon', theBody, headers);
+
   }
 
 }
@@ -135,28 +143,29 @@ var valueInJSON = function(obj, keys) {
   return valueInJSON(obj[lastKey], keys.slice(1) )
 }
 var drawList = function(listKey, title, user_type, parent, headers){
-  makeRow(parent, title+'<span class="detailHidden" id="showdetail_'+listKey+'"> details</span>',null,headers, {showNullAsDash:false, ignoreEmptyRows:false, titleClass:'listTitle'})
+  let rowname = 'row_'+listKey+'_'+user_type;
+  let showClass = detailShown[rowname]? "detailShown" :"detailHidden"
+  let titleRow = makeRow(parent, title+'<span class= "'+showClass+'" id="showdetail_'+listKey+'_'+user_type+'"> details</span>',null,headers, {showNullAsDash:false, ignoreEmptyRows:false, titleClass:'listTitle'})
   let keyList = [], keyCount ={};
-  console.log("Enumerating")
   headers.forEach((aHeader) => {
     if (allLogs[aHeader] && allLogs[aHeader][user_type]&& allLogs[aHeader][user_type][listKey]){
       Object.keys(allLogs[aHeader][user_type][listKey]).forEach(aKey => {
-        console.log(aHeader,user_type,listKey, aKey, allLogs[aHeader][user_type][listKey][aKey], allLogs[aHeader][user_type][listKey])
+        //onsole.log(aHeader,user_type,listKey, aKey, allLogs[aHeader][user_type][listKey][aKey], allLogs[aHeader][user_type][listKey])
         keyList = addToListAsUnique(keyList,aKey);
         keyCount[aKey] = keyCount[aKey]? (keyCount[aKey]+(allLogs[aHeader][user_type][listKey][aKey] || 0)) : (allLogs[aHeader][user_type][listKey][aKey] || 0);
-        console.log("keyCount for "+aKey+" now "+keyCount[aKey] )
       })
     }
   })
   var keyListSorter = function (key1, key2) {return ((keyCount[key2]||0) - (keyCount[key1]||0))}
   keyList.sort(keyListSorter)
-  console.log("keyList")
-  console.log(keyList)
+  exists = false
   keyList.forEach((aKey) => {
+    exists = true;
     let theRow = makeRow(parent, aKey,[user_type,listKey,aKey],headers, mainCellOptions);
-    theRow.className = 'row_'+listKey;
-    theRow.style.display="none";
+    theRow.className = rowname;
+    theRow.style.display= detailShown[rowname]? "table-row":"none";
   })
+  if (!exists) titleRow.style.display="none"
 }
 
 

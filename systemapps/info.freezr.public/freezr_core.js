@@ -114,7 +114,6 @@ freezr.db.publicquery = function(options, callback) {
   freezer_restricted.connect.send(url, JSON.stringify(options), callback, 'POST', 'application/json');
 }
 
-
 // Permissions and file permissions
 freezr.perms.getAllAppPermissions = function(callback) {
   // gets a list of permissions granted - this is mainly called on my freezr_core, but can also be accessed by apps
@@ -194,6 +193,25 @@ freezr.perms.allFieldsIHaveAccessTo = function(options , callback) {
 }
 
 
+// PROMISES create freezr.promise based on above
+freezr.promise= {db:{},perms:{}}
+Object.keys(freezr.db     ).forEach(aFunc => freezr.promise.db[aFunc]   =null)
+Object.keys(freezr.perms  ).forEach(aFunc => freezr.promise.perms[aFunc]=null)
+Object.keys(freezr.promise).forEach(typeO => {
+  Object.keys(freezr.promise[typeO]).forEach(function(freezrfunc) {
+     freezr.promise[typeO][freezrfunc] = function() {
+      var args = Array.prototype.slice.call(arguments);
+      return new Promise(function (resolve, reject) {
+        args.push(function(resp) {
+          resp=freezr.utils.parse(resp);
+          if (!resp || resp.error) {reject(resp);} else { resolve(resp)}
+        })
+        freezr[typeO][freezrfunc](...args)
+      });
+     }
+  });
+});
+freepr = freezr.promise;
 // UTILITY Functions
 freezr.utils.updateFileList = function(folder_name, callback) {// Currently NOT FUNCTIONAL
   // This is for developers mainly. If files have been added to a folder manually, this function reads all the files and records them in the db
@@ -394,10 +412,10 @@ freezer_restricted.permissions= {};
               if (this.status == 200 || this.status == 0) {
     				    callback(jsonResponse); 
         			} else if (this.status == 400) {
-        				callback({'error':((jsonResponse.type)? jsonResponse.type: 'Connection error 400'),'message':'Error 400 connecting to the server'});
+        				callback({'error':((jsonResponse.type)? jsonResponse.type: 'Connection error 400'),'message':'Error 400 connecting to the server', "errorCode":"noServer"});
         			} else {
                 if (this.status == 401 && !freezr.app.isWebBased) {freezr.app.offlineCredentialsExpired = true; }
-        				callback({'error':"unknown error from freezr server","status":this.status});
+        				callback({'error':"unknown error from freezr server","status":this.status, "errorCode":"noServer"});
         			}         
             } 
         };

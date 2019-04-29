@@ -5,7 +5,7 @@ freezr.initPageScripts = function() {
   }
   freezr.utils.getAllAppList(function(allApps) {
     if (allApps) allApps = freezr.utils.parse(allApps);
-    console.log(allApps.user_apps)
+    //onsole.log(allApps.user_apps)
     oldChoice = document.getElementById("oldChoice").innerHTML;
     if (allApps.user_apps && allApps.user_apps.length>0) {
       allApps.user_apps.forEach(anAppObj => {
@@ -30,7 +30,7 @@ freezr.initPageScripts = function() {
                         redirect_public:document.getElementById("redirectPublicId").checked,
                         public_landing_page: document.getElementById("defaultPublicAppId").value
                       };
-                      console.log(theInfo)
+                      //onsole.log(theInfo)
         freezer_restricted.connect.write("/v1/admin/change_main_prefs", theInfo, gotChangeStatus, "jsonString");
       }
 
@@ -39,7 +39,6 @@ freezr.initPageScripts = function() {
 
 var gotChangeStatus = function(data) {
   if (data) data = freezr.utils.parse(data);
-  console.log("gotChangeStatus "+JSON.stringify(data));
   if (!data) {
     showError("Could not connect to server");
   } else if (data.error) {

@@ -16,6 +16,11 @@
 .midnum {
 	text-align: center;
 }
+.rowtitle {
+	max-width: 150px;
+	white-space:nowrap;	
+	overflow-x: scroll;
+}
 .red {
 	color: red;
 }

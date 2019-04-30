@@ -1,0 +1,5 @@
+{
+  "name": "freezr server",
+  "description": "Reference implementation of a freezr server",
+  "repository": "https://github.com/salmanff/freezr",
+}

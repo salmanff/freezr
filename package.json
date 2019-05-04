@@ -4,7 +4,7 @@
   "version": "0.0.1",
   "private": true,
   "dependencies": {
-    "adm-zip": "0.x",
+    "adm-zip": ">=0.4.11",
     "async": "2.x.x",
     "bcryptjs": "2.x",
     "body-parser": "1.x",

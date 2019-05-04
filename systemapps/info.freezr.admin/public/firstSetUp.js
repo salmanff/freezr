@@ -67,7 +67,7 @@ freezr.initPageScripts = function() {
       db_has_pw: freezr_environment.dbParams.has_password,
       db_unifiedDbName: (freezr_environment.dbParams.unifiedDbName? freezr_environment.dbParams.unifiedDbName : ""),
       fs_selectorName: (freezr_environment.userDirParams.name? freezr_environment.userDirParams.name : "local"),
-      fs_auth_Server: 'https://salmanff.com',
+      fs_auth_Server: 'https://www.salmanff.com',
       fs_auth_AppName: 'freezr'
     }
   };

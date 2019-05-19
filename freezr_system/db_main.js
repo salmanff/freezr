@@ -21,6 +21,7 @@ exports.dbConnectionString = function(appName) {
         if (freezr_environment.dbParams.connectionString) {
             return freezr_environment.dbParams.connectionString
         } else {
+            connectionString+= 'mongodb://'
             if (freezr_environment.dbParams.user) connectionString+= freezr_environment.dbParams.user + ":"+freezr_environment.dbParams.pass + "@"
             connectionString += freezr_environment.dbParams.host + (freezr_environment.dbParams.host=="localhost"? "" : (":"+freezr_environment.dbParams.port) )
             connectionString += "/"+ ((freezr_environment.dbParams && freezr_environment.dbParams.unifiedDbName)? freezr_environment.dbParams.unifiedDbName:appName)  +(freezr_environment.dbParams.addAuth? '?authSource=admin':'');
@@ -71,7 +72,7 @@ exports.check_db = function (callback) {
     async.waterfall([        
         // 1. open database connection
         function (cb) {
-            MongoClient.connect('mongodb://'+exports.dbConnectionString('info_freezer_admin'), cb);
+            MongoClient.connect(exports.dbConnectionString('info_freezer_admin'), cb);
         },
 
         // 2. create collections for users, installed_app_list, user_installed_app_list, user_devices, permissions.
@@ -104,7 +105,7 @@ exports.getOrSetPrefs = function (prefName, prefsToSet, doSet, callback) {
     async.waterfall([        
         // 1. open database connection
         function (cb) {
-            MongoClient.connect('mongodb://'+exports.dbConnectionString('info_freezer_admin'), cb);
+            MongoClient.connect(exports.dbConnectionString('info_freezer_admin'), cb);
         },
 
         // 2. create collections for users, installed_app_list, user_installed_app_list, user_devices, permissions.
@@ -150,7 +151,7 @@ exports.get_coll = function (app_name, collection_name, callback) {
         // 1. open database connection
         function (cb) {
             app_name=app_name.replace(/\./g,"_");
-            MongoClient.connect('mongodb://'+exports.dbConnectionString(app_name), cb);
+            MongoClient.connect(exports.dbConnectionString(app_name), cb);
         },
 
         // 2. create collections for users, installed_app_list, user_installed_app_list, user_devices, permissions.
@@ -171,7 +172,7 @@ exports.write_environment = function (env, callback) {
     async.waterfall([        
         // 1. open database connection
         function (cb) {
-            MongoClient.connect('mongodb://'+exports.dbConnectionString('info_freezer_admin'), cb);
+            MongoClient.connect(exports.dbConnectionString('info_freezer_admin'), cb);
         },
 
         // 2. create collections for users, installed_app_list, user_installed_app_list, user_devices, permissions.
@@ -197,7 +198,8 @@ exports.init_admin_db = function (callback) {
     async.waterfall([        
         // 1. open database connection
         function (cb) {
-            MongoClient.connect('mongodb://'+exports.dbConnectionString('info_freezer_admin'), cb);
+            var connectionString = freezr_environment.dbParams.connectionString || exports.dbConnectionString('info_freezer_admin')
+            MongoClient.connect(exports.dbConnectionString('info_freezer_admin'), cb);
         },
 
         // 2. create collections for users, installed_app_list, user_installed_app_list, user_devices, permissions.
@@ -260,7 +262,7 @@ exports.app_db_collection_get = function (app_name, collection_name, firstpass, 
             } else if (running_apps_db[app_name].db) {
                 cb(null, null);
             } else {
-                MongoClient.connect('mongodb://'+exports.dbConnectionString(app_name), cb);
+                MongoClient.connect(exports.dbConnectionString(app_name), cb);
            }
         },
 
@@ -286,7 +288,7 @@ exports.app_db_collection_get = function (app_name, collection_name, firstpass, 
     function (err) {
         if (err) {
             running_apps_db[app_name].collections[collection_name] = null;
-            if (firstpass) {
+            if (firstpass && running_apps_db[app_name].db) {
                 helpers.warning ("db_main", exports.version, "app_db_collection_get", "first pass error getting collection - "+err );
                 running_apps_db[app_name].db.close(function(err2) {
                     if (err2) {
@@ -295,6 +297,8 @@ exports.app_db_collection_get = function (app_name, collection_name, firstpass, 
                     running_apps_db[app_name].db = null;
                     exports.app_db_collection_get(app_name, collection_name, false, callback);
                 });
+            } else if (firstpass) {
+                callback(helpers.internal_error("db_main", exports.version, "app_db_collection_get", "No db collection exists yet "+collection_name+" ("+app_name+") - "+err ));                
             } else if (running_apps_db[app_name].db) {
                 callback(helpers.internal_error("db_main", exports.version, "app_db_collection_get", "second pass error getting collection (exists) "+collection_name+" ("+app_name+") - "+err ));
             } else {
@@ -320,7 +324,7 @@ exports.getAllCollectionNames = function(app_name, callback) {
             } else if (freezr_environment.dbParams.unifiedDbName && unifiedDb) {
                 cb(null, null);
             } else {
-                MongoClient.connect('mongodb://'+exports.dbConnectionString(app_name), cb);
+                MongoClient.connect(exports.dbConnectionString(app_name), cb);
            }
         },
 

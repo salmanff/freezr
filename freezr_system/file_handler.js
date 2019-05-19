@@ -256,7 +256,7 @@ exports.checkExistsOrCreateUserAppFolder = function (app_name, env_params, callb
     if (useCustomEnvironment(env_params, app_name) ) {
         custom_environment.checkExistsOrCreateUserAppFolder(app_name, env_params, callback);
     } else {
-        var app_path = exports.fullPathToUserLocalAppFiles(app_name, null);
+        var app_path = exports.partPathToAppFiles(app_name, null);
         localCheckExistsOrCreateUserFolder(app_path, callback);
     }
 }

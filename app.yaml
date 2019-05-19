@@ -1,0 +1,9 @@
+#	
+#	freezr
+#	This file is used for Google App Engine Deployments
+#	
+#	
+#	
+# [START runtime]
+runtime: nodejs10
+# [END runtime]

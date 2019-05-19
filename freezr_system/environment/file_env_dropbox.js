@@ -12,7 +12,17 @@ var Dropbox = require('dropbox'),
     fs = require('fs'), path = require('path'), // for cached app files
     json = require('comment-json');
 
-exports.version = "0.0.122";
+exports.version = "0.0.123";
+
+/*  
+
+custom_environment should have the following functions for a db: TBCompleted
+
+
+
+*/
+
+
 
 var dbx = null;
 
@@ -25,14 +35,9 @@ exports.customDb    = function(app_name) {return false}
 
 
 var useAppFileFSCache = function() {
-	// todo - set to false base don user_prefs and ability to write to server 
+	// todo - set to false based on user_prefs and ability to write to server 
 	return true;
 }
-/*  
-custom_environment should have the following functions for a db: TBCompleted
-
-*/
-
 
 exports.init_custom_env = function(env_params, callback)  {
 	console.log("     Initialising custom environment for dropbox - dbx (NOTE - NODE 4.x + NEEDED TO RUN THIS.) ")
@@ -54,22 +59,17 @@ exports.sendAppFile = function(res, filePath, env_params) {
 	if (!dbx) exports.init_custom_env(env_params);
 	//onsole.log("sending app file "+filePath)
     if (useAppFileFSCache() && fs.existsSync(systemPathTo (filePath))) {
-    	//onsole.log("SENDING Cached version")
+    	//onsole.log("SENDING Cached version "+filePath)
     	res.sendFile(systemPathTo(filePath));
     } else {
     	dbx.filesGetTemporaryLink({path: "/"+filePath})
 		.then( response => https.get(response.link, secondRes => {
 			secondRes.pipe(res);
-			var pathOnly = filePath.split("/");
-			if (useAppFileFSCache() && pathOnly.length>0){
-		  	   	//onsole.log("Going to FScache the file on node server;");
-		      	pathOnly.pop();
-		      	// Note - async version of mkdir loses pipe so need to use sync
-		      	localCheckExistsOrCreateUserFolderSync(pathOnly.join(path.sep) )
+		    localCheckExistsOrCreateUserFolderSync(pathOnly(filePath) )
 		  	var myFile = fs.createWriteStream(systemPathTo(filePath));
 			secondRes.pipe(myFile);
-				return;
-			} else {return;}
+		    FILE_CACHE[filePath] = {'access_date' : new Date().getTime(), 'isFile':true};
+			if (Object.keys(FILE_CACHE).length > MAX_LEN_FILE_CACHE) reduce_file_cache_items();
 		}) )
 		.catch(error => {
 			console.warn("err in send app file",error)
@@ -82,9 +82,8 @@ exports.sendAppFile = function(res, filePath, env_params) {
 		}
 		res.sendStatus(401);
 		});
-	}
-    
-} 
+	} 
+}
 
 exports.writeUserFile = function (folderPartPath, fileName, saveOptions, data_model, req, callback) { 
 	//onsole.log("writeUserFile",folderPartPath)
@@ -106,6 +105,19 @@ exports.writeUserFile = function (folderPartPath, fileName, saveOptions, data_mo
 	dbx.filesUpload(uploadparams)
 	    .then(response => {
 	    	callback(null, response.name)
+	    	if (useAppFileFSCache()) {
+				localCheckExistsOrCreateUserFolderSync(folderPartPath);
+		        fs.writeFile(fullLocalPathToUserFiles(folderPartPath, response.name), req.file.buffer, function(err) {
+	            	if (err) {
+	            		helpers.warning("file_env_dropbox.js", exports.version, "writeUserFile", "error writing file for cache  "+filePath);
+	            	} else {
+		            	filePath = (folderPartPath? ("/"+folderPartPath):"")+response.name
+		            	FILE_CACHE[filePath] = {'access_date' : new Date().getTime(), 'isFile':true};
+						if (Object.keys(FILE_CACHE).length > MAX_LEN_FILE_CACHE) reduce_file_cache_items();
+		            }
+	            });
+
+        	}
 	    } )
         .catch(function(error) {
           	var errparse = {};
@@ -119,6 +131,7 @@ exports.writeUserFile = function (folderPartPath, fileName, saveOptions, data_mo
           		error = helpers.state_error ("file_env_dropbox", exports.version, "writeUserFile", error,"dropbox_write_error");
           	}
           	callback(error, null) //, callback)
+
         });	
 }
 exports.writeTextToUserFile = function (folderPartPath, fileName, fileText, saveOptions, data_model, app_name, freezr_environment, callback) { 
@@ -195,13 +208,25 @@ exports.clearFSAppCache = function (app_name, env_params, callback) {
 
 exports.sendUserFile = function(res, filePath, env_params) {
 	if (!dbx) exports.init_custom_env(env_params);
-	//onsole.log("SENDING USER FILE "+filePath)
-	dbx.filesGetTemporaryLink({path: "/"+filePath})
-		.then(response => https.get(response.link, secondRes => secondRes.pipe(res)) )
-		.catch(error => {
-		  	helpers.warning("file_env_dropbox.js", exports.version, "sendUserFile", "Missing file:  "+filePath);
-		    res.sendStatus(401);
-		});	
+    if (useAppFileFSCache() && fs.existsSync(systemPathTo (filePath))) {
+    	res.sendFile(systemPathTo(filePath));
+    } else {
+		dbx.filesGetTemporaryLink({path: "/"+filePath})
+			.then( response => https.get(response.link, secondRes => {
+				secondRes.pipe(res);
+				if (useAppFileFSCache()) {
+					localCheckExistsOrCreateUserFolderSync(pathOnly(filePath) )
+					var myFile = fs.createWriteStream(systemPathTo( filePath ));
+					secondRes.pipe(myFile)
+				    FILE_CACHE[filePath] = {'access_date' : new Date().getTime(), 'isFile':true};
+					if (Object.keys(FILE_CACHE).length > MAX_LEN_FILE_CACHE) reduce_file_cache_items();
+				}
+			}) )
+			.catch(error => {
+			  	helpers.warning("file_env_dropbox.js", exports.version, "sendUserFile", "Missing file:  "+filePath);
+			    res.sendStatus(401);
+			});	
+	}
 }
 exports.get_file_content = function(filePath, env_params, callback) {
 	//onsole.log("get_file_content for "+filePath)
@@ -218,20 +243,20 @@ exports.get_file_content = function(filePath, env_params, callback) {
 		//onsole.log("checling for fscache "+filePath+" exists? "+fs.existsSync(systemPathTo (filePath)) )
 	 	if (useAppFileFSCache() && fs.existsSync(systemPathTo (filePath))) {
 	    	fs.readFile(systemPathTo( filePath ), 'utf8', (err, html_content) => { 
-				if (!err) FILE_CACHE[filePath] = {content: html_content, 'access_date' : new Date().getTime()} 
+				if (!err) FILE_CACHE[filePath] = {content: html_content, 'access_date' : new Date().getTime(), 'isFile':false} 
 				callback(err, html_content) 
 			})
 	    } else {
 			dbx.filesDownload({path: filePath})
 			.then(response => {
-				FILE_CACHE[filePath] = {content: response.fileBinary, 'access_date' : new Date().getTime()};
+				FILE_CACHE[filePath] = {content: response.fileBinary, 'access_date' : new Date().getTime(), 'isFile':false};
 				callback(null, response.fileBinary) 
 			})
 			.catch(error => {
 				var errparse = JSON.parse(error.error);
 				if (errparse && errparse.error_summary && helpers.startsWith(errparse.error_summary, 'path/not_found') ){
 					console.warn("errparse.error_summary",errparse.error_summary)
-					FILE_CACHE[filePath] = {content: '', 'access_date' : new Date().getTime()};
+					FILE_CACHE[filePath] = {content: '', 'access_date' : new Date().getTime(), 'isFile':false};
 					callback(helpers.error("file_not_found","Could not get content for inexistant file at "+filePath) ,null)
 				} else {
 					helpers.warning("file_env_dropbox.js", exports.version, "get_file_content", "Could not get file content for  "+filePath);
@@ -433,13 +458,24 @@ exports.deleteAppFolderAndContents = function(app_name, env_params, callback){
 }
 
 var reduce_file_cache_items = function() {
-    var list = [];
-    for (item in FILE_CACHE) { if (FILE_CACHE.hasOwnProperty(item)) {list.push({filePath:item, access_date: FILE_CACHE[item].access_date})} }
+	// todo - change to make it based on actual size of files, not number of files
+	var list = [];
+    for (item in FILE_CACHE) { if (FILE_CACHE.hasOwnProperty(item)) {list.push({filePath:item, access_date: FILE_CACHE[item].access_date, isFile:FILE_CACHE[item].isFile})} }
     var date_sort = function (obj1,obj2) { return obj1.access_date -obj2.access_date }
     list.sort(date_sort);
-    const reduce_by = 0.2;
+    const reduce_by = 0.3;
     const reduce_by_num = Math.round(reduce_by*MAX_LEN_FILE_CACHE)
-    for (var i= 0; i<reduce_by_num; i++) {delete FILE_CACHE[list[i].filePath]; }
+    for (var i= 0; i<reduce_by_num; i++) {
+    	if (list[i].isFile && fs.existsSync(systemPathTo (list[i].filePath))) {
+	    	fs.unlink(list[i].filePath, (err) => {
+			  if (err) {
+			    console.error(err)
+			    return
+			  }
+			})
+	    }
+    	delete FILE_CACHE[list[i].filePath]; 
+    }
 }
 
 
@@ -460,6 +496,12 @@ var removeStartAndEndSlashes = function(aUrl) {
 	if (helpers.startsWith(aUrl,"/")) aUrl = aUrl.slice(1);
 	if (aUrl.slice(aUrl.length-1) == "/") aUrl = aUrl.slice(0,aUrl.length-1);
 	return aUrl;
+}
+var fullLocalPathToUserFiles = function(targetFolder, fileName) {
+	// target flder format and rights must have been valdiated.. ie starts with userfiles / user name / app name
+	//onsole.log("fullLocalPathToUserFiles  "+targetFolder+" file:"+fileName+" freezr_environment"+JSON.stringify(freezr_environment));
+    var partialUrl = removeStartAndEndSlashes(targetFolder) + (fileName? path.sep+fileName: '');
+	return path.normalize(systemPath() + path.sep + partialUrl )
 }
 var localCheckExistsOrCreateUserFolderSync = function (aPath) {
 	/*
@@ -500,6 +542,14 @@ var localCheckExistsOrCreateUserFolderSync = function (aPath) {
     	};
     }
 }
+var pathOnly = function (aFilePath)  {
+	var thePath = aFilePath.split(path.sep)
+	if (thePath.length>1) { 
+		thePath.pop();
+		return thePath.join(path.sep)
+	} else {return "/"}
+}
+
 
 // delete FILE_CACHE[list[i].filePath];
 var deleteLocalFolderAndCacheAndContents = function(app_name, subfolders, next) {

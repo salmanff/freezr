@@ -259,7 +259,7 @@ exports.first_registration = function (req, callback) {
 
             // File sys
             function (cb) { 
-                file_handler.resetFreezrEnvironment(temp_environment);
+                file_handler.reset_freezr_environment(temp_environment);
                 file_handler.init_custom_env(temp_environment, cb);
             },
             function (cb) { 
@@ -268,7 +268,7 @@ exports.first_registration = function (req, callback) {
                     if(err) { 
                         // reset original parameters
                         temp_environment.userDirParams = req.freezr_environment.userDirParams;
-                        file_handler.resetFreezrEnvironment(temp_environment);
+                        file_handler.reset_freezr_environment(temp_environment);
                         file_handler.init_custom_env(temp_environment, function() {
                             helpers.warning("admin_handler", exports.version,"first_registration","failure to write to user folder - "+err);                            
                             cb(null)
@@ -283,7 +283,7 @@ exports.first_registration = function (req, callback) {
 
             // db set up and check
             function (cb) {
-                freezr_db.resetFreezrEnvironment(temp_environment);
+                freezr_db.reset_freezr_environment(temp_environment);
 
                 //onsole.log("set env : "+JSON.stringify(temp_environment))
                 freezr_db.init_admin_db(function (err, results) { // in case it has not been inited (and to make sure it exists)
@@ -292,7 +292,7 @@ exports.first_registration = function (req, callback) {
                         freezr_db.set_and_nulify_environment(req.freezr_environment);
                         temp_status.can_read_write_to_db = false;
                         temp_environment.userDirParams = req.freezr_environment.userDirParams;
-                        file_handler.resetFreezrEnvironment(temp_environment);
+                        file_handler.reset_freezr_environment(temp_environment);
                         file_handler.init_custom_env(temp_environment, function(err2) {
                             cb(helpers.state_error("admin_handler", exports.version,"first_registration",helpers.error("db_write_error","Failure initialising database ("+err.message+")"),"db_write_error") );
                         });
@@ -311,7 +311,7 @@ exports.first_registration = function (req, callback) {
                         freezr_db.set_and_nulify_environment(temp_environment);
                         temp_status.can_read_write_to_db = false;
                         temp_environment.userDirParams = req.freezr_environment.userDirParams;
-                        file_handler.resetFreezrEnvironment(temp_environment);
+                        file_handler.reset_freezr_environment(temp_environment);
                         file_handler.init_custom_env(temp_environment, function(err2) {
                             cb(helpers.state_error("admin_handler", exports.version,"first_registration",helpers.error("db_error", "Failure to get the users  data-base  ("+JSON.stringify(err)+")" ),"db_error") );
                         });

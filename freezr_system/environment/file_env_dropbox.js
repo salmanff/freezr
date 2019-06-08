@@ -5,16 +5,16 @@
 
 // custom environment for dropbox
 
-var Dropbox = require('dropbox'), 
+var Dropbox = require('dropbox'),
 	https = require('https'),
-    async = require('async'), 
-    helpers = require('../helpers.js'), 
+    async = require('async'),
+    helpers = require('../helpers.js'),
     fs = require('fs'), path = require('path'), // for cached app files
     json = require('comment-json');
 
 exports.version = "0.0.123";
 
-/*  
+/*
 
 custom_environment should have the following functions for a db: TBCompleted
 
@@ -30,12 +30,12 @@ var FILE_CACHE = {}
 var MAX_LEN_FILE_CACHE = 100;
 exports.use = true;
 
-exports.customFiles = function(app_name) {return true} 
-exports.customDb    = function(app_name) {return false} 
+exports.customFiles = function(app_name) {return true}
+exports.customDb    = function(app_name) {return false}
 
 
 var useAppFileFSCache = function() {
-	// todo - set to false based on user_prefs and ability to write to server 
+	// todo - set to false based on user_prefs and ability to write to server
 	return true;
 }
 
@@ -43,7 +43,7 @@ exports.init_custom_env = function(env_params, callback)  {
 	console.log("     Initialising custom environment for dropbox - dbx (NOTE - NODE 4.x + NEEDED TO RUN THIS.) ")
 	var userDirParams = (env_params && env_params.userDirParams)? env_params.userDirParams: null;
 	var access_token = (env_params && env_params.userDirParams && env_params.userDirParams.access_token)? env_params.userDirParams.access_token: null;
-	if (!access_token) {					
+	if (!access_token) {
 		callback(helpers.auth_failure("file_env_dropbox.js", exports.version, "init_custom_env", "Could not initialise custom environment with dropbox - no access token ","missing_access_token_dropbox" ) );
 	} else {
 		dbx = new Dropbox({ accessToken: access_token });
@@ -82,16 +82,16 @@ exports.sendAppFile = function(res, filePath, env_params) {
 		}
 		res.sendStatus(401);
 		});
-	} 
+	}
 }
 
-exports.writeUserFile = function (folderPartPath, fileName, saveOptions, data_model, req, callback) { 
+exports.writeUserFile = function (folderPartPath, fileName, saveOptions, data_model, req, callback) {
 	//onsole.log("writeUserFile",folderPartPath)
 	// Used for userapps and userfiles
 
 	if (!dbx) exports.init_custom_env(req.freezr_environment);
 	var filePath = (folderPartPath? ("/"+folderPartPath):"")+(fileName? ("/"+fileName) : "");
-	
+
 	var uploadparams = {path: filePath , contents:req.file.buffer };
 	if (saveOptions && saveOptions.fileOverWrite ) {
 		uploadparams.mode = "overwrite";
@@ -105,7 +105,7 @@ exports.writeUserFile = function (folderPartPath, fileName, saveOptions, data_mo
 	dbx.filesUpload(uploadparams)
 	    .then(response => {
 	    	callback(null, response.name)
-	    	if (useAppFileFSCache()) {
+	    	if (!saveOptions.doNotWriteToCache && useAppFileFSCache()) {
 				localCheckExistsOrCreateUserFolderSync(folderPartPath);
 		        fs.writeFile(fullLocalPathToUserFiles(folderPartPath, response.name), req.file.buffer, function(err) {
 	            	if (err) {
@@ -132,9 +132,9 @@ exports.writeUserFile = function (folderPartPath, fileName, saveOptions, data_mo
           	}
           	callback(error, null) //, callback)
 
-        });	
+        });
 }
-exports.writeTextToUserFile = function (folderPartPath, fileName, fileText, saveOptions, data_model, app_name, freezr_environment, callback) { 
+exports.writeTextToUserFile = function (folderPartPath, fileName, fileText, saveOptions, data_model, app_name, freezr_environment, callback) {
 	//onsole.log("writeUserFile",folderPartPath)
 	// Used for userapps and userfiles
 
@@ -142,7 +142,7 @@ exports.writeTextToUserFile = function (folderPartPath, fileName, fileText, save
 	var filePath = (folderPartPath? ("/"+folderPartPath):"")+(fileName? ("/"+fileName) : "");
 
 	var fileBuffer =  fileText;
-	
+
 	var uploadparams = {path: filePath , contents:fileBuffer };
 	if (saveOptions && saveOptions.fileOverWrite ) {
 		uploadparams.mode = "overwrite";
@@ -167,7 +167,7 @@ exports.writeTextToUserFile = function (folderPartPath, fileName, fileText, save
           		error = helpers.state_error ("file_env_dropbox", exports.version, "writeUserFile", error,"dropbox_write_error");
           	}
           	callback(error, null);
-        });	
+        });
 }
 
 exports.checkExistsOrCreateUserAppFolder = function (app_name, env_params, callback) {
@@ -179,17 +179,17 @@ exports.checkExistsOrCreateUserAppFolder = function (app_name, env_params, callb
 		    	var app_path = "userapps"+path.sep+app_name;
 	        	localCheckExistsOrCreateUserFolderSync(systemPathTo(app_path));
 	        }
-	    	callback(null) 
+	    	callback(null)
 	    } )
         .catch( error => {
           	if (error && error.error && error.error.error_summary && error.error.error_summary.indexOf( "conflict")>0 ) {
           		//onsole.log("checkExistsOrCreateUserAppFolder - FILE ALREADY EXSITS "+filePath+" - ignore error");
           		error=null;
           	} else {
-          		helpers.state_error ("file_env_dropbox", exports.version, "checkExistsOrCreateUserAppFolder", error, "unown_error_making_directors" ) 
+          		helpers.state_error ("file_env_dropbox", exports.version, "checkExistsOrCreateUserAppFolder", error, "unown_error_making_directors" )
           	}
           	callback(error)
-        });	
+        });
 }
 
 exports.clearFSAppCache = function (app_name, env_params, callback) {
@@ -199,8 +199,8 @@ exports.clearFSAppCache = function (app_name, env_params, callback) {
                 // ignores err of removing directories - todo shouldflag
                 if (err) console.warn("ignoring ERROR in removing app files for "+app_name+ "err:"+err);
                 callback(null)
-            });        // from http://stackoverflow.com/questions/18052762/in-node-js-how-to-remove-the-directory-which-is-not-empty		
-	} else {    
+            });        // from http://stackoverflow.com/questions/18052762/in-node-js-how-to-remove-the-directory-which-is-not-empty
+	} else {
         callback(null);
 	}
 }
@@ -225,12 +225,11 @@ exports.sendUserFile = function(res, filePath, env_params) {
 			.catch(error => {
 			  	helpers.warning("file_env_dropbox.js", exports.version, "sendUserFile", "Missing file:  "+filePath);
 			    res.sendStatus(401);
-			});	
+			});
 	}
 }
 exports.get_file_content = function(filePath, env_params, callback) {
-	//onsole.log("get_file_content for "+filePath)
-	if (!dbx) exports.init_custom_env(env_params); 
+	if (!dbx) exports.init_custom_env(env_params);
 	filePath = filePath.replace("app_files","userapps");
 	if (!helpers.startsWith(filePath,"/")) filePath = "/"+filePath
 
@@ -242,15 +241,15 @@ exports.get_file_content = function(filePath, env_params, callback) {
 		FILE_CACHE[filePath] = null;
 		//onsole.log("checling for fscache "+filePath+" exists? "+fs.existsSync(systemPathTo (filePath)) )
 	 	if (useAppFileFSCache() && fs.existsSync(systemPathTo (filePath))) {
-	    	fs.readFile(systemPathTo( filePath ), 'utf8', (err, html_content) => { 
-				if (!err) FILE_CACHE[filePath] = {content: html_content, 'access_date' : new Date().getTime(), 'isFile':false} 
-				callback(err, html_content) 
+	    	fs.readFile(systemPathTo( filePath ), 'utf8', (err, html_content) => {
+				if (!err) FILE_CACHE[filePath] = {content: html_content, 'access_date' : new Date().getTime(), 'isFile':false}
+				callback(err, html_content)
 			})
 	    } else {
 			dbx.filesDownload({path: filePath})
 			.then(response => {
 				FILE_CACHE[filePath] = {content: response.fileBinary, 'access_date' : new Date().getTime(), 'isFile':false};
-				callback(null, response.fileBinary) 
+				callback(null, response.fileBinary)
 			})
 			.catch(error => {
 				var errparse = JSON.parse(error.error);
@@ -267,10 +266,10 @@ exports.get_file_content = function(filePath, env_params, callback) {
 	}
 }
 exports.async_app_config = function (app_name, env_params, callback) {
-	//onsole.log("async_app_config ")
-	var filePath = "app_files/"+app_name+"/app_config.json";
+	var filePath = "userapps/"+app_name+"/app_config.json";
 	exports.get_file_content(filePath, env_params, function(err, app_config) {
 		if (err) {
+			console.warn(err)
 			if(err.code =="file_not_found") {
 				//onsole.log("okay if app config is  missing for "+app_name)
 				callback(null, null)
@@ -291,7 +290,7 @@ var doParseConfig = function(app_name, app_config, callback) {
 		callback(helpers.app_config_error("NR", "file_env_dropbox:doParseConfig", app_name,app_name+" app_config passed to doParseConfig is not a string"));
 	} else {
 		//onsole.log("doParseConfig "+app_config)
-		app_config = app_config.trim();				
+		app_config = app_config.trim();
 		var err = null
 		try {
 			app_config = json.parse(app_config, null, true);
@@ -313,7 +312,7 @@ exports.extractZippedAppFiles = function(zipfile, app_name, originalname, env_pa
         if (!gotDirectoryWithAppName && zipEntry.isDirectory && zipEntry.entryName == originalname+"/") {gotDirectoryWithAppName= originalname+"/";}
     });
     //onsole.log("env.extractZippedAppFiles "+app_name+" gotDirectoryWithAppName "+ gotDirectoryWithAppName )
-		
+
 	var call_fwd = function(file_name, is_directory, content, overwrite, callfwdback) {
 		var fakereq = {
 			file: {buffer: content},
@@ -337,10 +336,10 @@ exports.extractZippedAppFiles = function(zipfile, app_name, originalname, env_pa
 			} else {
 				file_name = "userapps/"+app_name+"/"+file_name;
 			}
-		}	
+		}
 		if (dowrite) {
 			//onsole.log("writing user file "+file_name)
-			exports.writeUserFile (file_name, null, {fileOverWrite:true}, null, fakereq, function(err){
+			exports.writeUserFile (file_name, null, {fileOverWrite:true, doNotWriteToCache:true}, null, fakereq, function(err){
 				if (err) helpers.warning("file_env_dropbox", exports.version, "extractZippedAppFiles", "Error writing file "+file_name+" to dropbox" )
 				callfwdback();
 			})
@@ -352,9 +351,12 @@ exports.extractZippedAppFiles = function(zipfile, app_name, originalname, env_pa
 
 	zip.extractAllToAsyncWithCallFwd(call_fwd, true, function(err) {
 		if (err) {
+			console.warn("got err extracting files in zip.extractAllToAsyncWithCallFwd")
+			console.warn(err)
 			callback(err)
+			/* // to do later - error heck this..
 		} else if (useAppFileFSCache()){
-			try { 
+			try {
 	            var zip = new AdmZip(zipfile); //"zipfilesOfAppsInstalled/"+app_name);
 			    var partialUrl = 'userapps'+path.sep+app_name;
                 var FSCache_app_path = systemPathTo(partialUrl);
@@ -365,13 +367,14 @@ exports.extractZippedAppFiles = function(zipfile, app_name, originalname, env_pa
 	                zip.extractAllTo(FSCache_app_path, true);
 	            }
 	            callback(null);
-	        } catch ( e ) { 
+	        } catch ( e ) {
 	        	helpers.warning("file_env_dropbox", exports.version, "extractZippedAppFiles", "Error extracting to FSCache"+e )
 	            callback(null);
 	        }
+					*/
 
 		} else {
-			callback(null)
+			callback(null) ;
 		}
 	});
 };
@@ -410,7 +413,7 @@ exports.sensor_app_directory_files = function (app_name, flags, env_params, call
     var file_ext = "", file_text="";
     if (!flags) flags = new Flags({'app_name':app_name});
 
-	if (!dbx) exports.init_custom_env(env_params); 
+	if (!dbx) exports.init_custom_env(env_params);
     exports.get_full_folder_file_list('/userapps/'+app_name, true, env_params, function(err, appfiles){
     	if (err) {
     		flags.add('errors', err.code, {'function':'sensor_app_directory_files', 'text':err.message});
@@ -423,7 +426,7 @@ exports.sensor_app_directory_files = function (app_name, flags, env_params, call
 	    			cb2(null);
 	    		} else if (sensor.is_text_file(fileInfo.name)){
 	    			env_params.reset_cache = true; // convenient (though inlelegant) place to put this to renew cache
-		    		exports.get_file_content(fileInfo.path_lower, env_params, function(err, content) { 
+		    		exports.get_file_content(fileInfo.path_lower, env_params, function(err, content) {
 		        		if (err) {
 		        			flags.add('errors', err.code, {'function':'sensor_app_directory_files', 'text':err.message});
 		        		} else {
@@ -474,7 +477,7 @@ var reduce_file_cache_items = function() {
 			  }
 			})
 	    }
-    	delete FILE_CACHE[list[i].filePath]; 
+    	delete FILE_CACHE[list[i].filePath];
     }
 }
 
@@ -485,7 +488,7 @@ var systemPathTo = function(partialUrl) {
     if (partialUrl) {
         return path.normalize(systemPath() + path.sep + removeStartAndEndSlashes(partialUrl) ) ;
     } else {
-        return systemPath();    
+        return systemPath();
     }
 }
 var systemPath = function() {
@@ -516,7 +519,7 @@ var localCheckExistsOrCreateUserFolderSync = function (aPath) {
     var pathSep = path.sep;
     var dirs = aPath.split("/");
     var root = "";
-    
+
     mkDir();
 
     function mkDir(){
@@ -525,7 +528,7 @@ var localCheckExistsOrCreateUserFolderSync = function (aPath) {
             root = systemPath() + pathSep;
         }
         if (!fs.existsSync(root + dir) ){
-            fs.mkdirSync(root + dir); 
+            fs.mkdirSync(root + dir);
             root += dir + pathSep;
             if (dirs.length > 0) {
                 mkDir();
@@ -544,7 +547,7 @@ var localCheckExistsOrCreateUserFolderSync = function (aPath) {
 }
 var pathOnly = function (aFilePath)  {
 	var thePath = aFilePath.split(path.sep)
-	if (thePath.length>1) { 
+	if (thePath.length>1) {
 		thePath.pop();
 		return thePath.join(path.sep)
 	} else {return "/"}
@@ -554,7 +557,7 @@ var pathOnly = function (aFilePath)  {
 // delete FILE_CACHE[list[i].filePath];
 var deleteLocalFolderAndCacheAndContents = function(app_name, subfolders, next) {
     // http://stackoverflow.com/questions/18052762/in-node-js-how-to-remove-the-directory-which-is-not-empty
-    
+
     location = systemPathTo("userapps/"+app_name + (subfolders? ("/"+subfolders) :"") );
     //onsole.log("deleteLocalFolderAndCacheAndContents "+location);
     if (!subfolders) subfolders = ""

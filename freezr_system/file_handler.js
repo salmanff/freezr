@@ -1,26 +1,26 @@
 // freezr.info - nodejs system files - file_handler
 exports.version = "0.0.122";
 
-var path = require('path'), 
-    fs = require('fs'), 
-    async = require('async'), 
+var path = require('path'),
+    fs = require('fs'),
+    async = require('async'),
     helpers = require('./helpers.js'),
     flags_obj = require("./flags_obj.js");
-    sensor = require("./file_sensor.js"), 
+    sensor = require("./file_sensor.js"),
     json = require('comment-json');
 
 
 var freezr_environment = null; // require(exports.systemPathTo("freezr_environment.js")) below
-var custom_environment= null; 
+var custom_environment= null;
 /*  custom_environment can have the following
 custom_environment.init_custom_env
 
 custom_environment.use
-custom_environment.customFiles(app_name) - true if used ("custom_environment.use" needs to be set to true too) 
+custom_environment.customFiles(app_name) - true if used ("custom_environment.use" needs to be set to true too)
 custom_environment.writeUserFile(folderPartPath, fileName, saveOptions, data_model, freezr_environment, callback)
 custom_environment.sendUserFile(res, filePartPath, freezr_environment)
 custom_environment.get_app_config
-custom_environment.appLocalFileExists(app_name, fileName, freezr_environment)	
+custom_environment.appLocalFileExists(app_name, fileName, freezr_environment)
 custom_environment.extractZippedAppFiles(zipfile, app_name, originalname, freezr_environment, callback)
 custom_environment.readUserDir(user_id,app_name,folder_name, freezr_environment, callback)
 custom_environment.readAppFileSyncParts(app_name, fileName, freezr_environment);
@@ -30,7 +30,7 @@ custom_environment.readFileSync(partialUrl, freezr_environment, callback);
 
 // SET UP
 
-exports.resetFreezrEnvironment = function(env) {
+exports.reset_freezr_environment = function(env) {
     freezr_environment = env;
 }
 exports.init_custom_env = function(env_params, callback) {
@@ -41,7 +41,7 @@ exports.init_custom_env = function(env_params, callback) {
             try {
                 custom_environment =  require(exports.systemPathTo('freezr_system/environment/'+file_env_name));
             } catch (e) {
-                env_okay = false;     
+                env_okay = false;
                 console.warn("got err in init_custom_env")
                 callback(helpers.state_error("file_handler",exports.version,"init_custom_env", ("error reading file "+file_env_name+" - "+e.message), "error_in_custom_file") )
             }
@@ -52,7 +52,7 @@ exports.init_custom_env = function(env_params, callback) {
 }
 exports.setup_file_sys = function(env_params, USER_DIRS, callback) {
     // returns false if it can't se up directories - and system fails
-    
+
     if (custom_environment && custom_environment.use && custom_environment.customFiles && custom_environment.customFiles() ) {
         custom_environment.setupFileSys(freezr_environment, USER_DIRS, callback)
     } else {
@@ -62,11 +62,11 @@ exports.setup_file_sys = function(env_params, USER_DIRS, callback) {
                 if (!fs.existsSync(path) ) fs.mkdirSync(path);
             });
             callback(null)
-        } catch (e) {       
-            helpers.state_error("file_handler.js",exports.version,"setupFileSys", e, "setup_file_sys_failure" ) 
+        } catch (e) {
+            helpers.state_error("file_handler.js",exports.version,"setupFileSys", e, "setup_file_sys_failure" )
         }
-    }   
-} 
+    }
+}
 
 // General Utilities
     exports.fileExt = function(fileName) {
@@ -119,7 +119,7 @@ exports.sendAppFile = function(res, partialUrl, env_params) {
         var filePath = exports.removeStartAndEndSlashes(partialUrl.replace("app_files","userapps"));
         custom_environment.sendAppFile(res, filePath, env_params);
     } else {
-        
+
         var filePath = (helpers.system_apps.indexOf(app_name)>=0)? exports.systemAppsPathTo(partialUrl):userAppsLocalPathTo(partialUrl);
         if (!fs.existsSync(filePath)) {
             if (!helpers.endsWith(partialUrl,"logo.png")) {
@@ -128,7 +128,7 @@ exports.sendAppFile = function(res, partialUrl, env_params) {
             res.sendStatus(401);
         } else {
             res.sendFile(filePath);
-        } 
+        }
     }
 }
 
@@ -157,7 +157,7 @@ exports.extractZippedAppFiles = function(zipfile, app_name, originalname, env_pa
         var AdmZip = require('./forked_modules/adm-zip/adm-zip.js');
         //var AdmZip = require('.'+path.sep+'forked_modules'+path.sep+'adm-zip'+path.sep+'adm-zip.js');
 
-        try {   
+        try {
             var zip = new AdmZip(zipfile); //"zipfilesOfAppsInstalled/"+app_name);
             var app_path = exports.fullLocalPathToAppFiles(app_name, null)
 
@@ -170,14 +170,14 @@ exports.extractZippedAppFiles = function(zipfile, app_name, originalname, env_pa
                 if (zipEntry.isDirectory && zipEntry.entryName == originalname+"/") gotDirectoryWithAppName= true;
             });
 
-            if (gotDirectoryWithAppName) { // mac issue
-                zip.extractEntryTo(app_name + "/", app_path, false, true);
+            if (gotDirectoryWithAppName) { // If app named fodler was top level in the zip file
+                zip.extractEntryTo(app_name + "/", userAppsLocalPathTo(), true, true);
             } else {
                 zip.extractAllTo(app_path, true);
             }
             callback(null)
 
-        } catch ( e ) { 
+        } catch ( e ) {
             callback(helpers.invalid_data("error extracting from zip file "+JSON.stringify(e) , "file_handler", exports.version, "extractZippedAppFiles"));
         }
     }
@@ -207,7 +207,7 @@ exports.sendUserFile = function(res, partialUrl, env_params) {
         res.sendFile( exports.fullLocalPathToUserFiles(partialUrl, null) ) ;
     }
 }
-exports.writeUserFile = function (folderPartPath, fileName, saveOptions, data_model, req, callback) {   
+exports.writeUserFile = function (folderPartPath, fileName, saveOptions, data_model, req, callback) {
     //onsole.log("writeUserFile "+folderPartPath+" - "+fileName)
     if (useCustomEnvironment(req.freezr_environment, req.params.app_name) ) {
         custom_environment.writeUserFile(folderPartPath, fileName, saveOptions, data_model, req, callback)
@@ -226,7 +226,7 @@ exports.writeUserFile = function (folderPartPath, fileName, saveOptions, data_mo
         });
     }
 }
-exports.writeTextToUserFile = function (folderPartPath, fileName, fileText, saveOptions, data_model, app_name, freezr_environment, callback) {   
+exports.writeTextToUserFile = function (folderPartPath, fileName, fileText, saveOptions, data_model, app_name, freezr_environment, callback) {
    if (useCustomEnvironment(freezr_environment, app_name) ) {
         custom_environment.writeTextToUserFile(folderPartPath, fileName, fileText, saveOptions, data_model, app_name, freezr_environment, callback)
     } else {
@@ -256,7 +256,7 @@ exports.checkExistsOrCreateUserAppFolder = function (app_name, env_params, callb
     if (useCustomEnvironment(env_params, app_name) ) {
         custom_environment.checkExistsOrCreateUserAppFolder(app_name, env_params, callback);
     } else {
-        var app_path = exports.partPathToAppFiles(app_name, null);
+        var app_path = exports.partPathToUserAppFiles(app_name, null);
         localCheckExistsOrCreateUserFolder(app_path, callback);
     }
 }
@@ -304,7 +304,7 @@ exports.sensor_app_directory_files = function (app_name, flags, env_params, call
     } else {
         // todo needs to dill through sub-directories iteratively (add custom directories...)
         var app_path = exports.fullPathToUserLocalAppFiles(app_name, null);
-        var appfiles = fs.readdirSync(app_path); 
+        var appfiles = fs.readdirSync(app_path);
         if (fs.existsSync(app_path+path.sep+'public')) {
             var publicfiles = fs.readdirSync(app_path+path.sep+'public');
             publicfiles.forEach(function(publicfile) {
@@ -313,7 +313,7 @@ exports.sensor_app_directory_files = function (app_name, flags, env_params, call
         }
         var file_ext = "", file_text="";
         if (!flags) flags = new Flags({'app_name':app_name});
-        
+
         async.forEach(appfiles, function(fileName, cb2) {
             var skip_file=false;
             async.waterfall([
@@ -321,7 +321,7 @@ exports.sensor_app_directory_files = function (app_name, flags, env_params, call
                 function (cb3) {
                     skip_file = false;
                     fs.stat(app_path+path.sep+fileName, cb3)
-                },  
+                },
 
                 // 2. if directory skip... if not read file
                 function (stats, cb3) {
@@ -332,7 +332,7 @@ exports.sensor_app_directory_files = function (app_name, flags, env_params, call
                     } else {
                         fs.readFile(app_path+path.sep+fileName, cb3)
                     }
-                },  
+                },
 
                 // sensor filetext
                 function (data, cb3) {
@@ -350,9 +350,9 @@ exports.sensor_app_directory_files = function (app_name, flags, env_params, call
                         cb2(null);
                     }
                 });
-        }, 
+        },
         function (err) {
-            if (err) { 
+            if (err) {
                 helpers.warning("file_handler.js",exports.version,"sensor_app_directory_files", "Gor err (2): "+JSON.stringify(err));
                 flags.add('errors','err_unknown',{'function':'sensor_app_directory_files', 'text':JSON.stringify(err)})
                 callback(null, flags, callback);
@@ -368,6 +368,11 @@ exports.partPathToAppFiles = function(app_name, fileName) {
     // onsole.log("partPathToAppFiles app "+app_name+" file "+fileName)
     if (helpers.startsWith(fileName,"./")) return '/app_files'+fileName.slice(1);
     return '/app_files/'+app_name+ (fileName? '/'+fileName: '') ;
+}
+exports.partPathToUserAppFiles = function(app_name, fileName) {
+    // onsole.log("partPathToAppFiles app "+app_name+" file "+fileName)
+    if (helpers.startsWith(fileName,"./")) return '/userapps'+fileName.slice(1);
+    return '/userapps/'+app_name+ (fileName? '/'+fileName: '') ;
 }
 exports.check_app_config = function(app_config, app_name, app_version, flags){
     // onsole.log("check_app_config "+app_name+" :"+JSON.stringify(app_config));
@@ -392,12 +397,12 @@ exports.check_app_config = function(app_config, app_name, app_version, flags){
                     if ( exports.fileExt(app_config.pages[page].html_file) != "html" )  flags.add("warnings", "config_file_bad_ext", {'ext':'html','filename':app_config.pages[page].html_file});
                     if (app_config.pages[page].css_files) {
                         if (typeof app_config.pages[page].css_files == "string") app_config.pages[page].css_files = [app_config.pages[page].css_files];
-                        app_config.pages[page].css_files.forEach( 
+                        app_config.pages[page].css_files.forEach(
                             function(one_file) {
                                 if ( exports.fileExt(one_file) != "css" ) flags.add("warnings", "config_file_bad_ext", {'ext':'css','filename':one_file});
                             }
-                        )                        
-                    } 
+                        )
+                    }
                     if (app_config.pages[page].script_files) {
                         if (typeof app_config.pages[page].script_files == "string") app_config.pages[page].script_files = [app_config.pages[page].script_files];
                         app_config.pages[page].script_files.forEach(
@@ -406,7 +411,7 @@ exports.check_app_config = function(app_config, app_name, app_version, flags){
                                     flags.add("warnings", "config_file_bad_ext", {'ext':'js','filename':one_file})
                                 }
                         });
-                    } 
+                    }
                 }
             }
         }
@@ -443,7 +448,7 @@ exports.systemPathTo = function(partialUrl) {
     if (partialUrl) {
         return path.normalize(systemPath() + path.sep + exports.removeStartAndEndSlashes(partialUrl) ) ;
     } else {
-        return systemPath();    
+        return systemPath();
     }
 }
 var systemPath = function() {
@@ -517,7 +522,7 @@ var localCheckExistsOrCreateUserFolder = function (aPath, callback) {
     var pathSep = path.sep;
     var dirs =  path.normalize(aPath).split(path.sep);
     var root = "";
-    
+
     mkDir();
 
     function mkDir(){
@@ -550,6 +555,7 @@ var localCheckExistsOrCreateUserFolder = function (aPath, callback) {
     }
 };
 var userAppsLocalPathTo = function(partialUrl) {
+    if (!partialUrl) partialUrl="app_files"
     partialUrl = partialUrl.replace("app_files","userapps");
     //onsole.log("userAppsLocalPathTo "+partialUrl)
     if (custom_environment) { // todo clean up - make sure custom env is needed
@@ -575,12 +581,12 @@ exports.load_data_html_and_page = function(res,options, env_params){
             if (options.queryresults){
                 //onsole.log("queryresults:"+JSON.stringify(options.queryresults))
                 var Mustache = require('mustache');
-                options.page_html =  Mustache.render(html_content, options.queryresults); 
+                options.page_html =  Mustache.render(html_content, options.queryresults);
                 exports.load_page_html(res,options)
             } else {
                 options.page_html= html_content;
                 exports.load_page_html(res,options)
-            } 
+            }
         }
     });
 }
@@ -620,7 +626,7 @@ exports.load_page_html = function(res, opt) {
             var nonce = helpers.randomText(10)
             contents = contents.replace('{{FREEEZR-SCRIPT-NONCE}}', nonce);
             contents = contents.replace('{{FREEEZR-SCRIPT-NONCE}}', nonce); // 2nd instance
-            contents = contents.replace('{{META_TAGS}}', opt.meta_tags? opt.meta_tags: ''); 
+            contents = contents.replace('{{META_TAGS}}', opt.meta_tags? opt.meta_tags: '');
 
             contents = contents.replace('{{HTML-BODY}}', opt.page_html? opt.page_html: "Page Not found");
 
@@ -646,7 +652,7 @@ exports.load_page_html = function(res, opt) {
                 	thePath = exports.partPathToAppFiles(opt.app_name, pathToFile);
                 	script_files = script_files +  '<script src="'+thePath+'" type="text/javascript"></script>';
                 });
-                
+
             }
             contents = contents.replace('{{SCRIPT_FILES}}', script_files);
 
@@ -681,10 +687,3 @@ exports.load_page_xml = function(res, opt) {
         }
     );
 }
-
-
-
-
-
-
-

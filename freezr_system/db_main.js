@@ -33,7 +33,7 @@ exports.dbConnectionString = function(appName) {
     }
 }
 
-exports.resetFreezrEnvironment = function(env) {
+exports.reset_freezr_environment = function(env) {
     //onsole.log("resettting environment in db_main "+JSON.stringify(env))
     freezr_environment = env;
 }  

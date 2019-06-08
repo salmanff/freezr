@@ -10,7 +10,7 @@ var async = require('async'),
 const ARBITRARY_COUNT = 200;
 
 // APP_DB's - pass through to main_db
-exports.app_db_collection_get = function (app_name, collection_name, callback) { 
+exports.app_db_collection_get = function (app_name, collection_name, callback) {
     //onsole.log("app_db_collection_get "+app_name)
     db_main.app_db_collection_get (app_name, collection_name, true, callback)
 }
@@ -22,8 +22,8 @@ exports.real_id = function(data_object_id,app_config,collection_name) {
         return db_main.get_real_object_id(data_object_id)
     }
 }
-exports.init_admin_db = function(callback) { db_main.init_admin_db(callback)} 
-exports.resetFreezrEnvironment = function(env)  {db_main.resetFreezrEnvironment(env) }
+exports.init_admin_db = function(callback) { db_main.init_admin_db(callback)}
+exports.reset_freezr_environment = function(env)  {db_main.reset_freezr_environment(env) }
 exports.set_and_nulify_environment = function(env)  {db_main.set_and_nulify_environment(env) }
 exports.write_environment = function(env, callback)  {db_main.write_environment(env, callback) }
 exports.get_coll = db_main.get_coll;
@@ -39,7 +39,7 @@ function object_by_unique_field (collection, field, value, callback) {
     //onsole.log("finding "+value+" in "+field+"in collection "+collection)
 
     db_main[collection].find( o ).toArray(function (err, results) {
-        
+
         if (err) {
             callback(err, null, callback);
             return;
@@ -126,8 +126,8 @@ exports.changeUserPassword = function (user_id,password, callback) {
         function (hash, cb) {
             db_main.users.update(
                 {user_id: user_id},
-                { $set: {password: hash, _date_Modified: new Date().getTime() } }, 
-                {safe: true }, 
+                { $set: {password: hash, _date_Modified: new Date().getTime() } },
+                {safe: true },
                 cb);
         }
     ],
@@ -148,7 +148,7 @@ exports.all_users = function (sort_field, sort_desc, skip, count, callback) {
         db_main.users.find(null)
             .sort(sort)
             .limit(count)
-            .skip(skip) 
+            .skip(skip)
             .toArray(callback);
     } else {
         callback(helpers.internal_error("freezr_db", exports.version, "all_users", "users dtabase is unavailable" ))
@@ -159,23 +159,23 @@ exports.all_users = function (sort_field, sort_desc, skip, count, callback) {
 // USER_DEVICES
 exports.set_or_update_user_device_code = function (device_code, user_id,login_for_app_name, callback){
     async.waterfall([
-        // 1. Get Device Code 
+        // 1. Get Device Code
         function (cb) {
             db_main.user_devices.find({'device_code':device_code, 'user_id':user_id})
                 .limit(1)
                 .skip(0)
                 .toArray(cb)
-        }, 
+        },
         function (user_device_records, cb) {
             if (user_device_records && user_device_records.length>0) {
                 db_main.user_devices.update(
                     {'device_code':device_code, 'user_id':user_id},
-                    { $set: {_date_Modified: new Date().getTime() , 'login_for_app_name':login_for_app_name} }, 
-                    {safe: true }, 
+                    { $set: {_date_Modified: new Date().getTime() , 'login_for_app_name':login_for_app_name} },
+                    {safe: true },
                     cb);
             } else {
                 var write = {
-                    'device_code':device_code, 
+                    'device_code':device_code,
                     'user_id':user_id,
                     'login_for_app_name':login_for_app_name,
                     _owner: user_id,
@@ -185,26 +185,26 @@ exports.set_or_update_user_device_code = function (device_code, user_id,login_fo
                 db_main.user_devices.insert(write, { w: 1, safe: true }, cb);
             }
         }
-    ], 
+    ],
     function (err, results) {
         if (err) {
             callback(err, null);
         } else {
             callback(null, {'device_code':device_code, 'login_for_app_name':login_for_app_name});
-        }  
+        }
     });
 }
 exports.get_device_code_specific_session = function (device_code, user_id, callback){
     //onsole.log("get_device_code_specific_session "+user_id+" app: "+app_name);
     async.waterfall([
-        // 1. Get App Code 
+        // 1. Get App Code
         function (cb) {
             db_main.user_devices.find({'device_code':device_code, 'user_id':user_id})
                 .limit(1)
                 .skip(0)
                 .toArray(cb)
         }
-    ], 
+    ],
     function (err, results) {
         if (err) {
             callback(err, null, callback);
@@ -212,19 +212,19 @@ exports.get_device_code_specific_session = function (device_code, user_id, callb
             callback(helpers.missing_data("device code for specific session", "freezr_db", exports.version,"get_device_code_specific_session"), null, callback);
         } else {
             callback(null, {'device_code':device_code, 'login_for_app_name':login_for_app_name}, callback);
-        }  
+        }
     });
 }
 exports.check_device_code_specific_session = function (device_code, user_id, app_name, callback){
     async.waterfall([
-        // 1. Get App Code 
+        // 1. Get App Code
         function (cb) {
             db_main.user_devices.find({'device_code':device_code, 'user_id':user_id})
                 .limit(1)
                 .skip(0)
                 .toArray(cb)
         }
-    ], 
+    ],
     function (err, results) {
         if (err) {
             callback(err);
@@ -262,20 +262,20 @@ exports.remove_user_app = function (user_id, app_name, callback){
     //onsole.log("removing app  for "+user_id+" app "+app_name);
     var dbQuery = {'_id':user_id+'}{'+app_name};
     db_main.user_installed_app_list.update(dbQuery,
-                        { $set: {removed: true, app_code:null, _date_Modified: new Date().getTime() } }, 
-                        {safe: true }, 
+                        { $set: {removed: true, app_code:null, _date_Modified: new Date().getTime() } },
+                        {safe: true },
                         callback);
 }
 exports.get_or_set_user_app_code = function (user_id,app_name, callback){
     var app_code = null, new_app_code=null;
     async.waterfall([
-        // 1. Get App Code 
+        // 1. Get App Code
         function (cb) {
             db_main.user_installed_app_list.find({'_id':user_id+'}{'+app_name})
                 .limit(1)
                 .skip(0)
                 .toArray(cb)
-        }, 
+        },
 
         function (user_app_records, cb) {
             if (user_app_records && user_app_records.length>0) {
@@ -285,8 +285,8 @@ exports.get_or_set_user_app_code = function (user_id,app_name, callback){
                     app_code = helpers.randomText(10);
                     db_main.user_installed_app_list.update(
                         {_id: user_app_records[0]._id},
-                        { $set: {app_code: app_code, removed: false, _date_Modified: new Date().getTime() } }, 
-                        {safe: true }, 
+                        { $set: {app_code: app_code, removed: false, _date_Modified: new Date().getTime() } },
+                        {safe: true },
                         cb);
                 } else {
                     cb(null, cb);
@@ -306,7 +306,7 @@ exports.get_or_set_user_app_code = function (user_id,app_name, callback){
                 db_main.user_installed_app_list.insert(write, { w: 1, safe: true }, cb);
             }
         }
-    ], 
+    ],
     function (err, results) {
         if (err) {
             callback(err, null, callback);
@@ -314,22 +314,22 @@ exports.get_or_set_user_app_code = function (user_id,app_name, callback){
             callback(null, {'app_code':app_code, 'newCode':(new_app_code?true:false)}, callback);
         } else if (results && results[0] && results[0].app_code) { // old mongo
             app_code = results[0].app_code
-            callback(null, {'app_code':app_code, 'newCode':(new_app_code?true:false)}, callback);        
+            callback(null, {'app_code':app_code, 'newCode':(new_app_code?true:false)}, callback);
         } else if (results && results.ops && results.ops[0] && results.ops[0].app_code) {
             app_code = results.ops[0].app_code;
-            callback(null, {'app_code':app_code, 'newCode':(new_app_code?true:false)}, callback);        
+            callback(null, {'app_code':app_code, 'newCode':(new_app_code?true:false)}, callback);
         } else  {
             callback(helpers.internal_error("freezr_db", exports.version, "get_or_set_user_app_code", "Unknown Error Getting App code"), null, callback)
-        } 
+        }
     });
 }
 
-// APP INTERACTIONS 
+// APP INTERACTIONS
 exports.update_permission_records_from_app_config = function(app_config, app_name, user_id, flags, callback) {
     if (!app_config) {
         flags.add('notes','appconfig_missing');
         callback(null, flags)
-    } else { 
+    } else {
         // app_config exists - check it is valid
         // make a list of the schemas to re-iterate later and add blank permissions
         var app_config_permissions = (app_config && app_config.permissions && Object.keys(app_config.permissions).length > 0)? JSON.parse(JSON.stringify( app_config.permissions)) : null;
@@ -354,15 +354,15 @@ exports.update_permission_records_from_app_config = function(app_config, app_nam
 
                     function (a,b,cb) {
                         cb(null)
-                    }, 
+                    },
 
                     // 2. for each permission, get or set a permission record
                     function (cb) {
-                        async.forEach(queried_schema_list, function (schemad_permission, cb) { // get perms 
-                            exports.permission_by_owner_and_permissionName(aUser.user_id, 
-                                schemad_permission.requestor_app, 
-                                schemad_permission.requestee_app, 
-                                schemad_permission.permission_name, 
+                        async.forEach(queried_schema_list, function (schemad_permission, cb) { // get perms
+                            exports.permission_by_owner_and_permissionName(aUser.user_id,
+                                schemad_permission.requestor_app,
+                                schemad_permission.requestee_app,
+                                schemad_permission.permission_name,
                                 function(err, returnPerms) {
                                     if (err) {
                                         cb(helpers.internal_error ("freezr_db", exports.version, "update_permission_records_from_app_config","permision query error"));
@@ -371,34 +371,34 @@ exports.update_permission_records_from_app_config = function(app_config, app_nam
                                     } else if (exports.permissionsAreSame(schemad_permission, returnPerms[0])) {
                                         cb(null);
                                     } else if (returnPerms[0].granted){
-                                        exports.updatePermission(returnPerms[0], "OutDated", null, cb); 
+                                        exports.updatePermission(returnPerms[0], "OutDated", null, cb);
                                     } else {
                                         // todo - really should also update the permissions
                                         cb(null);
                                     }
                                 })
-                        }, 
+                        },
                         function (err) {
-                            if (err) { 
-                                cb(err) 
+                            if (err) {
+                                cb(err)
                             } else {
                                 cb(null);
                             }
                         })
-                    }, 
+                    },
 
                 ],function (err) {
-                    if (err) { //err in update_app_config_from_file waterfall 
+                    if (err) { //err in update_app_config_from_file waterfall
                         cb(err);
                     } else {
                         cb();
                     }
                 })
-            }, 
+            },
             function (err) {
-                if (err) { 
+                if (err) {
                     if (!flags.error) flags.error = []; flags.error.push(err);
-                    callback(null, flags) 
+                    callback(null, flags)
                 } else {
                     callback(null, flags);
                 }
@@ -407,7 +407,7 @@ exports.update_permission_records_from_app_config = function(app_config, app_nam
 
     }
 }
-exports.add_app = function (app_name, app_display_name, user_id, callback) { 
+exports.add_app = function (app_name, app_display_name, user_id, callback) {
     //onsole.log("add_app "+app_name+" "+app_display_name);
     async.waterfall([
         // 1 make sure data exists
@@ -496,7 +496,7 @@ exports.getAllCollectionNames = db_main.getAllCollectionNames;
 
 exports.remove_user_records = function (user_id, app_name, callback) {
     var appDb, collection_names = [], other_data_exists = false;
-    helpers.log (req,("remove_user_records for "+user_id+" "+app_name));
+    helpers.log (fake_req_from(user_id) ,("remove_user_records for "+user_id+" "+app_name));
 
     async.waterfall([
         // 1. get all collection names
@@ -521,7 +521,7 @@ exports.remove_user_records = function (user_id, app_name, callback) {
                         this_collection.remove({'_owner':user_id}, {safe: true}, cb2);
                     },
 
-                    function (results, cb3)  {// remvoal results 
+                    function (results, cb3)  {// remvoal results
                         this_collection.find().limit(1).toArray(cb2)
                     },
 
@@ -530,7 +530,7 @@ exports.remove_user_records = function (user_id, app_name, callback) {
                         cb3(null);
                     }
 
-                    ], 
+                    ],
                     function (err) {
                         if (err) {
                             cb2(err);
@@ -551,7 +551,7 @@ exports.remove_user_records = function (user_id, app_name, callback) {
             }
         }
 
-        ], 
+        ],
         function (err) {
             if (err) {
                 callback(err);
@@ -561,8 +561,8 @@ exports.remove_user_records = function (user_id, app_name, callback) {
 
         });
 }
-exports.try_to_delete_app = function (user_id, app_name, env_params, callback) { 
-    helpers.log (req,("going to try_to_delete_app "+app_name));
+exports.try_to_delete_app = function (user_id, app_name, env_params, callback) {
+    helpers.log (fake_req_from(user_id) ,("going to try_to_delete_app "+app_name));
     var other_data_exists = false;
     async.waterfall([
         // validate params ad remvoe all user data
@@ -607,14 +607,14 @@ exports.try_to_delete_app = function (user_id, app_name, env_params, callback) {
         // also remove from user_installed_app_list
         function (results, cb) {
             if (!other_data_exists) {
-                db_main.user_installed_app_list.remove({'_id':user_id+'}{'+app_name}, {safe: true}, cb);                            
+                db_main.user_installed_app_list.remove({'_id':user_id+'}{'+app_name}, {safe: true}, cb);
             } else {
                 cb(null);
             }
         }
 
 
-    ], 
+    ],
     function (err) {
         if (err) {
             callback(err);
@@ -624,13 +624,13 @@ exports.try_to_delete_app = function (user_id, app_name, env_params, callback) {
 
     });
 }
-exports.app_exists_in_db = function (app_name, callback) { 
+exports.app_exists_in_db = function (app_name, callback) {
     object_by_unique_field ("installed_app_list", "app_name", app_name, function (dummy, obj_returned){
         var tempret = (obj_returned==null? false: true);
         callback(tempret, callback);
     });
 }
-exports.get_app_info_from_db = function (app_name, callback) { 
+exports.get_app_info_from_db = function (app_name, callback) {
     object_by_unique_field ("installed_app_list", "app_name", app_name, function (dummy, obj_returned){
         callback(null, obj_returned);
     });
@@ -650,11 +650,11 @@ exports.create_query_permission_record = function (user_id, requestor_app, reque
         requestee_app: requestee_app,       // Required
         collection: permission_object.collection, // this or collections required
         collections: permission_object.collections, // this or collections required
-        type: permission_object.type, // Required 
-        permission_name: permission_name,             // Required   
+        type: permission_object.type, // Required
+        permission_name: permission_name,             // Required
         description: permission_object.description? permission_object.description: permission_name,
         granted: false, denied:false, // One of the 2 are required
-        outDated:false, 
+        outDated:false,
         _owner: user_id,                  // Required
         _date_Created: new Date().getTime(),
         _date_Modified: new Date().getTime()
@@ -675,7 +675,7 @@ exports.create_query_permission_record = function (user_id, requestor_app, reque
         write.sharable_folders = permission_object.sharable_folders? permission_object.sharable_folders : ['/'];
         write.sharable_groups = permission_object.sharable_groups? permission_object.sharable_groups : "self";
     } else if (write.type == "outside_scripts") {
-        write.script_url = permission_object.script_url? permission_object.script_url : null;   
+        write.script_url = permission_object.script_url? permission_object.script_url : null;
     } else if (write.type == "web_connect") {
         write.web_url = permission_object.web_url? permission_object.web_url : null;
     }
@@ -685,12 +685,12 @@ exports.create_query_permission_record = function (user_id, requestor_app, reque
             write.granted = true;
         } else if (action == "Deny") {
             write.denied = true;
-        } 
-    } 
+        }
+    }
     db_main.permissions.insert(write, { w: 1, safe: true }, callback);
 }
 exports.updatePermission = function(oldPerm, action, newPerms, callback) {
-    // Note user_id, requestor_app, requestee_app, permission_name Already verified to find the right record. 
+    // Note user_id, requestor_app, requestee_app, permission_name Already verified to find the right record.
     // action can be null, "Accept" or "Deny"
     //onsole.log("updatePermission "+action)
     //onsole.log("updatePermission old"+JSON.stringify(oldPerm))
@@ -701,8 +701,8 @@ exports.updatePermission = function(oldPerm, action, newPerms, callback) {
     } else if (action == "OutDated") {
         db_main.permissions.update(
             {_id: oldPerm._id},
-            { $set: {'OutDated':true, '_date_Modified': new Date().getTime()}}, 
-            {safe: true }, 
+            { $set: {'OutDated':true, '_date_Modified': new Date().getTime()}},
+            {safe: true },
             callback);
     } else  {
         if (action == "Accept") {newPerms.granted = true; newPerms.denied = false;}
@@ -719,8 +719,8 @@ exports.updatePermission = function(oldPerm, action, newPerms, callback) {
         db_main.permissions.update(
             {_id: oldPerm._id},
             newPerms, // new july 2015
-            //{ $set: newPerms}, 
-            {safe: true }, 
+            //{ $set: newPerms},
+            {safe: true },
             callback);
     }
 }
@@ -804,14 +804,14 @@ var queryParamsArePermitted = function(query, permitted_fields) {
 }
 exports.queryIsPermitted = function(user_permission, query_schema, specific_params) {
     //// Permissions are held specifically for each users... so they actual permission given needs to be compared to the one in the app_config
-    // specific params come from the body (query_params) 
+    // specific params come from the body (query_params)
     //onsole.log("queryIsPermitted userpermission" + JSON.stringify(user_permission) );
     //onsole.log("queryIsPermitted query_schema" +JSON.stringify(query_schema))
     //onsole.log("queryIsPermitted specific_params" +JSON.stringify(specific_params))
-    
+
     if (!specific_params.count) specific_params.count = user_permission.max_count;
     if (!specific_params.skip) specific_params.skip = 0;
-    return objectsAreSimilar(fields_for_checking_query_is_permitted, user_permission,query_schema) 
+    return objectsAreSimilar(fields_for_checking_query_is_permitted, user_permission,query_schema)
         && queryParamsArePermitted(specific_params.query_params,user_permission.permitted_fields)
         && (!user_permission.max_count || (specific_params.count + specific_params.skip <= user_permission.max_count));
 }
@@ -855,7 +855,7 @@ exports.permission_object_from_app_config_params = function(app_config_params, p
     var returnpermission = app_config_params;
     if (!app_config_params) return null;
     //onsole.log("permission_object_from_app_config_params app_config_params "+JSON.stringify(app_config_params));
-    
+
 
     returnpermission.permission_name = permission_name;
     if (!returnpermission.requestor_app) {returnpermission.requestor_app = requestor_app? requestor_app:requestee_app;}
@@ -876,10 +876,10 @@ exports.check_app_code = function(user_id, app_name, source_app_code, callback) 
     //onsole.log("check_app_code");
 
     async.waterfall([
-        // 1. Get user App Code 
+        // 1. Get user App Code
         function (cb) {
-            exports.get_user_app_code(user_id,app_name, cb); 
-        }, 
+            exports.get_user_app_code(user_id,app_name, cb);
+        },
 
         function(user_app_code,cb) {
             if (user_app_code) {
@@ -887,18 +887,18 @@ exports.check_app_code = function(user_id, app_name, source_app_code, callback) 
                     cb(null)
                 } else {
 
-                     
+
                     cb(helpers.auth_failure("freezr_db", exports.version, "check_app_code", "WRONG SOURCE APP CODE"));
                 }
             } else {
                 cb(helpers.auth_failure("freezr_db", exports.version, "check_app_code", "inexistant SOURCE APP CODE"));
             }
         }
-    ], 
+    ],
     function (err, results) {
         if (err) {
             callback(err);
-        } else {    
+        } else {
             callback(null)
         }
     });
@@ -914,7 +914,7 @@ exports.check_query_permissions = function(user_id, queryJson, app_name, source_
 
 
 
-// GENERAL Admin db 
+// GENERAL Admin db
 exports.admindb_query = function (collection, options, callback) {
     //onsole.log("freezr_db admindb_query")
 
@@ -928,12 +928,12 @@ exports.admindb_query = function (collection, options, callback) {
             db_coll.find(params)
                 .sort(options.sort? options.sort:{})
                 .limit(options.count? options.count:ARBITRARY_COUNT)
-                .skip(options.skip? options.skip: 0) 
+                .skip(options.skip? options.skip: 0)
                 .toArray(callback);
         } else {
             callback(helpers.internal_error("freezr_db", exports.version, "admindb_query", "admin database is unavailable - collection:"+theCollection ))
         }
-    }) 
+    })
 };
 
 // OTHER / OAUTH
@@ -949,18 +949,20 @@ exports.all_oauths = function (include_disabled, skip, count, callback) {
             oauths.find(query)
                 .sort(sort)
                 .limit(count)
-                .skip(skip) 
+                .skip(skip)
                 .toArray(callback);
         } else {
             callback(helpers.internal_error("freezr_db", exports.version, "all_oauths", "oauths dtabase is unavailable" ))
         }
-    }) 
+    })
 };
 
 
 
 
 // General comparison functions and mongo...
+const fake_req_from = function(user_id) {return {session:{logged_in_user_id:user_id}}}
+
 var objectsAreSimilar = function(attribute_list, object1, object2 ) {
     // console.log - todo this is very simple - need to improve
     var foundUnequalObjects = false;
@@ -1002,7 +1004,6 @@ var getQueryParams = function(jsonQuery) {
                 }
             }
         }
-    }  
+    }
     return tempret
 }
-

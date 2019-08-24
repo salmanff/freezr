@@ -11,7 +11,7 @@ Flags.prototype.add = function (section, code, info) {
     if (!info) info = {};
     info.code = code;
     this[section].push(info);
-} 
+}
 
 Flags.prototype.sentencify = function (language) {
     var returnObj = {}, sectionItems, sentence;
@@ -25,10 +25,10 @@ Flags.prototype.sentencify = function (language) {
                 codedItems = this[section];
                 codedItems.forEach(function (anItem) {
                     theCode = anItem.code? anItem.code: JSON.stringify(anItem);
-                    sentence = sentences[language][theCode]? sentences[language][theCode] : (sentences['en'][theCode]? sentences['en'][theCode]: theCode);
+                    sentence = (sentences[language][theCode]? sentences[language][theCode] : (sentences['en'][theCode]? sentences['en'][theCode]: theCode))+"";
                     if (anItem.text) sentence = sentence + " - " + anItem.text;
                     for (var info in anItem) {
-                        if (anItem.hasOwnProperty(info) && info != "code") sentence = sentence.replace("{{"+info+"}}",anItem[info]);
+                        if (anItem.hasOwnProperty(info) && info != "code" && sentence) sentence = sentence.replace("{{"+info+"}}",anItem[info]);
                     }
                     returnObj[section].push({'text':sentence});
                 });
@@ -61,6 +61,3 @@ sentences.en = {
 }
 
 module.exports = Flags;
-
-
-

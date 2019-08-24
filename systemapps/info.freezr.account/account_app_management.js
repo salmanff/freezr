@@ -13,8 +13,11 @@ freezr.initPageScripts = function() {
     }
   });
 
-  if (!freezr_user_is_admin) {document.getElementById("button_showDevOptions").style.display="none";}
-  if (!freezr_user_is_admin) {document.getElementById("freezer_users_butt").style.display="none";}
+  if (!freezr_user_is_admin) {
+    setTimeout(function(){
+      document.getElementById("button_showDevOptions").style.display="none";
+      if (document.getElementById("freezer_users_butt"))document.getElementById("freezer_users_butt").style.display="none";
+    }, 300);}
   if (freezr_user_is_admin && window.location.search.indexOf("dev=true")>0) doShowDevoptions = true;
   showDevOptions();
 }
@@ -74,7 +77,7 @@ var buttons = {
     app_name = app_name.split(' ')[0];
 
     if (!fileInput || !file) {
-      showError("Please Choose a file first.");      
+      showError("Please Choose a file first.");
     } else if (file.name.substr(-4) != ".zip") {
       document.getElementById('errorBox').innerHTML="The app file uploaded must be a zipped file. (File name represents the app name.)";
     } else if (!valid_app_name(app_name)) {
@@ -95,7 +98,7 @@ var buttons = {
               ShowAppUploadErrors(d,uploadSuccess);
             }
           }, "PUT", null);
-      }      
+      }
     }
   },
   'updateApp': function(args) {
@@ -130,7 +133,7 @@ var buttons = {
       freezr.utils.getAllAppList (function (returndata) {
           var theData = freezr.utils.parse(returndata);
           var theEl = document.getElementById("app_list");
-          if(!theData) { 
+          if(!theData) {
             theEl.innerHTML = "No Apps have been installed";
           } else if (theData.err || theData.error) {
             theEl.innerHTML = "ERROR RETRIEVING APP LIST";
@@ -252,7 +255,7 @@ var endsWith = function (longertext, checktext) {
         return (checktext == longertext.slice((longertext.length-checktext.length)));}
     }
 var startsWith = function(longertext, checktext) {
-        if (!longertext || !checktext || !(typeof longertext === 'string')|| !(typeof checktext === 'string')) {return false} else 
+        if (!longertext || !checktext || !(typeof longertext === 'string')|| !(typeof checktext === 'string')) {return false} else
         if (checktext.length > longertext.length) {return false} else {
         return (checktext == longertext.slice(0,checktext.length));}
     }
@@ -263,4 +266,3 @@ var starts_with_one_of = function(thetext, stringArray) {
         return false;
     }
 const SYSTEM_APPS = ["info.freezr.account","info.freezr.admin","info.freezr.public","info.freezr.permissions","info.freezr.posts"];
-

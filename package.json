@@ -3,20 +3,37 @@
   "description": "Freezr.info - personal data store",
   "version": "0.0.1",
   "private": true,
+  "engines": {
+    "node": ">=8"
+  },
+  "repository": "https://github.com/salmanff/freezr",
   "dependencies": {
+    "@google-cloud/datastore": "^3.1.0",
     "adm-zip": ">=0.4.11",
     "async": "2.x.x",
     "bcryptjs": "2.x",
     "body-parser": "1.x",
+    "comment-json": "1.x",
     "cookie-parser": "1.x",
     "cookie-session": "1.x",
-    "dropbox": "^2.5.4",
     "express": "4.x",
     "express-session": "1.x",
     "mongodb": "3.0.x",
     "morgan": "1.x",
     "multer": "1.x",
     "mustache": "^2.3.0",
-    "comment-json": "1.x"
+    "nedb": "^1.8.0",
+    "dropbox": "^2.5.4"
+  },
+  "scripts": {
+    "test": "./node_modules/mocha/bin/mocha"
+  },
+  "optional_dependencies": {
+    "explanation": "Cut and paste these above if you want to use the specific technologies"
+  },
+  "devDependencies": {
+    "chai": "^4.2.0",
+    "cypress": "^3.4.1",
+    "mocha": "^6.1.4"
   }
 }

@@ -84,6 +84,9 @@ exports.sendAppFile = function(res, filePath, env_params) {
 		});
 	}
 }
+exports.requireFile(partialUrl, env_params, callback) {
+	callback(new Error("requireFile is not implemented in dropbox yet"))
+}
 
 exports.writeUserFile = function (folderPartPath, fileName, saveOptions, data_model, req, callback) {
 	//onsole.log("writeUserFile",folderPartPath)
@@ -134,6 +137,7 @@ exports.writeUserFile = function (folderPartPath, fileName, saveOptions, data_mo
 
         });
 }
+
 exports.writeTextToUserFile = function (folderPartPath, fileName, fileText, saveOptions, data_model, app_name, freezr_environment, callback) {
 	//onsole.log("writeUserFile",folderPartPath)
 	// Used for userapps and userfiles
@@ -229,6 +233,7 @@ exports.sendUserFile = function(res, filePath, env_params) {
 	}
 }
 exports.get_file_content = function(filePath, env_params, callback) {
+	//onsole.log("get_file_content for "+filePath)
 	if (!dbx) exports.init_custom_env(env_params);
 	filePath = filePath.replace("app_files","userapps");
 	if (!helpers.startsWith(filePath,"/")) filePath = "/"+filePath
@@ -354,7 +359,7 @@ exports.extractZippedAppFiles = function(zipfile, app_name, originalname, env_pa
 			console.warn("got err extracting files in zip.extractAllToAsyncWithCallFwd")
 			console.warn(err)
 			callback(err)
-			/* // to do later - error heck this..
+			/* // to do later - error check this..
 		} else if (useAppFileFSCache()){
 			try {
 	            var zip = new AdmZip(zipfile); //"zipfilesOfAppsInstalled/"+app_name);

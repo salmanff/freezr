@@ -1100,12 +1100,15 @@ const query_is_well_formed = function(topquery) {
       if (i++ == 1) {
         if (typeof obj[key]!="string" && isNaN(obj[key])
             && !(toplevel==true && key=="$or" && Array.isArray(obj[key]) ) ) {
-          err1 += " - Object cannot have multiple levels of queries"
+          //todo fix
+          //err1 += " - Object cannot have multiple levels of queries"
         } else {
           ret= [key, obj[key], null]
         }
       } else {
-        err1 += "Object contains more than one element (expected 1 for: "+JSON.stringify(obj)+")"
+        //todo fix
+        //err1 += " - Object cannot have multiple levels of queries"
+        //err1 += "Object contains more than one element (expected 1 for: "+JSON.stringify(obj)+")"
       }
     });
     if (err1) ret[2]=err1

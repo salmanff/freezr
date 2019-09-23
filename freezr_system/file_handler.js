@@ -1,5 +1,5 @@
 // freezr.info - nodejs system files - file_handler
-exports.version = "0.0.122";
+exports.version = "0.0.131";
 
 var path = require('path'),
     fs = require('fs'),
@@ -10,7 +10,7 @@ var path = require('path'),
     json = require('comment-json');
 
 
-var freezr_environment = null; // require(exports.systemPathTo("freezr_environment.js")) below
+var freezr_environment = null; // variable set below
 var custom_environment= null;
 /*  custom_environment can have the following
 custom_environment.init_custom_env
@@ -34,6 +34,7 @@ exports.reset_freezr_environment = function(env) {
     freezr_environment = env;
 }
 exports.init_custom_env = function(env_params, callback) {
+    freezr_environment = env_params;
     var file_env_name = (env_params && env_params.userDirParams && env_params.userDirParams.name)? ("file_env_"+env_params.userDirParams.name+".js") : null;
     //custom_environment = (file_env_name && fs.existsSync(exports.systemPathTo('freezr_system/environment/'+file_env_name)) )? require(exports.systemPathTo('freezr_system/environment/'+file_env_name)):null;
     if (file_env_name && fs.existsSync(exports.systemPathTo('freezr_system/environment/'+file_env_name)) )  {
@@ -50,15 +51,19 @@ exports.init_custom_env = function(env_params, callback) {
         callback(null);
     }
 }
-exports.setup_file_sys = function(env_params, USER_DIRS, callback) {
+exports.setup_file_sys = function(env_params, callback) {
     // returns false if it can't se up directories - and system fails
+    // this is called reset_freezr_environment, so env shoiuld be set
 
     if (custom_environment && custom_environment.use && custom_environment.customFiles && custom_environment.customFiles() ) {
-        custom_environment.setupFileSys(freezr_environment, USER_DIRS, callback)
+        custom_environment.setupFileSys(freezr_environment, helpers.USER_DIRS, callback)
     } else {
+
         try {
-            USER_DIRS.forEach(function(userDir) {
-                var path = userAppsLocalPathTo(userDir);
+            let path = userAppsLocalPathTo();
+            if (!fs.existsSync(path) ) fs.mkdirSync(path);
+            helpers.USER_DIRS.forEach(function(userDir) {
+                let path = userAppsLocalPathTo(userDir);
                 if (!fs.existsSync(path) ) fs.mkdirSync(path);
             });
             callback(null)
@@ -69,7 +74,7 @@ exports.setup_file_sys = function(env_params, USER_DIRS, callback) {
 }
 
 // General Utilities
-    exports.fileExt = function(fileName) {
+  exports.fileExt = function(fileName) {
         var ext = path.extname(fileName);
         if (ext && ext.length>0) ext = ext.slice(1);
         return ext;
@@ -81,7 +86,7 @@ exports.setup_file_sys = function(env_params, USER_DIRS, callback) {
 		if (aUrl.slice(aUrl.length-1) == "/") aUrl = aUrl.slice(0,aUrl.length-1);
 		return aUrl;
 	}
-    exports.folder_is_in_list_or_its_subfolders = function(folder_name, checklist) {
+  exports.folder_is_in_list_or_its_subfolders = function(folder_name, checklist) {
         folder_name = exports.removeStartAndEndSlashes(folder_name);
         if (!folder_name || !checklist || checklist.length==0)  return false;
         var sharable_folder;
@@ -93,7 +98,7 @@ exports.setup_file_sys = function(env_params, USER_DIRS, callback) {
         }
         return false;
     }
-    exports.valid_path_extension = function(aPath) {
+  exports.valid_path_extension = function(aPath) {
         var parts = aPath.split(path.sep);
         if (!aPath) return true;
         for (var i=0; i<parts.length; i++) {
@@ -160,24 +165,26 @@ exports.extractZippedAppFiles = function(zipfile, app_name, originalname, env_pa
         try {
             var zip = new AdmZip(zipfile); //"zipfilesOfAppsInstalled/"+app_name);
             var app_path = exports.fullLocalPathToAppFiles(app_name, null)
+            //onsole.log("extractZippedAppFiles to path "+app_path)
 
-            var zipEntries = zip.getEntries(); // an array of ZipEntry records
-            var gotDirectoryWithAppName = false;
+            let zipEntries = zip.getEntries(); // an array of ZipEntry records
+            let entryname=app_name+"/";
 
             zipEntries.forEach(function(zipEntry) {
-                // This is for case of compressing with mac, which also includes the subfolder - todo: review quirks with windows
-                if (zipEntry.isDirectory && zipEntry.entryName == app_name+"/") gotDirectoryWithAppName= true;
-                if (zipEntry.isDirectory && zipEntry.entryName == originalname+"/") gotDirectoryWithAppName= true;
-            });
+              if (!zipEntry.isDirectory && !helpers.startsWith(zipEntry.entryName, "__MACOSX")){
+                let targetpath = zipEntry.entryName
+                if (helpers.startsWith(zipEntry.entryName,"/")) targetpath = targetpath.slice(1)
+                if (helpers.startsWith(zipEntry.entryName,app_name)) targetpath = targetpath.slice(targetpath.indexOf("/")+1)
+                //onsole.log("zipEntry.entryName: "+zipEntry.entryName+ " targetpath: "+targetpath)
+                targetpath = targetpath.lastIndexOf("/")>0? ("/"+targetpath.slice(0,targetpath.lastIndexOf("/"))) :""
+                zip.extractEntryTo(zipEntry.entryName, (app_path+targetpath), false, true);
+              }
+            })
 
-            if (gotDirectoryWithAppName) { // If app named fodler was top level in the zip file
-                zip.extractEntryTo(app_name + "/", userAppsLocalPathTo(), true, true);
-            } else {
-                zip.extractAllTo(app_path, true);
-            }
             callback(null)
 
         } catch ( e ) {
+          console.warn(e)
             callback(helpers.invalid_data("error extracting from zip file "+JSON.stringify(e) , "file_handler", exports.version, "extractZippedAppFiles"));
         }
     }
@@ -194,6 +201,24 @@ exports.deleteAppFolderAndContents = function(app_name, env_params, callback){
                 callback(null)
             });        // from http://stackoverflow.com/questions/18052762/in-node-js-how-to-remove-the-directory-which-is-not-empty
         } else { callback(null)}
+    }
+}
+exports.requireFile = function(partialUrl, file_name, env_params, callback) {
+    var path_parts = partialUrl.split("/");
+    var app_name = (path_parts && path_parts.length>1)? path_parts[2]:null;
+
+    if (useCustomEnvironment(env_params, app_name) ) {
+        custom_environment.requireFile(partialUrl, env_params, callback);
+    } else {
+        let err, env_on_file;
+        //onsole.log("sendUserFile "+partialUrl)
+        try {
+          //onsole.log("requireFile in file_handler for ",exports.fullLocalPathToUserFiles(partialUrl, file_name))
+          env_on_file = require(exports.fullLocalPathToUserFiles(partialUrl, file_name))
+        } catch(e) {
+          err=e
+        }
+        callback(err, env_on_file)
     }
 }
 exports.sendUserFile = function(res, partialUrl, env_params) {
@@ -222,6 +247,7 @@ exports.writeUserFile = function (folderPartPath, fileName, saveOptions, data_mo
                     fileName = auto_enumerate_filename(folderPartPath,fileName);
                 }
             }
+            //onsole.log("writeUserFile to ",exports.fullLocalPathToUserFiles(folderPartPath, fileName))
             fs.writeFile(exports.fullLocalPathToUserFiles(folderPartPath, fileName), req.file.buffer, function() {callback(null, fileName )});
         });
     }
@@ -240,6 +266,7 @@ exports.writeTextToUserFile = function (folderPartPath, fileName, fileText, save
                     fileName = auto_enumerate_filename(folderPartPath,fileName);
                 }
             }
+            //onsole.log("Writing writeTextToUserFile to ",exports.fullLocalPathToUserFiles(folderPartPath, fileName))
             fs.writeFile(exports.fullLocalPathToUserFiles(folderPartPath, fileName), fileText, function() {callback(null, fileName )});
         });
     }
@@ -371,8 +398,10 @@ exports.partPathToAppFiles = function(app_name, fileName) {
 }
 exports.partPathToUserAppFiles = function(app_name, fileName) {
     // onsole.log("partPathToAppFiles app "+app_name+" file "+fileName)
-    if (helpers.startsWith(fileName,"./")) return '/userapps'+fileName.slice(1);
-    return '/userapps/'+app_name+ (fileName? '/'+fileName: '') ;
+    let partialPath = (freezr_environment && freezr_environment.userDirParams && freezr_environment.userDirParams.userRoot)? (freezr_environment.userDirParams.userRoot + path.sep):""
+    partialPath = path.sep + partialPath + 'userapps'
+    if (helpers.startsWith(fileName,"./")) return partialPath+fileName.slice(1);
+    return partialPath + (app_name? (path.sep + app_name):'') + (fileName? '/'+fileName: '') ;
 }
 exports.check_app_config = function(app_config, app_name, app_version, flags){
     // onsole.log("check_app_config "+app_name+" :"+JSON.stringify(app_config));
@@ -423,7 +452,8 @@ exports.check_app_config = function(app_config, app_name, app_version, flags){
 exports.fullLocalPathToUserFiles = function(targetFolder, fileName) {
 	// target flder format and rights must have been valdiated.. ie starts with userfiles / user name / app name
 	//onsole.log("fullLocalPathToUserFiles  "+targetFolder+" file:"+fileName+" freezr_environment"+JSON.stringify(freezr_environment));
-    var partialUrl = exports.removeStartAndEndSlashes(targetFolder) + (fileName? path.sep+fileName: '');
+  let partialUrl = exports.removeStartAndEndSlashes(targetFolder) + (fileName? path.sep+fileName: '');
+  if (freezr_environment && freezr_environment.userDirParams && freezr_environment.userDirParams.userRoot) partialUrl = freezr_environment.userDirParams.userRoot + path.sep + partialUrl
 	return path.normalize(systemPath() + path.sep + partialUrl )
 }
 exports.appLocalFileExists = function(app_name, file_name, env_params) {
@@ -474,8 +504,8 @@ exports.systemAppsPathTo = function(partialUrl) {
     return exports.systemPathTo(partialUrl.replace("app_files","systemapps") );
 }
 exports.userLocalFileStats = function(user_id,app_name,folder_name, file_name, callback){
-    //
-    fs.stat (userAppsLocalPathTo("userfiles"+exports.sep()+user_id+exports.sep()+app_name+(folder_name?exports.sep()+folder_name:"")+exports.sep()+file_name), callback);
+    if (!app_name) callback(helpers.error("cannot get user stats on root directory"))
+    else fs.stat (userAppsLocalPathTo("userfiles"+exports.sep()+user_id+exports.sep()+app_name+(folder_name?exports.sep()+folder_name:"")+exports.sep()+file_name), callback);
 }
 var deleteLocalFolderAndContents = function(location, next) {
     // http://stackoverflow.com/questions/18052762/in-node-js-how-to-remove-the-directory-which-is-not-empty
@@ -519,8 +549,10 @@ var auto_enumerate_filename = function(folderpath,fileName) {
 }
 var localCheckExistsOrCreateUserFolder = function (aPath, callback) {
     // from https://gist.github.com/danherbert-epam/3960169
+    //onsole.log("localCheckExistsOrCreateUserFolder checking "+aPath)
     var pathSep = path.sep;
     var dirs =  path.normalize(aPath).split(path.sep);
+    if (freezr_environment && freezr_environment.userDirParams && freezr_environment.userDirParams.userRoot) dirs.unshift(freezr_environment.userDirParams.userRoot)
     var root = "";
 
     mkDir();
@@ -556,15 +588,16 @@ var localCheckExistsOrCreateUserFolder = function (aPath, callback) {
 };
 var userAppsLocalPathTo = function(partialUrl) {
     if (!partialUrl) partialUrl="app_files"
-    partialUrl = partialUrl.replace("app_files","userapps");
+    partialUrl = exports.removeStartAndEndSlashes(partialUrl.replace("app_files","userapps") );
+    if (freezr_environment && freezr_environment.userDirParams && freezr_environment.userDirParams.userRoot) partialUrl = freezr_environment.userDirParams.userRoot + path.sep + partialUrl
+
     //onsole.log("userAppsLocalPathTo "+partialUrl)
     if (custom_environment) { // todo clean up - make sure custom env is needed
-        console.warn("SNBH - tdodo - review - "+partialUrl)
-        return exports.removeStartAndEndSlashes(partialUrl)
-    } else {
-        return exports.systemPathTo(partialUrl);
+        console.warn("SNBH - "+partialUrl)
     }
+    return exports.systemPathTo(partialUrl);
 }
+
 
 
 // MAIN LOAD PAGE

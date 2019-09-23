@@ -12,7 +12,7 @@ var Dropbox = require('dropbox'),
     fs = require('fs'), path = require('path'), // for cached app files
     json = require('comment-json');
 
-exports.version = "0.0.123";
+exports.version = "0.0.131";
 
 /*
 
@@ -84,6 +84,9 @@ exports.sendAppFile = function(res, filePath, env_params) {
 		});
 	}
 }
+exports.requireFile = function(partialUrl, env_params, callback) {
+	callback(new Error("requireFile is not implemented in dropbox yet"))
+}
 
 exports.writeUserFile = function (folderPartPath, fileName, saveOptions, data_model, req, callback) {
 	//onsole.log("writeUserFile",folderPartPath)
@@ -134,6 +137,7 @@ exports.writeUserFile = function (folderPartPath, fileName, saveOptions, data_mo
 
         });
 }
+
 exports.writeTextToUserFile = function (folderPartPath, fileName, fileText, saveOptions, data_model, app_name, freezr_environment, callback) {
 	//onsole.log("writeUserFile",folderPartPath)
 	// Used for userapps and userfiles
@@ -229,6 +233,7 @@ exports.sendUserFile = function(res, filePath, env_params) {
 	}
 }
 exports.get_file_content = function(filePath, env_params, callback) {
+	//onsole.log("get_file_content for "+filePath)
 	if (!dbx) exports.init_custom_env(env_params);
 	filePath = filePath.replace("app_files","userapps");
 	if (!helpers.startsWith(filePath,"/")) filePath = "/"+filePath
@@ -302,13 +307,14 @@ var doParseConfig = function(app_name, app_config, callback) {
 	}
 }
 exports.extractZippedAppFiles = function(zipfile, app_name, originalname, env_params, callback){
+	//onsole.log("in dropbox extractZippedAppFiles")
 	var AdmZip = require('../forked_modules/adm-zip/adm-zip.js');
     var zip = new AdmZip(zipfile); //"zipfilesOfAppsInstalled/"+app_name);
     var zipEntries = zip.getEntries(); // an array of ZipEntry records
     var gotDirectoryWithAppName = null;
     zipEntries.forEach(function(zipEntry) {
-        // This is for case of compressing with mac, which also includes the subfolder - todo: review quirks with windows
-        if (!gotDirectoryWithAppName && zipEntry.isDirectory && zipEntry.entryName == app_name+"/") gotDirectoryWithAppName= app_name+"/";
+        // This is for case of compressing a zip file which includes a root folder with the app names
+        if (!gotDirectoryWithAppName && zipEntry.isDirectory && helpers.startsWith(zipEntry.entryName, app_name) && zipEntry.entryName.indexOf("/")>1) gotDirectoryWithAppName= zipEntry.entryName.slice(0,zipEntry.entryName.indexOf("/"+1));
         if (!gotDirectoryWithAppName && zipEntry.isDirectory && zipEntry.entryName == originalname+"/") {gotDirectoryWithAppName= originalname+"/";}
     });
     //onsole.log("env.extractZippedAppFiles "+app_name+" gotDirectoryWithAppName "+ gotDirectoryWithAppName )
@@ -330,7 +336,7 @@ exports.extractZippedAppFiles = function(zipfile, app_name, originalname, env_pa
 		}
 		if (dowrite) {
 			if (gotDirectoryWithAppName && helpers.startsWith(file_name, gotDirectoryWithAppName) ) {
-				file_name = "userapps/"+app_name+"/"+file_name.substring(gotDirectoryWithAppName.length);
+				file_name = "userapps/"+app_name+"/"+file_name.substring(gotDirectoryWithAppName.length+1);
 			} else if (gotDirectoryWithAppName) {
 				dowrite = false
 			} else {
@@ -338,7 +344,6 @@ exports.extractZippedAppFiles = function(zipfile, app_name, originalname, env_pa
 			}
 		}
 		if (dowrite) {
-			//onsole.log("writing user file "+file_name)
 			exports.writeUserFile (file_name, null, {fileOverWrite:true, doNotWriteToCache:true}, null, fakereq, function(err){
 				if (err) helpers.warning("file_env_dropbox", exports.version, "extractZippedAppFiles", "Error writing file "+file_name+" to dropbox" )
 				callfwdback();
@@ -354,7 +359,7 @@ exports.extractZippedAppFiles = function(zipfile, app_name, originalname, env_pa
 			console.warn("got err extracting files in zip.extractAllToAsyncWithCallFwd")
 			console.warn(err)
 			callback(err)
-			/* // to do later - error heck this..
+			/* // to do later - error check this..
 		} else if (useAppFileFSCache()){
 			try {
 	            var zip = new AdmZip(zipfile); //"zipfilesOfAppsInstalled/"+app_name);

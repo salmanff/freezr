@@ -14,7 +14,11 @@ freezr.initPageScripts = function() {
 		showError("Error - Missing source")
 	} else if (!fragments.sender) {
 		showError("Error - Missing sender")
-	} else {		
+	} else {
+			if (fragments.sender.replace("http://","https://") != document.referrer.replace("http://","https://")) {
+				console.log("Error -  inconsitent sender (oauthor compared to fragements):"+fragments.sender+ " vs " + document.referrer)
+				showError("Error -  inconsitent sender (oauthor compared to fragements)")
+			}
 	    let options = {
 	      source: fragments.source,
 	      name: fragments.name,

@@ -5,6 +5,8 @@ exports.version = '0.0.122';
 var async = require('async'),
     flags_obj = require("./flags_obj.js");
 
+exports.RESERVED_FIELD_LIST = ["_owner","_date_Created", "_date_Modified","_accessible_By","_publicid","_id", "_date_Published","_date_Accessibility_Mod"];
+exports.USER_DIRS = ["userfiles", "userapps", "userbackups"]
 
 exports.log = function(req, message) {
     console.log((new Date())+" - "+(req? (req.session.logged_in_user_id || "no_user"): " server ")+" - "+message)
@@ -12,7 +14,7 @@ exports.log = function(req, message) {
 
 // Valid names
     exports.system_apps = ["info.freezr.account","info.freezr.admin","info.freezr.public","info.freezr.permissions","info.freezr.posts","info.freezr.logs"];
-    exports.permitted_types = { 
+    exports.permitted_types = {
         groups_for_objects: ["user","logged_in","public"],
         groups_for_fields: ["user","logged_in"],
         type_names: ["folder_delegate","field_delegate","object_delegate", "db_query"], // used in getDataObject
@@ -20,7 +22,7 @@ exports.log = function(req, message) {
     var reserved_collection_names = ["field_permissions", "accessible_objects"]; // "files" s also reserved but can write to it
     const RESERVED_IDS =["freezr_admin"]
 
-    // note - App_name and user_id etc could have spaces but need to deCodeUri when in url 
+    // note - App_name and user_id etc could have spaces but need to deCodeUri when in url
     exports.valid_app_name = function(app_name) {
         if (!app_name) return false;
         if (app_name.length<1) return false;
@@ -71,7 +73,7 @@ exports.log = function(req, message) {
             return false
         } else if (reserved_collection_names.indexOf(collection_name)>-1){
             return false;
-        } 
+        }
         return true;
     }
 
@@ -114,7 +116,7 @@ exports.log = function(req, message) {
         console.warn ("* * * ERROR *** :  Internal Error in system_file "+system_file+" function: "+theFunction+" message:"+message);
         return exports.error("internal_error",
                              "Internal error: "+message);
-    };    
+    };
     exports.warning = function (system_file, version, theFunction, message ) {
         //
         console.warn ("* * * WARNING *** :  "+(new Date())+" Possible malfunction in system_file "+system_file+" function: "+theFunction+" message:"+message);
@@ -154,7 +156,7 @@ exports.log = function(req, message) {
         console.warn ("WARNING - Missing Data err in system_file "+system_file+" function: "+theFunction+" missing:"+what);
         return exports.error("missing_data",
                              "You must include " + what);
-    }    
+    }
     exports.invalid_data = function (what, system_file, version, theFunction) {
         console.warn ("WARNING - Invalid Data err in system_file "+system_file+" function: "+theFunction+" missing:"+what);
         return exports.error("invalid_data",
@@ -188,7 +190,7 @@ exports.log = function(req, message) {
 
 // UTILITIES
     exports.startsWith = function(longertext, checktext) {
-        if (!longertext || !checktext || !(typeof longertext === 'string')|| !(typeof checktext === 'string')) {return false} else 
+        if (!longertext || !checktext || !(typeof longertext === 'string')|| !(typeof checktext === 'string')) {return false} else
         if (checktext.length > longertext.length) {return false} else {
         return (checktext == longertext.slice(0,checktext.length));}
     }
@@ -210,7 +212,7 @@ exports.log = function(req, message) {
             return [anItem]
         } else if (aList.indexOf(anItem) < 0) {
             aList.push(anItem);
-        } 
+        }
         return aList
     }
     exports.now_in_s = function () {
@@ -260,8 +262,8 @@ exports.getUniqueWords = function (anObject,theFields){
  allWords = [];
  if (Array.isArray(anObject) || typeof anObject != "object" || !theFields) {
     return getWords(anObject)
- } else { 
-   theFields.forEach(function(aField) { 
+ } else {
+   theFields.forEach(function(aField) {
       allWords = allWords.concat(getWords(anObject[aField]))
     });
   return reduceToUnique(allWords);
@@ -284,7 +286,7 @@ exports.variables_are_similar = function (obj1, obj2) {
         return objects_are_similar(obj1, obj2)
     } else {
         //onsole.log("variables_are_similar NOT - Unknown mismatch ",obj1,obj2)
-        return false        
+        return false
     }
 
     // Array.isArray(anObject) || typeof anObject != "object"
@@ -317,7 +319,7 @@ var objects_are_similar = function (obj1, obj2) {
     } else {
         for (var key in obj1) {
           if (obj1.hasOwnProperty(key)) {
-            if (!exports.variables_are_similar(obj1[key],obj2[key]) ) { 
+            if (!exports.variables_are_similar(obj1[key],obj2[key]) ) {
                 //onsole.log("objects_are_similar NOT -Mismatch comparing ",key,obj1[key],obj2[key])
                 return false;
             }
@@ -337,6 +339,3 @@ exports.isEmpty = function(obj)  {
     if (!obj) return true
     return Object.keys(obj).length === 0;
 }
-
-
-

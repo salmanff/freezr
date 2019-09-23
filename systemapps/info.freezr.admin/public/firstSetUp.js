@@ -5,7 +5,7 @@ const INPUT_TEXT_PARAM_LIST = ['user_id', 'password', 'password2', 'db_user', 'd
 
 freezr.initPageScripts = function() {
   document.addEventListener('click', function (evt) {
-    console.log(evt.target.id)
+    //onsole.log(evt.target.id)
     let args = evt.target.id.split("_");
     let params = {};
     if (args && args.length>1 && args[0] == "click") {
@@ -15,7 +15,7 @@ freezr.initPageScripts = function() {
             break;
           case 'externalDb':
             if (args[2]) {
-              showSubSection(args[1],args[2]) 
+              showSubSection(args[1],args[2])
             } else {
               showMainSection(args[1])
             }
@@ -51,7 +51,7 @@ freezr.initPageScripts = function() {
 
   // populate
   let tempParams =localStorage.getItem("params");
-  
+
   if (tempParams) {
     // These are kept when leaving the site to go authenticate
     tempParams = JSON.parse(tempParams);
@@ -66,7 +66,7 @@ freezr.initPageScripts = function() {
       db_connectionString: freezr_environment.dbParams.connectionString,
       db_has_pw: freezr_environment.dbParams.has_password,
       db_unifiedDbName: (freezr_environment.dbParams.unifiedDbName? freezr_environment.dbParams.unifiedDbName : ""),
-      fs_selectorName: (freezr_environment.userDirParams.name? freezr_environment.userDirParams.name : "local"),
+      fs_selectorName: ((freezr_environment.userDirParams.name && freezr_environment.userDirParams.name!="glitch.com")? freezr_environment.userDirParams.name : "local"),
       fs_auth_Server: 'https://www.salmanff.com',
       fs_auth_AppName: 'freezr'
     }
@@ -92,7 +92,7 @@ freezr.initPageScripts = function() {
   hideCustSelectorDivs((tempParams.fs_token || tempParams.fs_has_token)? "gotToken": null);
 
   populateErrorMessage(freezrServerStatus, true);
-  
+
   setTimeout(function(){ document.body.scrollTop = 0;},20);
 }
 var showMainSection = function (section) {
@@ -100,22 +100,20 @@ var showMainSection = function (section) {
   showDiv(section);
 }
 var showSubSection = function (mainSection, subSection) {
-  console.log("as",mainSection,subSection)
+  //onsole.log("as",mainSection,subSection)
   if (mainSection == 'externalDb') {
-    console.log("adsds")
     hideDiv("externalDb_"+(subSection == 'connectionString'? 'Details':'connectionString'));
-    showDiv("externalDb_"+subSection); 
+    showDiv("externalDb_"+subSection);
   }
 }
 var  populateForm = function(params) {
   //onsole.log("populateForm",params)
   INPUT_TEXT_PARAM_LIST.forEach(aParam =>  {if(document.getElementById(aParam)) document.getElementById(aParam).value = params[aParam] || "";})
 
-  document.getElementById('db_addAuth').checked = params.db_addAuth? true:false; 
+  document.getElementById('db_addAuth').checked = params.db_addAuth? true:false;
   if (!params.fs_selectorName) params.fs_selectorName = "local";
   let selector = document.getElementById('customFileSysSelect');
   selector.selectedIndex = CUST_FILE_SEL_LIST.indexOf(params.fs_selectorName);
-  console.log("selector.selectedIndex" +selector.selectedIndex+" for name "+params.fs_selectorName)
 }
 var hideCustSelectorDivs = function(oauth2show) {
   var serviceName = CUST_FILE_SEL_LIST[document.getElementById('customFileSysSelect').selectedIndex];
@@ -144,19 +142,19 @@ var goAuthDropbox = function() {
     window.localStorage.setItem("params", JSON.stringify(currentParams));
 
     const allurl = url+"/admin/public/oauth_start_oauth#source=dropbox&type=file_env&name="+appName+"&sender="+encodeURIComponent(freezr_server_address+"/admin/public/firstSetUp")
-    console.log("opening authenticator site as first step in oauth process: "+allurl)
+    //onsole.log("opening authenticator site as first step in oauth process: "+allurl)
     window.open(allurl,"_self");
   }
 }
 var get_current_vals = function() {
   let params = {};
   INPUT_TEXT_PARAM_LIST.forEach(aParam =>  {if(document.getElementById(aParam)) params[aParam] = document.getElementById(aParam).value? document.getElementById(aParam).value:null;})
-  
+
   params.db_addAuth=document.getElementById('db_addAuth')? document.getElementById('db_addAuth').checked:null;
 
   params.wantsExternalDb = (params.connectionString || params.db_host || params.db_pword || freezr_environment.dbParams.has_password);
-  
-  params.externalDb = params.db_connectionString? 
+
+  params.externalDb = params.db_connectionString?
           {connectionString:params.db_connectionString, has_password: freezr_environment.dbParams.has_password}
           :
             (params.wantsExternalDb?
@@ -166,7 +164,7 @@ var get_current_vals = function() {
   params.externalFs = {};
   params.fileSysSelected = CUST_FILE_SEL_LIST[document.getElementById('customFileSysSelect').selectedIndex];
   if (params.fileSysSelected!= 'local') {
-    params.externalFs = {name: params.fileSysSelected, access_token: document.getElementById('fs_token').value, has_access_token:freezr_environment.userDirParams.has_access_token}; 
+    params.externalFs = {name: params.fileSysSelected, access_token: document.getElementById('fs_token').value, has_access_token:freezr_environment.userDirParams.has_access_token};
     if (!params.externalFs.access_token && !freezr_environment.userDirParams.has_access_token) { params.infoMissing = true; }
   }
   return params
@@ -175,8 +173,8 @@ var register = function () {
   (document.documentElement || document.body.parentNode || document.body).scrollTop = 0;
 
   let forminfo = get_current_vals();
-  // create 
-  console.log(forminfo)
+  // create
+  //onsole.log(forminfo)
 
   if (!forminfo || !forminfo.user_id || !forminfo.password) {
     showError("You need a name and password to log in");
@@ -208,7 +206,7 @@ var register = function () {
 var gotRegisterStatus = function(data) {
   var theEl = document.getElementById("freezer_dialogueInnerText");
   if (data) data = freezr.utils.parse(data);
-  console.log("gotRegisterStatus "+JSON.stringify(data));
+  //onsole.log("gotRegisterStatus "+JSON.stringify(data));
   if (!data) {
     freezr.utils.freezrMenuClose();
     showError("Could not connect to server");
@@ -229,10 +227,10 @@ var gotRegisterStatus = function(data) {
 
 
 var showInstructions = function(freezrStatus) {
-  populateErrorMessage(freezrStatus, false);  
+  populateErrorMessage(freezrStatus, false);
   var els = [], theClass;
   if (freezrStatus.fundamentals_okay) {
-    if (freezrStatus.environment_mismatch || !freezrStatus.can_write_to_system_folder || ((freezrStatus.other_errors && freezrStatus.other_errors.length>0))){
+    if (!freezrStatus.environments_match || !freezrStatus.can_write_to_user_folder|| ((freezrStatus.other_errors && freezrStatus.other_errors.length>0))){
       theClass = "fh_partsuccess"
     } else {
       theClass = "fh_success"
@@ -244,7 +242,7 @@ var showInstructions = function(freezrStatus) {
   document.getElementById("close_instructions_01").style.display="none";
 }
 var populateErrorMessage = function (freezrServerStatus, initial){
-  //onsole.log("freezrServerStatus",freezrServerStatus)
+  console.log("freezrServerStatus",freezrServerStatus)
   var inner = "";
   if (!freezrServerStatus.fundamentals_okay) {
     var inner = "<b>There was a serious issue with your freezr server environement.<br/>";
@@ -258,10 +256,9 @@ var populateErrorMessage = function (freezrServerStatus, initial){
     inner+= (initial? "Please review your External File System or Database for alternatives" : "Please try resubmitting credentials.");
     inner+= "<br/><br/>";
   }
-  inner+= freezrServerStatus.environment_mismatch? "There was a mismatch on environment paramaters":"";
-  inner+= freezrServerStatus.can_write_to_system_folder? "": "There was a problem writing to the system folder.";
+  inner+= !freezrServerStatus.environments_match? "There was a mismatch on environment paramaters":"";
   inner+= (freezrServerStatus.other_errors && freezrServerStatus.other_errors.length>0)? ("Other issues"+freezrServerStatus.other_errors.join("<br/>")):"";
-  
+
   if (!firstSetUp) inner+="<br/><hr/>IT IS VERY DANGEROUS TO RESET YOUR FREEZR WITH NEW PARAMETERS. <BR/> ONLY DO THIS IF YOU REALLY KNOW WHAT YOU ARE DOING.<br/><hr/>"
   showError(inner);
 }
@@ -301,12 +298,13 @@ var showClass = function (theClass){
 }
 var showDiv = function (divId){
   let theEl = document.getElementById(divId);
-  console.log("shwoing "+divId+(theEl? "exists":"ex NOT"))
+  //onsole.log("shwoing "+divId+(theEl? "exists":"ex NOT"))
   if (theEl) theEl.style.display="block";
 }
 var hideDiv = function (divId){
   let theEl = document.getElementById(divId);
-  console.log("hiding "+divId+(theEl? "exists":"ex NOT"))
+
+  //onsole.log("hiding "+divId+(theEl? "exists":"ex NOT"))
   if (theEl) theEl.style.display="none";
 }
 var hideDivs = function(theDivs) {
@@ -319,5 +317,3 @@ var showDivs = function(theDivs) {
     for (var i=0;i<theDivs.length;i++) {showDiv(theDivs[i])};
   }
 }
-
-

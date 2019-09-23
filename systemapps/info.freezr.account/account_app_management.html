@@ -20,7 +20,7 @@ freezr Account App Mangement
       <a id="freezer_admin_butt" href="/admin/home">Admin</a>
       &nbsp;
       <a href="/account/logout">Log Out</a>
-    </div>    
+    </div>
 
     <div class="freezer_dialogueTitle">freezr.info - App Management</div>
 
@@ -28,26 +28,50 @@ freezr Account App Mangement
 
     <table class="app_container">
       <tr>
-        <td>
+        <td width="90%">
             <div class="freezer_app_page_title">Upload a New App</div>
-            <div>Zip file name must be name of app</div>
+            <div>Choose an app zip file.</div>
         </td>
-        <td width="50%">
+        <td width="50px">
         </td>
       </tr>
       <tr>
           <td>
-            <div class="button left" id="button_chooseFile">Choose</div>
+            <div class="button left" id="button_chooseFile">Choose a file</div>
             <div class="choose_file_outer"> <input class="choose_file_inner" id="app_zipfile2" type='file' class="freezer_butt" name="app_zipfile2"/></div>
           </td>
-          <td width="50%" >    
+          <td width="50%" >
             <div id="button_uploadZipFileApp" class="left button" style="display:none"><br/>upload</div>
         </td>
       </tr>
     </table>
 
+
+    <br/>
+    <div class="freezer_app_page_title">Download an app via from another web site</div>
+        <table class="app_container" id="addUrlTable">
+          <tr>
+            <td width="90%">
+              <span class="texttop">Enter URL:</span>
+              <div  id="appUrl" contentEditable="true">https://github.com/user/repo</div>
+               <div class="">
+
+               </div>
+              <span class="texttop">app Name:</span>
+              <div id="appNameFromUrl" contentEditable="true"/></div>
+            </td>
+            <td width="50px">
+              <div id="button_addAppViaUrl" class="button left">Down-load & Install</div>
+            </td>
+          </tr>
+        </table>
+    <br/>
+
     <div id="button_showDevOptions">show dev options</div>
     <br/>
+
+
+
 
     <table class="app_container dev_option" id="addFileTable" style="display:none">
       <tr>
@@ -70,12 +94,3 @@ freezr Account App Mangement
   <br/>
   </div>
 </div>
-
-
-
-
-
-
-
-
-

@@ -22,7 +22,7 @@ body{
 	width: 40px;
 	height:55px;
 	font-size: 12px;
-	vertical-align: top;	
+	vertical-align: top;
 	cursor: pointer;
 	background-color:  rgba(255, 255, 255, 0.6);
 	color: blue;
@@ -56,7 +56,7 @@ body{
 .small_text {
 	font-size: 10px;
 	vertical-align: top;
-	text-overflow: ellipsis;	
+	text-overflow: ellipsis;
 }
 #appNameFromFolder {
 	margin-top: 15px;
@@ -85,4 +85,16 @@ body{
 	font-size: 12px;
 	color: blue;
 }
-
+#appUrl , #appNameFromUrl {
+	width:80%;
+	display: inline-block;
+	border: 1px dotted darkblue;
+	border-radius: 2px;
+	margin-top: -2px;
+	margin-bottom: 10px;
+	vertical-align: top;
+	cursor: auto;
+}
+.texttop {
+	vertical-align: top;
+}

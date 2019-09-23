@@ -1,13 +1,11 @@
 // freezr.info - nodejs system files - app_handler.js
 exports.version = "0.0.122";
- 
+
 var helpers = require('./helpers.js'),
-    freezr_db = require("./freezr_db.js"),
+    db_handler = require("./db_handler.js"),
     user_obj = require("./user_obj.js"),
     async = require('async'),
     file_handler = require('./file_handler.js');
-
-var reserved_field_name_list = ["_owner","_date_Created", "_date_Modified","_accessible_By","_publicid"];
 
 exports.generateSystemDataPage = function (req, res) {
     // '/allmydata/:whattodo/:app_name'
@@ -36,11 +34,11 @@ exports.generateSystemDataPage = function (req, res) {
     } else {
         helpers.send_internal_err_page(res, "app_handler", exports.version, "generateDataPage", "whattodo is not defined");
     }
-    
+
     exports.generatePage(req, res);
 }
 
-exports.generatePage = function (req, res) { 
+exports.generatePage = function (req, res) {
     // '/apps/:app_name' and '/apps/:app_name/:page' (and generateDataPage above)
     helpers.log (req,"appPage: "+req.url);
 
@@ -54,25 +52,25 @@ exports.generatePage = function (req, res) {
                 var page_name = req.params.page? req.params.page: "index";
                 var has_app_config = true;
                 if (!app_config) {
-                    app_config = {};
+                    app_config = {pages:{}};
                     has_app_config = false;
                 }
                 app_config.pages = app_config.pages || {};
                 app_config.pages[page_name] = app_config.pages[page_name] || {}
 
                 if (app_config.pages[page_name].initial_query) {
-                    // formulate req to add an internlcallforward and relevant query_params 
+                    // formulate req to add an internlcallforward and relevant query_params
                     // generatePageWithAppConfig (req, res, app_config, initial_query) addinitial data here and internalcallfwd it from db_quer
                             // note define requestee app and requestor app etc to fit db_query params without overlapping
 
                     // Only takes type: db_query at this time
-                    
+
                     var data_params = app_config.pages[page_name].initial_query;
 
                     req.params.requestor_app = req.params.app_name;
                     req.params.permission_name = data_params.permission_name;
                     var app_config_permission_schema = (app_config.permissions)? app_config.permissions[req.params.permission_name]: {};
-                    if (app_config_permission_schema) {                        
+                    if (app_config_permission_schema) {
                         req.params.requestee_app = (app_config_permission_schema.requestee_app)? app_config_permission_schema.requestee_app: req.params.requestor_app;
                         if (data_params.collection_name) {
                             if (app_config_permission_schema.collection) {
@@ -80,19 +78,19 @@ exports.generatePage = function (req, res) {
                                 if (data_params.collection_name && app_config_permission_schema.collection != data_params.collection_name) helpers.warning("app_handler", exports.version, "generatePage", "permission schema collections inconsistent with requested collction "+data_params.collection_name+" for app: "+req.params.app_name)
                             } else if (app_config_permission_schema.collections && Object.prototype.toString.call( app_config_permission_schema.collections ) === '[object Array]' && app_config_permission_schema.collections.length>0) {
                                 if (data_params.collection_name && app_config_permission_schema.collections.indexOf(data_params.collection_name)>0) {
-                                    req.body.collection = data_params.collection_name;   
+                                    req.body.collection = data_params.collection_name;
                                 } else {
                                     helpers.send_failure(res, 500, helpers.state_error("app_handler", exports.version, "generatePage","bad_colelction_name","permission schema collections inconsistent with requested collction "+data_params.collection_name+" for app: "+req.params.app_name));
-                                }            
+                                }
                             } else {
                                 helpers.send_failure(res, 500, helpers.state_error("app_handler", exports.version, "generatePage","bad_colelction_name","permission schema collections not stated - need to add to app config:  "+data_params.collection_name+" for app: "+req.params.app_name));
                             }
                         } else {
                             if (app_config_permission_schema.collections && Object.prototype.toString.call( app_config_permission_schema.collections ) === '[object Array]' && app_config_permission_schema.collections.length>0) {
-                                req.body.collection = app_config_permission_schema.collections[0]   
+                                req.body.collection = app_config_permission_schema.collections[0]
                             } else {
                                 helpers.send_failure(res, 500, helpers.state_error("app_handler", exports.version, "generatePage","bad_colelction_name","permission schema collections not stated - need to add to app config the desired collection for  app: "+req.params.app_name));
-                            } 
+                            }
                         }
                     } else {
                         req.params.requestee_app = req.params.requestor_app;
@@ -102,37 +100,38 @@ exports.generatePage = function (req, res) {
 
                     req.internalcallfwd = function (err, results) {
                         if (err) console.warn("State Error "+err)
-                        
+
                         req.params.queryresults = {results: results};
                         generatePageWithAppConfig(req, res, app_config);
                     }
                     exports.db_query(req, res);
 
-                } else if (!has_app_config){
-                    // todo - check if the files exist first
-                    app_config.pages[page_name].page_title  =  page_name;
-                    app_config.pages[page_name].html_file   =  page_name+".html"; // file_handler.appLocalFileExists(req.params.app_name, (page_name+".html"))?  page_name+".html" : null;
-                    app_config.pages[page_name].css_files   =  page_name+".css"; // file_handler.appLocalFileExists(req.params.app_name, (page_name+".css" ))?  page_name+".css"  : null;
-                    app_config.pages[page_name].script_files= [page_name+".js"] //file_handler.appLocalFileExists(req.params.app_name, (page_name+".js"  ))? [page_name+".js"]  : null; 
-                    generatePageWithAppConfig(req, res, app_config);
                 } else {
+                    // todo - check if the files exist first?
+                    if (!has_app_config || !app_config.pages[page_name] || !app_config.pages[page_name].page_title){
+                      app_config.pages[page_name]={}
+                      app_config.pages[page_name].page_title  =  page_name;
+                      app_config.pages[page_name].html_file   =  page_name+".html"; // file_handler.appLocalFileExists(req.params.app_name, (page_name+".html"))?  page_name+".html" : null;
+                      app_config.pages[page_name].css_files   =  page_name+".css"; // file_handler.appLocalFileExists(req.params.app_name, (page_name+".css" ))?  page_name+".css"  : null;
+                      app_config.pages[page_name].script_files= [page_name+".js"] //file_handler.appLocalFileExists(req.params.app_name, (page_name+".js"  ))? [page_name+".js"]  : null;
+                    }
                     generatePageWithAppConfig(req, res, app_config);
                 }
             }
-        }) 
+        })
     } else {
          generatePageWithAppConfig(req, res, req.params.sysConfig)
     }
 }
 
-var generatePageWithAppConfig = function (req, res, app_config) { 
+var generatePageWithAppConfig = function (req, res, app_config) {
     var page_name = req.params.page? req.params.page: "index";
     if (helpers.endsWith(page_name, '.html')) page_name = page_name.slice(0,-5);
 
     var page_params = {};
     if (app_config && app_config.pages && app_config.pages[page_name]) {
         page_params = app_config.pages[page_name];
-    } 
+    }
 
     var options = {
         page_title: page_params.page_title+" - freezr.info",
@@ -149,9 +148,9 @@ var generatePageWithAppConfig = function (req, res, app_config) {
         other_variables: null,
         freezr_server_version: req.freezr_server_version,
         server_name: req.protocol+"://"+req.get('host')
-    }     
+    }
 
-    freezr_db.get_or_set_user_app_code (req.session.logged_in_user_id,req.params.app_name, function(err,results,cb){
+    db_handler.get_or_set_user_app_code (req.freezr_environment, req.session.logged_in_user_id,req.params.app_name, function(err,results,cb){
         if (err || !results.app_code) {
             helpers.send_internal_err_page(res, "app_handler", exports.version, "generatePage", "Could not get app code");
         } else {
@@ -159,7 +158,7 @@ var generatePageWithAppConfig = function (req, res, app_config) {
             options.messages.showOnStart = (results.newCode && app_config && app_config.permissions && Object.keys(app_config.permissions).length > 0);
 
 
-            freezr_db.check_device_code_specific_session(req.session.device_code, req.session.logged_in_user_id, req.params.app_name, function(err, cb) {
+            db_handler.check_device_code_specific_session(req.freezr_environment, req.session.device_code, req.session.logged_in_user_id, req.params.app_name, function(err, cb) {
                 // Put page param scripts in options.scrip_files, except for outside scripts to be checked below
                 if (err) {
                     req.session.device_code=null;
@@ -197,7 +196,7 @@ var generatePageWithAppConfig = function (req, res, app_config) {
                     }
 
                     if (outside_scripts.length>0) {
-                        freezr_db.all_userAppPermissions(req.session.logged_in_user_id, req.params.app_name, function(err, perm_list, cb) {
+                        db_handler.all_userAppPermissions(req.freezr_environment, req.session.logged_in_user_id, req.params.app_name, function(err, perm_list, cb) {
                             if (err) {
                                 helpers.send_internal_err_page(res, "app_handler", exports.version, "generatePage", "Could not get user app  permissions");
                             } else {
@@ -211,7 +210,7 @@ var generatePageWithAppConfig = function (req, res, app_config) {
                                             }
                                         }
                                     });
-                                }  
+                                }
                                 file_handler.load_data_html_and_page(res, options, req.freezr_environment);
                             }
                         })
@@ -219,9 +218,9 @@ var generatePageWithAppConfig = function (req, res, app_config) {
                         file_handler.load_data_html_and_page(res, options, req.freezr_environment);
                     }
                 }
-            })   
+            })
         }
-    });    
+    });
 };
 
 // database operations
@@ -231,52 +230,43 @@ exports.putData = function (req, res){
     helpers.log (req,"putData at "+req.url+"body:"+JSON.stringify((req.body && req.body.options)? req.body.options:" none"));
 
     // Initialize variables
-        if (req.body.options && (typeof req.body.options == "string")) req.body.options = JSON.parse(req.body.options); // needed when upload file
-        if (req.body.data && (typeof req.body.data == "string")) req.body.data = JSON.parse(req.body.data); // needed when upload file
+      let   data_object_id= (req.body.options && req.body.options.data_object_id)? req.body.options.data_object_id: null;
+      let   write = (req.body && req.body.data)? JSON.parse(JSON.stringify(req.body.data)): {};
+      const restoreRecord = (req.body.options && req.body.options.restoreRecord)
+      const updateRecord  = (req.body.options && (req.body.options.updateRecord || req.body.options.update))
+      const upsertRecord  = (req.body.options && req.body.options.upsert)
 
-        var data_object_id= (req.body.options && req.body.options.data_object_id)? req.body.options.data_object_id: null;
-        var flags = new Flags({'app_name':req.params.app_name});
-        var app_config = null, real_object_id, data_model, dbCollection = null, collection_name=null, returned_confirm_fields={},  real_object_id;
-        function app_err(message) {return helpers.app_data_error(exports.version, "putData", req.params.app_name, message);}
-        var fileParams = {'dir':"", 'name':"", 'duplicated_file':false};
-        fileParams.is_attached = (req.file)? true:false;
-        var isAccessibleObject, permission_object, accessibles_db;
-        var write = (req.body && req.body.data)? JSON.parse(JSON.stringify(req.body.data)): {};
+      let fileParams = {'dir':"", 'name':"", 'duplicated_file':false};
+          fileParams.is_attached = (req.file)? true:false;
+          if (req.body.options && (typeof req.body.options == "string")) req.body.options = JSON.parse(req.body.options); // needed when upload file
+          if (req.body.data && (typeof req.body.data == "string")) req.body.data = JSON.parse(req.body.data); // needed when upload file
 
-        var final_object = null;
+      let app_config = null, data_model, collection_name=null, appcollowner=null, returned_confirm_fields={};
+      let isAccessibleObject, permission_object;
+      var final_object = null;
+      let flags = new Flags({'app_name':req.params.app_name});
 
-        if (!req.body.options || !req.body.options.restoreRecord){
-            if (write._date_Modified) delete write._date_Modified;
-            if (write._date_Created ) delete write._date_Created;
-        }
-        if (req.body.options && !req.body.options.restoreRecord) {
-            reserved_field_name_list.forEach(function (aReservedField) {
-                delete write[aReservedField];
-                //if (write[aReservedField]) delete write[aReservedField];
-            } )
-        }
+      function app_err(message) {return helpers.app_data_error(exports.version, "putData", req.params.app_name, message);}
+      function app_auth(message) {return helpers.auth_failure("app_handler", exports.version, "putData", message);}
 
+    //onsole.log("-- write ",write)
 
-        //onsole.log("-- write ",write)
-        function app_auth(message) {return helpers.auth_failure("app_handler", exports.version, "putData", message);}
-        
-    // Set collection_name and data_model
-    
     async.waterfall([
     // 0. get app config
         function (cb) {
             file_handler.async_app_config(req.params.app_name, req.freezr_environment,cb);
         },
-    // 1. make sure all data exits
+    // 1. make sure all data exits - Set collection_name and data_model
         function (got_app_config, cb) {
             app_config = got_app_config;
 
+            // set collection name
             if (fileParams.is_attached) {
                 if (req.params.collection) flags.add('warnings','collectionNameWithFiles',{'collection_name':collection_name});
                 if (data_object_id) flags.add('warnings','dataObjectIdSentWithFiles');
                 collection_name = "files";
                 data_model = (app_config && app_config.files)? app_config.files: null;
-            } else if (req.params.collection == "files" && req.body.options && req.body.options.updateRecord){
+            } else if (req.params.collection == "files" && updateRecord){ //201909 review - also
                 collection_name = "files";
                 data_model = (app_config && app_config.files)? app_config.files: null;
             } else {
@@ -284,9 +274,10 @@ exports.putData = function (req, res){
                 data_model= (app_config && app_config.collections && collection_name && app_config.collections[collection_name])? app_config.collections[collection_name]: null;
             }
 
+            // Check data exists
             if (!req.session.logged_in_user_id) {
                 cb(helpers.auth_failure("app_handler", exports.version, "putData", req.params.app_name, "Need to be logged in to access app"));
-            } else if (!collection_name) { 
+            } else if (!collection_name) {
                 cb(app_err("Missing collection name"));
             } else if (!newObjectFieldNamesAreValid(req,data_model)) {
                 cb(app_err("invalid field names"));
@@ -295,26 +286,26 @@ exports.putData = function (req, res){
             } else if (!fileParams.is_attached && Object.keys(req.body.data).length<=0 ) {
                 cb(app_err("Missing data parameters."));
             } else if (!fileParams.is_attached && Object.keys(req.body.data).length<=0 ) {
-                cb(app_err("Missing data parameters."));               
-            } else if (helpers.system_apps.indexOf(req.params.app_name)>-1 || 
+                cb(app_err("Missing data parameters."));
+            } else if (helpers.system_apps.indexOf(req.params.app_name)>-1 ||
                 !collectionIsValid(collection_name,app_config,fileParams.is_attached)){
-                // check for exception of 
-                //onsole.log(collection_name,req.params.app_name,req.body.options.restoreRecord)
-                if (collection_name=="accessible_objects" && req.params.app_name=="info.freezr.permissions" && req.body.options.restoreRecord && req.body.options.password) {
-                    freezr_db.user_by_user_id(req.session.logged_in_user_id, function (err, user_json) {
+                if (collection_name=="accessible_objects" && req.params.app_name=="info.freezr.permissions" && restoreRecord && req.body.options.password) {
+                    db_handler.user_by_user_id(req.freezr_environment, req.session.logged_in_user_id, function (err, user_json) {
                         if (err) {
                             cb(err)
+                        } else if (!req.session.logged_in_as_admin){
+                            cb(helpers.auth_failure("app_handler", exports.version, "putData", req.params.app_name, "Need to be admin to restore records"));
                         } else {
                             var u = new User(user_json);
                             if (u.check_passwordSync(req.body.options.password)) {
                                 cb(null)
                             } else {
-                                cb(helpers.auth_failure("app_handler", exports.version, "putData", req.params.app_name, "Cannot upload to accessible_objects without a password"));
+                                cb(helpers.auth_failure("app_handler", exports.version, "putData", req.params.app_name, "Cannot restore records or upload to accessible_objects without a password"));
                             }
                         }
                     })
                 } else if (helpers.system_apps.indexOf(req.params.app_name)>-1 ){
-                    cb(helpers.invalid_data("app name not allowed: "+req.params.app_name, "account_handler", exports.version, "add_uploaded_app_zip_file"));
+                    cb(helpers.invalid_data("app name not allowed: "+req.params.app_name, "account_handler", exports.version, "putData"));
                 } else {
                     cb(app_err("Collection name "+collection_name+"is invalid."));
                 }
@@ -325,20 +316,20 @@ exports.putData = function (req, res){
 
     // 2. checkapp code (make sure the right app is sending data) and device_code (to make sure rights exist)
         function (cb) {
-            freezr_db.check_app_code(req.session.logged_in_user_id, req.params.app_name, req.params.source_app_code, cb)
+            db_handler.check_app_code(req.freezr_environment, req.session.logged_in_user_id, req.params.app_name, req.params.source_app_code, cb)
         },
         function (cb) {
-            freezr_db.check_device_code_specific_session(req.session.device_code, req.session.logged_in_user_id, req.params.app_name, cb)
+            db_handler.check_device_code_specific_session(req.freezr_environment, req.session.device_code, req.session.logged_in_user_id, req.params.app_name, cb)
         },
 
-    // 3. get data_object_id (if needed to be set manually) 
-    //     and if file: error check and write file  
+    // 3. get data_object_id (if needed to be set manually)
+    //     and if file: error check and write file
         function(cb) {
             if (fileParams.is_attached) {
                 fileParams.dir = (req.body.options && req.body.options.targetFolder)?req.body.options.targetFolder : "";
                 data_object_id = file_handler.removeStartAndEndSlashes(req.session.logged_in_user_id+"/"+file_handler.removeStartAndEndSlashes(""+fileParams.dir));
                 fileParams.dir = file_handler.normUrl(file_handler.removeStartAndEndSlashes("userfiles/"+req.session.logged_in_user_id+"/"+req.params.app_name+"/"+file_handler.removeStartAndEndSlashes(""+fileParams.dir)) );
-                fileParams.name = ( req.body.options && req.body.options.fileName)?req.body.options.fileName : req.file.originalname; 
+                fileParams.name = ( req.body.options && req.body.options.fileName)?req.body.options.fileName : req.file.originalname;
 
                 if (!helpers.valid_filename(fileParams.name) ) {
                     cb(app_err("Invalid file name"));
@@ -348,18 +339,20 @@ exports.putData = function (req, res){
                     cb(app_err("invalid folder name"));
                 } else {
                     data_object_id = data_object_id+"/"+fileParams.name;
-                    file_handler.writeUserFile(fileParams.dir, fileParams.name, req.body.options, data_model, req, cb);       
+                    file_handler.writeUserFile(fileParams.dir, fileParams.name, req.body.options, data_model, req, cb);
                 }
-            } else if ((!req.body.options || !req.body.options.updateRecord) && (!data_model || !data_model.make_data_id || (!data_model.make_data_id.from_field_names && !data_model.make_data_id.manual))) {
+              } else if (restoreRecord && !updateRecord) {
+                  if (!req.body.options.KeepUpdateIds){
+                      delete write._id;
+                  }
+                  cb(null, null);
+            } else if (!updateRecord
+                      && (!data_model || !data_model.make_data_id || (!data_model.make_data_id.from_field_names && !data_model.make_data_id.manual))) {
                 delete write._id;
                 cb(null, null);
-            } else if (req.body.options.updateRecord) { 
-                if (req.body.options.KeepUpdateIds){
-                    cb(null, null);
-                } else {
-                    delete write._id;
-                    cb(null, null);
-                }
+            } else if (updateRecord) { // 201909: redundant now that have it further below?
+                delete write._id;
+                cb(null, null);
             } else if (data_model && data_model.make_data_id && data_model.make_data_id.manual) {
                 if (write._id) {
                     cb(null, null);
@@ -370,18 +363,18 @@ exports.putData = function (req, res){
             // then is must be make_data_id.from_field_names...
             } else if  (data_model && data_model.make_data_id && (!data_model.make_data_id.reference_field_names || !(data_model.make_data_id.reference_field_names instanceof Array) || data_model.make_data_id.reference_field_names.length==0) ){
                 cb(app_err("object id reference field_names but none are included"));
-            } else { 
-                var err = null;
+            } else {
+                let err = null;
                 try {
                     data_object_id = unique_id_from(data_model.make_data_id.reference_field_names, req.body.data, req.session.logged_in_user_id);
                 } catch (e) {
-                    err=e; 
+                    err=e;
                 }
                 if (err) {cb(app_err("Could not set object_id - "+err));} else {cb(null);}
             }
         },
 
-    // 4. get collection, set real_object_id and get existing object (if it exists).
+    // 4. set appcollowner and get object_id and get existing object (if it exists).
         function (new_file_name, cb) {
             if (fileParams.is_attached && new_file_name != fileParams.name) {
                 var last =  data_object_id.lastIndexOf(fileParams.name);
@@ -391,16 +384,15 @@ exports.putData = function (req, res){
                     console.warn("SNBH - no file name in obejct id")
                 }
             }
-            //onsole.log('todo recheck filename change here and record', new_file_name,collection_name,req.params.app_name.replace(/\./g,"_"))
-            freezr_db.app_db_collection_get(req.params.app_name.replace(/\./g,"_"), collection_name, cb);
-        },
-        function (theCollection, cb) {
-            dbCollection = theCollection;
+            appcollowner = {
+              app_name:req.params.app_name,
+              collection_name:collection_name,
+              _owner:req.session.logged_in_user_id // note restoreRecords of logged_in user only
+            }
             if (!data_object_id) {
                 cb(null, null);
             } else {
-                real_object_id = freezr_db.real_id(data_object_id,app_config,collection_name);
-                dbCollection.find({ _id: real_object_id }).toArray(cb);
+                db_handler.db_find(req.freezr_environment, appcollowner, data_object_id, {}, cb)
             }
         },
 
@@ -409,43 +401,36 @@ exports.putData = function (req, res){
             //onsole.log("Going to write id "+data_object_id+((results && results.length>0)? "item exists": "new item"));
             //onsole.log("results of finding ",results)
             //onsole.log("data_model ",JSON.stringify(data_model))
-                write._owner = req.session.logged_in_user_id; 
-                if (!req.body.options || !req.body.options.restoreRecord || !write._date_Modified) write._date_Modified =  0 + (new Date().getTime() );
-                
+
                 if (fileParams.is_attached) {write._folder = (req.body.options && req.body.options.targetFolder)? file_handler.removeStartAndEndSlashes(req.body.options.targetFolder):"/";}
 
                 // set confirm_return_fields
                     var return_fields_list = (req.body.options && req.body.options.confirm_return_fields)? req.body.options.confirm_return_fields: ['_id'];
                     for (var i =0; i<return_fields_list.length; i++) {
-                        if ((typeof return_fields_list[i] == "string")  && 
+                        if ((typeof return_fields_list[i] == "string")  &&
                             write[return_fields_list[i]]) {
                             returned_confirm_fields[return_fields_list[i]] = write[return_fields_list[i]];
                         }
                         if (data_object_id) {returned_confirm_fields._id = data_object_id};
                     }
-            
 
-            if ((results == null || results.length == 0) && req.body.options && req.body.options.updateRecord && !req.body.options.restoreRecord && (!data_model || !data_model.make_data_id || !data_model.make_data_id.manual) ){
+
+            if ((results == null || results.length == 0) && req.body.options && req.body.options.updateRecord && !restoreRecord && (!data_model || !data_model.make_data_id || !data_model.make_data_id.manual) ){
                 cb(helpers.rec_missing_error(exports.version, "putData", req.params.app_name, "Document not found. (updateRecord with no record) for record "))
+            } else if (results && results[0] && results[0]._owner != req.session.logged_in_user_id && !restoreRecord) {
+                  cb(helpers.auth_failure("app_handler", exports.version, "putData", req.params.app_name, "Cannot write to another user's record"));
             } else if ( (results == null || results.length == 0) ) { // new document
-                write._date_Created = new Date().getTime();
-                if (data_object_id) {write._id = real_object_id;}; // it is not manual
-                //onsole.log("writing ",write)
                 if ((req.body.options && req.body.options.fileOverWrite) && fileParams.is_attached) flags.add('warnings','fileRecordExistsWithNoFile');
-                dbCollection.insert(write, { w: 1, safe: true }, cb);
-            } else if (results.length == 1 && fileParams.is_attached && (req.body.options && req.body.options.fileOverWrite) && results[0]._owner == req.session.logged_in_user_id) { // file data being updated
-                dbCollection.update({_id: real_object_id },
-                    {$set: write}, {safe: true }, cb);
-            } else if (results.length == 1 
-                        && req.body.options && (req.body.options.KeepUpdateIds || req.body.options.updateRecord || (data_model && data_model.make_data_id && data_model.make_data_id.manual)) && results[0]._owner == req.session.logged_in_user_id) { // document update
-                //todo: have option of overwriting all? dbCollection.update({ _id: real_object_id }, ie write, {safe: true }, cb);
-                final_object = results[0];
-                isAccessibleObject = (final_object._accessible_By && final_object._accessible_By.groups && final_object._accessible_By.groups.length>0);
-                returned_confirm_fields._updatedRecord=true;
-                dbCollection.update({ _id: real_object_id },
-                    {$set: write}, {safe: true }, cb);                
-            } else if (results[0]._owner != req.session.logged_in_user_id) {
-                cb(helpers.auth_failure("app_handler", exports.version, "putData", req.params.app_name, "Cannot write to another user's record"));
+                db_handler.db_insert(req.freezr_environment, appcollowner, data_object_id, write, {restoreRecord: restoreRecord}, cb)
+            } else if (results.length == 1
+                        && (  ((updateRecord || upsertRecord) || (data_model && data_model.make_data_id && data_model.make_data_id.manual))
+                           || (fileParams.is_attached  && (req.body.options && req.body.options.fileOverWrite)) )
+                        && results[0]._owner == req.session.logged_in_user_id) { // file data being updated
+              let old_object = results[0]
+              isAccessibleObject = (old_object._accessible_By && old_object._accessible_By.groups && old_object._accessible_By.groups.length>0); // 201909 - to review
+              returned_confirm_fields._updatedRecord=true;
+              delete write._id;
+              db_handler.update_app_record (req.freezr_environment, appcollowner, data_object_id, old_object,write, cb)
             } else if (results.length == 1) {
                 cb(app_err("data object ("+data_object_id+") already exists. Set updateRecord to true in options to update a document, or fileOverWrite to true when uploading files."));
             } else {
@@ -455,82 +440,77 @@ exports.putData = function (req, res){
 
         //if it is an accessible object then update the accessible_object record too
         // get permission db
-        function(final_object_list, cb) {
-            //onsole.log({final_object_list})
-            final_object = (final_object || ((final_object_list && final_object_list.ops && final_object_list.ops.length>0)? final_object_list.ops[0]:null));
+        function(write_confirm, cb) {
+            final_object = (final_object || ((write_confirm && write_confirm.entity)? write_confirm.entity:null));
             if (!isAccessibleObject) {
-                cb(null, cb)
-            } else {               
-                freezr_db.app_db_collection_get("info_freezr_permissions" , "accessible_objects", cb);
-            }
-        }, 
-        
-        function (theCollection, cb) {
-            if (!isAccessibleObject) {
-                cb(null, cb)
-            } else{
-                accessibles_db = theCollection;
-                // _accessible_By: {groups: ['public'], users:[], group_perms:{"public":["requestor_app1/perm1","requestor_app1/perm2"], user_perms:{someone:["requestor_app3/perm2"]} }
+              cb(null, cb)
+            } else if (!final_object){
+              cb(app_err("Did not get back a final object for object ("+data_object_id+"). Accessile object not updated. May need to reset access or try again."));
+            } else {
+              const accessibles_collection = {
+                app_name:'info_freezr_permissions',
+                collection_name:"accessible_objects",
+                _owner:'freezr_admin'
+              }
+              //onsole.log(final_object._accessible_By)
+              if (final_object._accessible_By.group_perms.public) { // todo? also do for non public?
+                  async.forEach(final_object._accessible_By.group_perms.public, function (requestorapp_permname, cb2) {
+                    var acc_id = req.session.logged_in_user_id+"/"+requestorapp_permname+"/"+req.params.app_name+"/"+collection_name+"/"+data_object_id;
+                    //onsole.log("getting acc_id "+acc_id)
+                    db_handler.db_getbyid(req.freezr_environment, accessibles_collection, acc_id, function(err, results) {
+                      if (!results) {
+                          flags.add('warnings', "missing_accessible", {"_id":acc_id, "msg":"permission does not exist - may have been removed - should remove public"});
+                          cb2(null);
+                      } else {
+                          permission_object = results;
+                          permission_object.data_object = {};
+                          var requestorApp = requestorapp_permname.split("/")[0];
 
-                //onsole.log(final_object._accessible_By)
-
-                if (final_object._accessible_By.group_perms.public) { // todo? also do for non public?
-                    async.forEach(final_object._accessible_By.group_perms.public, function (requestorapp_permname, cb2) {
-                        var acc_id = req.session.logged_in_user_id+"/"+requestorapp_permname+"/"+req.params.app_name+"/"+collection_name+"/"+data_object_id;
-                        //onsole.log("getting acc_id "+acc_id)
-                        accessibles_db.find({"_id":acc_id}).toArray(function(err, results) {
-                            if (!results || results.length==0) {
-                                flags.add('warnings', "missing_accessible", {"_id":acc_id, "msg":"permission does not exist - may have been removed - should remove public"});
-                                cb2(null);
-                            }  else if (!results.length>1) {
-                                flags.add('warnings', "too_many_accessibles", {"_id":acc_id, "msg":"internal error - more than one permission retrieved"});
-                                cb2(null);
-                            } else {
-                                permission_object = results[0];
-                                permission_object.data_object = {}; 
-                                var requestorApp = requestorapp_permname.split("/")[0];
-                                
-                                file_handler.async_app_config(requestorApp, req.freezr_environment, function(err, requestorAppConfig){
-                                    if (err) {
-                                        console.warn("Error getting requestorAppConfig - todo - consider issuing flad rather than error")
-                                        cb(helpers.state_error("app_handler.js", exports.version, "putData", err, "Could not get requestor app config"));
-                                    } else {
-                                        var permission_name = requestorapp_permname.split("/")[1];
-                                        var permission_model= (requestorAppConfig && requestorAppConfig.permissions && requestorAppConfig.permissions[permission_name])? requestorAppConfig.permissions[permission_name]: null;
-                                        if (requestorAppConfig && permission_name && permission_model){
-                                            if (permission_model.return_fields){ 
-                                                for (var i=0; i<permission_model.return_fields.length; i++) {
-                                                    permission_object.data_object[permission_model.return_fields[i]] =  write[permission_model.return_fields[i]];
-                                                }
-                                            } else {
-                                                permission_object.data_object = write;
-                                            }
-                                            delete permission_object._id
-                                            accessibles_db.update({ _id: results[0]._id }, {$set : permission_object}, {safe: true }, cb2);
-                                        } else {
-                                            flags.add('warnings', "app_config_error", {"_id":acc_id, "msg":"no "+(requestorAppConfig?"app_config":("permission_name or model for "+permission_name))});
-                                            cb2(null);
-                                        }
-                                    }
-                                })
-                            }
-                        });
-                    },
-                    function (err) {
-                        console.warn({flags})
-                        if (err) {
-                            flags.add('warnings',"unkown_error_accessibles", err);
-                        } 
-                        cb(null)
-                    })
-                } else { cb(null)}
+                          file_handler.async_app_config(requestorApp, req.freezr_environment, function(err, requestorAppConfig){
+                              if (err) {
+                                  console.warn("Error getting requestorAppConfig - todo - consider issuing flad rather than error")
+                                  cb(helpers.state_error("app_handler.js", exports.version, "putData", err, "Could not get requestor app config"));
+                              } else {
+                                  const permission_name = requestorapp_permname.split("/")[1];
+                                  const permission_model= (requestorAppConfig && requestorAppConfig.permissions && requestorAppConfig.permissions[permission_name])? requestorAppConfig.permissions[permission_name]: null;
+                                  let new_data_obj={}
+                                  if (requestorAppConfig && permission_name && permission_model){
+                                      if (permission_model.return_fields){
+                                          for (var i=0; i<permission_model.return_fields.length; i++) {
+                                              new_data_obj[permission_model.return_fields[i]] =  final_object[permission_model.return_fields[i]];
+                                          }
+                                      } else {
+                                          new_data_obj = final_object;
+                                      }
+                                      permission_object.data_object = new_data_obj;
+                                      db_handler.replace_accessible_record (req.freezr_environment, accessibles_collection, acc_id, permission_object, cb)
+                                  } else {
+                                      flags.add('warnings', "app_config_error", {"_id":acc_id, "msg":"no "+(requestorAppConfig?"app_config":("permission_name or model for "+permission_name))});
+                                      cb2(null);
+                                  }
+                              }
+                          })
+                      }
+                  });
+              },
+              function (err) {
+                  console.warn({flags})
+                  if (err) {
+                      flags.add('warnings',"unkown_error_accessibles", err);
+                  }
+                  cb(null)
+              })
+              } else {
+                // non public objects are handled differently
+                cb(null)
+              }
             }
         }
-    ], 
+    ],
     function (err) {
         if (err) {
             helpers.send_failure(res, err, "app_handler", exports.version, "putData");
-        } else {            
+        } else {
             //onsole.log({final_object})
             if (final_object && final_object._id) returned_confirm_fields._id = final_object._id; // new document
             if (final_object && final_object._date_Created) returned_confirm_fields._date_Created = final_object._date_Created;
@@ -554,11 +534,12 @@ exports.getDataObject= function(req, res) {
         } else {
             data_object_id = req.params.data_object_id;
         }
-        if(!req.params.user_id) req.params.user_id = req.session.logged_in_user_id; 
+        if(!req.params.user_id) req.params.user_id = req.session.logged_in_user_id;
 
         var app_config, permission_model, permission_type, collection_name, own_record, accessibles_collection_name;
 
-        var record_is_permitted = false;
+        let record_is_permitted = false
+            appcollowner =  {}
         var flags = new Flags({'app_name':req.params.requestor_app});
 
         function app_err(message) {return helpers.app_data_error(exports.version, "getDataObject", req.params.app_name, message);}
@@ -577,10 +558,16 @@ exports.getDataObject= function(req, res) {
             permission_model= (app_config && app_config.permissions && app_config.permissions[req.params.permission_name])? app_config.permissions[req.params.permission_name]: null;
             permission_type = (permission_model && permission_model && permission_model.type)? permission_model.type: null;
 
-            collection_name = req.params.collection_name?  req.params.collection_name: (permission_model.collection? permission_model.collection :  ( (permission_model.collections && permission_model.collections.length>0)? permission_model.collections[0]: null ) ) 
+            collection_name = req.params.collection_name?  req.params.collection_name: (permission_model.collection? permission_model.collection :  ( (permission_model.collections && permission_model.collections.length>0)? permission_model.collections[0]: null ) )
 
             own_record = (req.params.requestor_app == req.params.requestee_app  && (!request_file || (req.session.logged_in_user_id == req.params.user_id) ) );
             accessibles_collection_name = permission_type=="field_delegate"? "field_permissions": null;
+
+            appcollowner = {
+              app_name:req.params.requestee_app,
+              collection_name:collection_name,
+              _owner:req.params.user_id
+            }
 
             if (!req.session || !req.session.logged_in || !req.session.logged_in_user_id) {
                 cb(app_auth("Need to be logged in to access app"));
@@ -606,43 +593,33 @@ exports.getDataObject= function(req, res) {
 
         // 2. checkapp code (make sure the right app is sending data) and device_code (to make sure rights exist)
         function (cb) {
-            freezr_db.check_app_code(req.session.logged_in_user_id, req.params.requestor_app, req.params.source_app_code, cb)
+            db_handler.check_app_code(req.freezr_environment, req.session.logged_in_user_id, req.params.requestor_app, req.params.source_app_code, cb)
         },
         function (cb) {
-            freezr_db.check_device_code_specific_session(req.session.device_code, req.session.logged_in_user_id, req.params.requestor_app, cb)
+            db_handler.check_device_code_specific_session(req.freezr_environment, req.session.device_code, req.session.logged_in_user_id, req.params.requestor_app, cb)
         },
 
-        // 3. open app db
+        // 3. 4. get item
         function (cb) {
-            if (own_record && request_file) {    
+            if (own_record && request_file) {
                 record_is_permitted = true;
-            } 
-            freezr_db.app_db_collection_get(req.params.requestee_app.replace(/\./g,"_") , collection_name, cb);
-        },
-
-        // 4. get the record (unless you are getting a file)
-        function (theCollection, cb) {
-            var real_object_id = freezr_db.real_id(data_object_id,app_config,collection_name);
-            theCollection.find({'_id':real_object_id}).toArray(cb);
+            }
+            db_handler.db_getbyid (req.freezr_environment, appcollowner, data_object_id, cb)
         },
 
         // 5. check if record fits criteria and return it if it belongs to the logged in user (own_record)
         function (results, cb) {
-            if (!results || results.length==0) {
+            //onsole.log("got results ",results)
+            if (!results) {
                 cb(app_err("no related records"))
             } else {
-                if (results.length>1) {
-                    console.warn('MoreThanOneRecordRetrieved - SNBH')
-                    flags.add('warnings','MoreThanOneRecordRetrieved - SNBH');
-                }
-
                 if (!own_record && !request_file && permission_model.return_fields && permission_model.return_fields.length>0) {
                     resulting_record = {};
                     for (var i=0; i<permission_model.return_fields.length; i++) {
-                        resulting_record[permission_model.return_fields[i]] =  results[0][permission_model.return_fields[i]];
+                        resulting_record[permission_model.return_fields[i]] =  results[permission_model.return_fields[i]];
                     }
                 } else {
-                    resulting_record = results[0];
+                    resulting_record = results;
                 }
 
                 if (own_record) {
@@ -672,7 +649,7 @@ exports.getDataObject= function(req, res) {
 
                     var userAccess = (resulting_record._accessible_By && resulting_record._accessible_By.user_perms && resulting_record._accessible_By.user_perms[req.session.logged_in_user_id])? resulting_record._accessible_By.user_perms[req.session.logged_in_user_id] : null;
                     if (userAccess && userAccess.length>0) {
-                        // could also check _accessible_By.users 
+                        // could also check _accessible_By.users
                         have_access = true;
                         if (userAccess.indexOf(perm_string) > -1 )  correct_access=true
                     }
@@ -687,9 +664,9 @@ exports.getDataObject= function(req, res) {
             }
         },
 
-        // 6. get app permissions and if granted, open field_permissions or object_permission collection 
+        // 6. get app permissions and if granted, open field_permissions or object_permission collection
         function(cb) {
-            freezr_db.permission_by_owner_and_permissionName (req.params.user_id, req.params.requestor_app, req.params.requestee_app, req.params.permission_name, cb)
+            db_handler.permission_by_owner_and_permissionName (req.freezr_environment, req.params.user_id, req.params.requestor_app, req.params.requestee_app, req.params.permission_name, cb)
         },
         function (results, cb) {
             if (!results || results.length==0) {
@@ -698,32 +675,35 @@ exports.getDataObject= function(req, res) {
                 cb(app_auth("permission not granted"));
             }  else {
                 app_permission = results[0];
-                if (accessibles_collection_name) { // ie field permissins
-                    freezr_db.app_db_collection_get("info_freezr_permissions" , accessibles_collection_name, cb);
+                if (!accessibles_collection_name) { // ie field permissins
+                  record_is_permitted = true;
+                  cb({"success":true}, null)
                 } else {
-                    record_is_permitted = true;
-                    cb({"success":true}, null)
+                  var permission_attributes = {
+                      'requestor_app':req.params.requestor_app,
+                      'requestee_app':req.params.requestee_app,
+                      '_owner': req.params.user_id,
+                      'permission_name':req.params.permission_name,
+                      '$or': [{'shared_with_group':'logged_in'},{'shared_with_group':'public'},{'shared_with_user': req.session.logged_in_user_id} ]
+                  }
+                  if (accessibles_collection_name == "field_permissions") {
+                      // no extra conditions
+                      db_handler.db_find(req.freezr_environment,
+                       {
+                          app_name:'info_freezr_permissions',
+                          collection_name:accessibles_collection_name,
+                          _owner:'freezr_admin'
+                        },
+                        permission_attributes,
+                        {},cb)
+                  } else {
+                      cb(null, null)
+                  }
                 }
             }
         },
         // 7 Find right permisssion attributes to see if they are granted and consistent with app permission
         // Note: ALL this needs  to be revieweed and updated for field permissions
-        function (theCollection, cb) {
-            var permission_collection = theCollection;
-            var permission_attributes = {
-                'requestor_app':req.params.requestor_app,
-                'requestee_app':req.params.requestee_app,
-                '_owner': req.params.user_id,
-                'permission_name':req.params.permission_name,
-                '$or': [{'shared_with_group':'logged_in'},{'shared_with_group':'public'},{'shared_with_user': req.session.logged_in_user_id} ] 
-            }
-            if (accessibles_collection_name == "field_permissions") {
-                // no extra conditions
-                permission_collection.find(permission_attributes).toArray(cb);
-            } else {
-                cb(null, null)
-            }            
-        },
         function (all_permissions, cb) {
             if (own_record) {
                 cb(null);
@@ -744,7 +724,7 @@ exports.getDataObject= function(req, res) {
                     cb(app_auth("app permission granted does not correspond to request"));
                 }
             } else if (all_permissions == null || all_permissions.length == 0) {
-                cb(app_auth("no permission")); 
+                cb(app_auth("no permission"));
             } else if (permission_type=="object_delegate") {
                 // note that it is possible for multiple permissions to have been given the "or" in the query allowing one for groups and one for users.. but it doesnt really matter because it is allowed in any case
                 if (app_permission.collections.indexOf(collection_name)<0) {
@@ -766,7 +746,7 @@ exports.getDataObject= function(req, res) {
                 cb(app_err("Wrong permission type - SNBH"));
             }
         }
-    ], 
+    ],
     function (err) {
         //onsole.log("got to end of getDataObject");
         if (!record_is_permitted) {
@@ -780,25 +760,23 @@ exports.getDataObject= function(req, res) {
             if (flags.warnings) console.warn("flags:"+JSON.stringify(flags))
             file_handler.sendUserFile(res, unescape(parts.join('/')), req.freezr_environment );
         } else {
-            //onsole.log("sending record:"+JSON.stringify(resulting_record));
             helpers.send_success(res, {'results':resulting_record, 'flags':flags});
         }
     });
 }
 exports.db_query = function (req, res){
     helpers.log (req,"db_query: "+req.url)
-    //app.post('/v1/db/query/:requestor_app/:source_app_code/:requestee_app', userDataAccessRights, app_hdlr.db_query); 
-    //app.post('/v1/db/query/:requestor_app/:source_app_code/:requestee_app/:permission_name', userDataAccessRights, app_hdlr.db_query); 
+    //onsole.log("db_query from: "+req.params.requestor_app+" - "); // +JSON.stringify(req.body)
+
+    //app.post('/v1/db/query/:requestor_app/:source_app_code/:requestee_app', userDataAccessRights, app_hdlr.db_query);
+    //app.post('/v1/db/query/:requestor_app/:source_app_code/:requestee_app/:permission_name', userDataAccessRights, app_hdlr.db_query);
     // req.body.onlyOthers excludes own records
     // todo - Simplify so that if ownrecord, just looks up the db and if not, then returns the data_record in the accessibles_db. (Figure out what to do in case of field and folder permissions - potentially separate into separate functions)
 
-    console.log("db_query from: "+req.params.requestor_app+" - "); // +JSON.stringify(req.body)
 
     var appDb = {}, dbCollection, accessibles_collection, objectsPermittedList=[];
     var usersWhoGrantedFieldPermission = (req.params.requestee_app == req.params.requestor_app)? [{'_owner':req.session.logged_in_user_id}]: []; // if requestor is same as requestee then user is automatically included
     var usersWhoGrantedAppPermission = (!req.body.onlyOthers && req.params.requestee_app == req.params.requestor_app)? [{'_owner':req.session.logged_in_user_id}]: []; // if requestor is same as requestee then user is automatically included
-    
-
 
     var app_config, app_config_permission_schema, accessibles_collection_name, permission_attributes, own_record;
 
@@ -813,15 +791,15 @@ exports.db_query = function (req, res){
         function (cb) {
             file_handler.async_app_config(req.params.requestee_app, req.freezr_environment,cb);
         },
-        // 1. Check all data needed exists 
+        // 1. Check all data needed exists
         function (the_app_config, cb) {
             app_config = the_app_config;
 
             app_config_permission_schema = (app_config && app_config.permissions)? app_config.permissions[req.params.permission_name]: null;
-            
+
             accessibles_collection_name = (app_config_permission_schema && app_config_permission_schema.type=="field_delegate")? "field_permissions": null;
                 // to be used for field / folder permission
-            permission_attributes = { 
+            permission_attributes = {
                 'requestor_app': req.params.requestor_app,
                 'requestee_app': ((app_config_permission_schema && app_config_permission_schema.requestee_app)? app_config_permission_schema.requestee_app: req.params.requestee_app),
                 'permission_name': req.params.permission_name,
@@ -831,9 +809,9 @@ exports.db_query = function (req, res){
 
             own_record = (!req.params.permission_name && req.params.requestor_app==permission_attributes.requestee_app)
             // if no permission name is given, then it is one's own records, otehr wise returns shared items
-            
+
             //onsole.log("own_record",own_record," req.params.requestor_app",req.params.requestor_app," permission_attributes.requestee_app",permission_attributes.requestee_app," req.params.permission_name",req.params.permission_name)
-            
+
             if (!req.session.logged_in_user_id) {
                 cb(app_auth_err("Need to be logged in to access app"));
             } else if (!req.params.permission_name && !own_record) {
@@ -866,11 +844,11 @@ exports.db_query = function (req, res){
                         cb(app_err("missing field value"));
                     }  else {
                         cb(null);
-                    }  
+                    }
                 } else { // types are db_query or object_delegate
                     cb(null);
                 }
-                          
+
             }
         },
 
@@ -879,14 +857,14 @@ exports.db_query = function (req, res){
             if (req.params.skipappcodecheck) {
                 cb(null)
             } else {
-                freezr_db.check_app_code(req.session.logged_in_user_id, req.params.requestor_app, req.params.source_app_code, cb)
+                db_handler.check_app_code(req.freezr_environment, req.session.logged_in_user_id, req.params.requestor_app, req.params.source_app_code, cb)
             }
         },
         function (cb) {
             if (req.params.skipappcodecheck) {
                 cb(null)
             } else {
-                freezr_db.check_device_code_specific_session(req.session.device_code, req.session.logged_in_user_id, req.params.requestor_app, cb)
+                db_handler.check_device_code_specific_session(req.freezr_environment, req.session.device_code, req.session.logged_in_user_id, req.params.requestor_app, cb)
             }
         },
 
@@ -895,30 +873,33 @@ exports.db_query = function (req, res){
             if (own_record) {
                 cb(null, []);
             } else {
-                freezr_db.all_granted_app_permissions_by_name(req.params.requestor_app, permission_attributes.requestee_app, req.params.permission_name, null , cb) 
+                db_handler.all_granted_app_permissions_by_name(req.freezr_environment, req.params.requestor_app, permission_attributes.requestee_app, req.params.permission_name, null , cb)
             }
         },
 
         // 4. Recheck that have given the required permission and add to usersWhoGrantedAppPermission list
         function (allUserPermissions, cb) {
+          //onsole.log("allUserPermissions",allUserPermissions)
             if (allUserPermissions && allUserPermissions.length>0) {
                 for (var i=0; i<allUserPermissions.length; i++) {
                     if (  (allUserPermissions[i].sharable_groups && allUserPermissions[i].sharable_groups.indexOf("logged_in")>-1 && req.session.logged_in_user_id)
                           ||
                           (allUserPermissions[i].sharable_groups && allUserPermissions[i].sharable_groups.indexOf("user")>-1 && req.session.logged_in_user_id) // currently only share with logged in users
                           ||
-                          (allUserPermissions[i].sharable_groups && allUserPermissions[i].sharable_groups.indexOf("self")>-1 && allUserPermissions[i]._owner==req.session.logged_in_user_id) 
-                        // todo - if statement to be pushed in freezr_db as a function... and used in other permission functions as an extra security (and everntually to allow non logged in users)
+                          (allUserPermissions[i].sharable_groups && allUserPermissions[i].sharable_groups.indexOf("self")>-1 && allUserPermissions[i].permitter==req.session.logged_in_user_id)
+                        // todo - if statement to be pushed in db_handler as a function... and used in other permission functions as an extra security (and everntually to allow non logged in users)
                         ) {
-                            if (["field_delegate","folder_delegate"].indexOf(app_config_permission_schema.type)>=0 && freezr_db.fieldNameIsPermitted(allUserPermissions[i],app_config_permission_schema,permission_attributes.field_name) ) {
-                                usersWhoGrantedAppPermission.push({'_owner':allUserPermissions[i]._owner});
+                          if (allUserPermissions[i].permitter != req.session.logged_in_user_id) {
+                            if (["field_delegate","folder_delegate"].indexOf(app_config_permission_schema.type)>=0 && db_handler.fieldNameIsPermitted(allUserPermissions[i],app_config_permission_schema,permission_attributes.field_name) ) {
+                                usersWhoGrantedAppPermission.push({'_owner':allUserPermissions[i].permitter});
                             } else if (app_config_permission_schema.type=="object_delegate" ) {
                                 // todo re-added (2017) - check wh removed and security implications
-                                usersWhoGrantedAppPermission.push({'_owner':allUserPermissions[i]._owner});
-                            } else if (app_config_permission_schema.type=="db_query" && freezr_db.queryIsPermitted(allUserPermissions[i],app_config_permission_schema,req.body)) {
+                                usersWhoGrantedAppPermission.push({'_owner':allUserPermissions[i].permitter});
+                            } else if (app_config_permission_schema.type=="db_query" && db_handler.queryIsPermitted(allUserPermissions[i],app_config_permission_schema,req.body)) {
                                 // Note: Currently no field permissions in db_query
-                                usersWhoGrantedAppPermission.push({'_owner':allUserPermissions[i]._owner});
-                            } 
+                                usersWhoGrantedAppPermission.push({'_owner':allUserPermissions[i].permitter});
+                            }
+                          }
                             /* else {
                                 helpers.warning("app_handler - "+req.params.requestor_app, exports.version, "error? - permission changed and no longer permitted for "+allUserPermissions[i]._owner)
                             }*/
@@ -934,146 +915,138 @@ exports.db_query = function (req, res){
         },
 
         // 5. get accessibles collection  (to be re-implemented later - todo)
+        // 7. find field permissions (to be re-implemented later - todo)
         function (cb) {
             if (accessibles_collection_name) { // ie app_config_permission_schema.type=="field_delegate" or app_config_permission_schema.type=="object_delegate"
-                freezr_db.app_db_collection_get("info_freezr_permissions" , accessibles_collection_name, cb);
+                if (accessibles_collection_name && usersWhoGrantedAppPermission && usersWhoGrantedAppPermission.length>0){
+                    var permissionQuery = {'$and':[{'$or':usersWhoGrantedAppPermission},
+                                                    permission_attributes
+                                                    ]}
+                    const appcollowner = {  app_name:'info_freezr_permissions',
+                                            collection_name:accessibles_collection_name,
+                                            _owner:'freezr_admin'}
+
+                    if (app_config_permission_schema.type=="field_delegate") {
+                        db_handler.db_find(req.freezr_environment,appcollowner, permissionQuery,{},cb)
+
+                    } else if (app_config_permission_schema.type=="object_delegate"){
+                        db_handler.db_find(req.freezr_environment,appcollowner, permissionQuery,{},cb)
+                    } else if (app_config_permission_schema.type=="db_query") {
+                        if (usersWhoGrantedAppPermission.length>0) {
+                            cb(null, [])
+                        } else {
+                            cb(app_err("no permission granted"));
+                        }
+                    } else {
+                        // shouldnt be here
+                        cb(null, []);
+                    }
+                } else if (accessibles_collection_name){
+                    cb(app_err("no permission granted (accessibles_collection_name)"))
+                } else {
+                    // ie for object_delegate
+                    cb(null, []);
+                }
             } else {
                 // ie for object_delegate
                 cb(null, null)
             }
         },
 
-        // 7. find field permissions (to be re-implemented later - todo)
-        function (theCollection, cb) {
-            accessibles_collection = theCollection;
-            if (accessibles_collection_name && usersWhoGrantedAppPermission && usersWhoGrantedAppPermission.length>0){ 
-                var permissionQuery = {'$and':[{'$or':usersWhoGrantedAppPermission},
-                                                permission_attributes
-                                                ]}
-                if (app_config_permission_schema.type=="field_delegate") {
-                    accessibles_collection.find(permissionQuery).toArray(cb);
-                } else if (app_config_permission_schema.type=="object_delegate"){
-                    var skip =  0, 
-                        sort = {'_date_Modified': -1};
-                    accessibles_collection.find(permissionQuery).sort(sort).skip(skip).toArray(cb);
-
-                } else if (app_config_permission_schema.type=="db_query") {
-                    if (usersWhoGrantedAppPermission.length>0) {
-                        cb(null, [])
-                    } else {
-                        cb(app_err("no permission granted"));
-                    }
-                } else {
-                    // shouldnt be here
-                    cb(null, []);
-                }
-            } else if (accessibles_collection_name){
-                cb(app_err("no permission granted (accessibles_collection_name)")) 
-            } else { 
-                // ie for object_delegate
-                cb(null, []);
-            }
-        },
-
         // 8. Add owners to usersWhoGrantedFieldPermission list
         function (allUserFieldPermissions, cb) {
+          //onsole.log("allUserFieldPermissions",allUserFieldPermissions)
             if (!accessibles_collection_name) {
                 usersWhoGrantedFieldPermission = usersWhoGrantedAppPermission;
             } else if (allUserFieldPermissions && allUserFieldPermissions.length>0) { //  (to be re-implemented later - todo)
                 for (var i=0; i<allUserFieldPermissions.length; i++) {
                     if (app_config_permission_schema.type=="field_delegate") {
-                        usersWhoGrantedFieldPermission.push({'_owner':allUserFieldPermissions[i]._owner});
+                        usersWhoGrantedFieldPermission.push({'_owner':allUserFieldPermissions[i].permitter});
                     } else if (app_config_permission_schema.type=="object_delegate") {
-                        objectsPermittedList.push({'_id':freezr_db.real_id(allUserFieldPermissions[i].data_object_id,app_config,collection_name) });
-                    } 
+                        objectsPermittedList.push({'_id':db_handler.real_id(req.freezr_environment, allUserFieldPermissions[i].data_object_id,app_config,collection_name) });
+                    }
                 }
             }
             if (usersWhoGrantedFieldPermission.length>1) {
                 usersWhoGrantedFieldPermission = {'$or':usersWhoGrantedFieldPermission}
             } else if (usersWhoGrantedFieldPermission.length>0)  {
-                usersWhoGrantedFieldPermission = usersWhoGrantedFieldPermission[0];  
+                usersWhoGrantedFieldPermission = usersWhoGrantedFieldPermission[0];
             } else {
                 cb(app_err("no permission granted"))
             }
             cb(null);
         },
 
-        // 9. Open relevant collection
+        // 9 & 10. do query on collection
         function (cb) {
             var collection_name = req.body.collection? req.body.collection : (app_config_permission_schema && app_config_permission_schema.type=="folder_delegate")? "files": (app_config_permission_schema && app_config_permission_schema.collection)? app_config_permission_schema.collection:(app_config_permission_schema && app_config_permission_schema.collections)? app_config_permission_schema.collections[0]:null;
             if (own_record && !collection_name) collection_name = 'main';
-            if (collection_name) {
-                freezr_db.app_db_collection_get(permission_attributes.requestee_app.replace(/\./g,"_") , collection_name, cb);
+            if (!collection_name) {
+              cb(app_err("missing collection_name"));
             } else {
-                cb(app_err("missing collection_name"));
+              const appcollowner = {
+                app_name:permission_attributes.requestee_app,
+                collection_name:collection_name,
+                _owner:req.session.logged_in_user_id
+              }
+              let query_params = req.body.query_params;
+              if (!query_params) query_params = {};
+
+              if (app_config_permission_schema && (app_config_permission_schema.type=="folder_delegate" || app_config_permission_schema.type=="field_delegate")) {
+                  query_params[permission_attributes.field_name] = permission_attributes.field_value;
+              }
+
+              if (!query_params || Object.keys(query_params).length==0) {
+                  query_params = usersWhoGrantedFieldPermission;
+              } else {
+                  query_params = {'$and':[ usersWhoGrantedFieldPermission, query_params]};
+              }
+
+              if (app_config_permission_schema && app_config_permission_schema.type=="object_delegate") {
+                  if (!query_params.$and) query_params = {'$and':[query_params]};
+                  var perm_string = permission_attributes.requestee_app+"/"+permission_attributes.permission_name
+                  var theOrs = []
+                  if (app_config_permission_schema.sharable_groups && app_config_permission_schema.sharable_groups.length>0) {
+                      if (app_config_permission_schema.sharable_groups.indexOf('public')>-1) theOrs.push({'_accessible_By.group_perms.public':perm_string})
+                      if (app_config_permission_schema.sharable_groups.indexOf('logged_in')>-1 && req.session.logged_in_user_id) theOrs.push({'_accessible_By.group_perms.logged_in':perm_string})
+                      if (app_config_permission_schema.sharable_groups.indexOf('user')>-1 && req.session.logged_in_user_id) {
+                          var a_user_obj={}
+                          a_user_obj['_accessible_By.user_perms.'+req.session.logged_in_user_id]=perm_string;
+                          theOrs.push(a_user_obj);
+                      }
+                      if (!req.body.onlyOthers && req.params.requestee_app == req.params.requestor_app) theOrs.push({'_owner':req.session.logged_in_user_id})
+
+                  }
+                  if (theOrs.length==0) {
+                      cb(app_err("permission schema has no sharables"));
+                  } else if (theOrs.length == 1) {
+                      theOrs = theOrs[0]
+                  } else {
+                      theOrs = {'$or':theOrs}
+                  }
+                  query_params.$and.push(theOrs);
+                  // replace above with parameterized one
+              }
+
+
+              //onsole.log("permission_attributes is "+JSON.stringify(permission_attributes));
+              //onsole.log("query_params is "+JSON.stringify(query_params));
+
+              var skip = req.body.skip? parseInt(req.body.skip): 0,
+                  count= req.body.count? parseInt(req.body.count):((app_config_permission_schema && app_config_permission_schema.max_count)? app_config_permission_schema.max_count: 50);
+              if (app_config_permission_schema && app_config_permission_schema.max_count && count+skip>app_config_permission_schema.max_count) {count = Math.max(0,app_config_permission_schema.max_count-skip);}
+
+              var sort = {};
+              if (req.body.sort_field) {
+                  sort[req.body.sort_field] = req.body.sort_direction? parseInt(sort_direction):-1;
+              } else if (app_config_permission_schema && app_config_permission_schema.sort_fields) {
+                  sort = app_config_permission_schema.sort_fields;
+              } else {
+                  sort =  {'_date_Modified': -1}
+              }
+              db_handler.db_find(req.freezr_environment, appcollowner,query_params,
+                {sort: sort, count:count, skip:skip}, cb)
             }
-        },
-
-        // 10. do query on collection
-        function (theCollection, cb) {
-            var query_params = req.body.query_params;
-            if (!query_params) query_params = {};
-
-            if (app_config_permission_schema && (app_config_permission_schema.type=="folder_delegate" || app_config_permission_schema.type=="field_delegate")) {
-                query_params[permission_attributes.field_name] = permission_attributes.field_value;
-            }
-            
-            if (!query_params || Object.keys(query_params).length==0) {
-                query_params = usersWhoGrantedFieldPermission;
-            } else {
-                query_params = {'$and':[ usersWhoGrantedFieldPermission, query_params]};
-            }
-            
-            if (app_config_permission_schema && app_config_permission_schema.type=="object_delegate") {
-                if (!query_params.$and) query_params = {'$and':[query_params]};
-                var perm_string = permission_attributes.requestee_app+"/"+permission_attributes.permission_name
-                var theOrs = []
-                if (app_config_permission_schema.sharable_groups && app_config_permission_schema.sharable_groups.length>0) {
-                    if (app_config_permission_schema.sharable_groups.indexOf('public')>-1) theOrs.push({'_accessible_By.group_perms.public':perm_string})
-                    if (app_config_permission_schema.sharable_groups.indexOf('logged_in')>-1 && req.session.logged_in_user_id) theOrs.push({'_accessible_By.group_perms.logged_in':perm_string})
-                    if (app_config_permission_schema.sharable_groups.indexOf('user')>-1 && req.session.logged_in_user_id) {
-                        var a_user_obj={}
-                        a_user_obj['_accessible_By.user_perms.'+req.session.logged_in_user_id]=perm_string;
-                        theOrs.push(a_user_obj);
-                    }
-                    if (!req.body.onlyOthers && req.params.requestee_app == req.params.requestor_app) theOrs.push({'_owner':req.session.logged_in_user_id})
-                    
-                }
-                if (theOrs.length==0) {
-                    cb(app_err("permission schema has no sharables"));
-                } else if (theOrs.length == 1) {
-                    theOrs = theOrs[0]
-                } else {
-                    theOrs = {'$or':theOrs}
-                }
-                query_params.$and.push(theOrs);
-                // replace above with parameterized one
-            }
-
-
-            //onsole.log("permission_attributes is "+JSON.stringify(permission_attributes));
-            //onsole.log("query_params is "+JSON.stringify(query_params));
-
-            var skip = req.body.skip? parseInt(req.body.skip): 0, 
-                count= req.body.count? parseInt(req.body.count):((app_config_permission_schema && app_config_permission_schema.max_count)? app_config_permission_schema.max_count: 50);
-            if (app_config_permission_schema && app_config_permission_schema.max_count && count+skip>app_config_permission_schema.max_count) {count = Math.max(0,app_config_permission_schema.max_count-skip);}
-
-            var sort = {};
-            if (req.body.sort_field) {
-                sort[req.body.sort_field] = req.body.sort_direction? parseInt(sort_direction):-1;
-            } else if (app_config_permission_schema && app_config_permission_schema.sort_fields) {
-                sort = app_config_permission_schema.sort_fields;
-            } else {
-                sort =  {'_date_Modified': -1}
-            }
-            //onsole.log("query_params for permitted fields "+JSON.stringify(query_params)+" count "+count+" skip "+skip+" sort "+JSON.stringify(sort));
-
-            theCollection.find(query_params)
-                .sort(sort)
-                .limit(count)
-                .skip(skip)
-                .toArray(cb);
-
         },
 
         // 11. parse to send only the permitted return fields and anonimyze as necessary
@@ -1098,7 +1071,7 @@ exports.db_query = function (req, res){
         }
 
 
-    ], 
+    ],
     function (err, results) {
         if (req.internalcallfwd){
             req.internalcallfwd(err, results)
@@ -1119,24 +1092,31 @@ exports.setObjectAccess = function (req, res) {
     //'data_object_id' (a string) or 'query_criteria' (an object with creteria for search) mandaory
     // can have one of:  'shared_with_group':'logged_in' or 'self' or 'public'
     // 'requestee_app': app_name (defaults to self)
-    // 'pubDate' - 
+    // 'pubDate' -
     // 'pid' - public id to be used
     // todo this could be merged with setFieldAccess
     // note "granted" in accessible-object is redundant - should be set to false if all groups have been removed
-    
-    var app_config, 
-        permission_model, 
-        permission_type, 
-        requestee_app, 
-        collection_name, 
-        dbCollection, 
+
+    let app_config,
+        appcollowner,
+        permission_model,
+        permission_type,
+        requestee_app,
+        collection_name,
+        dbCollection,
         accessibles_object_id,
         permission_collection,
+        accessibles_collection = {
+          app_name:'info_freezr_permissions',
+          collection_name:"accessible_objects",
+          _owner:'freezr_admin'
+        },
         search_words = [],
         the_one_public_data_object = [],
         records_changed=0;
         real_object_id=null;
 
+    //onsole.log("req.body",req.body)
 
     var data_object_id = req.body.data_object_id? req.body.data_object_id : null;
     var query_criteria = req.body.query_criteria? req.body.query_criteria : null;
@@ -1154,8 +1134,8 @@ exports.setObjectAccess = function (req, res) {
     var addToAccessibles =  new_shared_with_group == "public"  && !req.body.not_accessible;
     // currently added query_criteria to deal with multuple items, but "make_accessible" section only works with one object at a time - to be fixed / updated later (Todo later)
 
-    console.log("setObjectAccess by "+req.session.logged_in_user_id+" for "+data_object_id+" query:"+ JSON.stringify(query_criteria)+" action"+JSON.stringify(req.body.action)+" perm: " +req.params.permission_name,"collection name: ",req.body.collection);
-    
+    helpers.log(req,"setObjectAccess by "+req.session.logged_in_user_id+" for "+data_object_id+" query:"+ JSON.stringify(query_criteria)+" action"+JSON.stringify(req.body.action)+" perm: " +req.params.permission_name,"collection name: ",req.body.collection);
+
     function app_err(message) {return helpers.app_data_error(exports.version, "putData", req.params.requestor_app + "- "+message);}
 
     async.waterfall([
@@ -1163,13 +1143,13 @@ exports.setObjectAccess = function (req, res) {
         function (cb) {
             file_handler.async_app_config(req.params.requestor_app, req.freezr_environment,cb);
         },
-        // 1. Check all data needed exists 
+        // 1. Check all data needed exists
         function (the_app_config, cb) {
             app_config = the_app_config;
 
             permission_model= (app_config && app_config.permissions && app_config.permissions[req.params.permission_name])? app_config.permissions[req.params.permission_name]: null;
             permission_type = (permission_model && permission_model && permission_model.type)? permission_model.type: null;
-            requestee_app = req.body.requestee_app? req.body.requestee_app: req.params.requestor_app; 
+            requestee_app = req.body.requestee_app? req.body.requestee_app: req.params.requestor_app;
             collection_name = req.body.collection? req.body.collection: ((permission_model && permission_model.collections && permission_model.collections.length>0)? permission_model.collections[0] : null);
             accessibles_object_id = req.body.publicid || req.session.logged_in_user_id+"/"+req.params.requestor_app+"/"+req.params.permission_name+"/"+requestee_app+"/"+collection_name+"/"+data_object_id;
 
@@ -1208,19 +1188,23 @@ exports.setObjectAccess = function (req, res) {
 
         // 2. checkapp code (make sure the right app is sending data) and device_code (to make sure rights exist)
         function (cb) {
-            freezr_db.check_app_code(req.session.logged_in_user_id, req.params.requestor_app, req.params.source_app_code, cb)
+            db_handler.check_app_code(req.freezr_environment, req.session.logged_in_user_id, req.params.requestor_app, req.params.source_app_code, cb)
         },
         function (cb) {
-            freezr_db.check_device_code_specific_session(req.session.device_code, req.session.logged_in_user_id, req.params.requestor_app, cb)
+            db_handler.check_device_code_specific_session(req.freezr_environment, req.session.device_code, req.session.logged_in_user_id, req.params.requestor_app, cb)
         },
 
-        // 3. get app permissions 
+        // 3. get app permissions
         function(cb) {
-            freezr_db.permission_by_owner_and_permissionName (req.session.logged_in_user_id, req.params.requestor_app, requestee_app, req.params.permission_name, cb)
+            db_handler.permission_by_owner_and_permissionName (req.freezr_environment, req.session.logged_in_user_id, req.params.requestor_app, requestee_app, req.params.permission_name, cb)
         },
 
         // 4. check permission is granted and can authorize requested fields, and if so, get permission collection
+        // 5. open object by id
         function (results, cb) {
+            //onsole.log("permission_by_owner_and_permissionName")
+            //onsole.log(results)
+
             if (!results || results.length==0) {
                 cb(helpers.error("PermissionMissing","permission does not exist"))
             }  else if (!results[0].granted) {
@@ -1230,22 +1214,20 @@ exports.setObjectAccess = function (req, res) {
             }  else if (results[0].collections.indexOf(collection_name) < 0)  {
                 cb(app_err("bad collection_name"))
             } else {
-                freezr_db.app_db_collection_get(requestee_app.replace(/\./g,"_") , collection_name, cb);
+                appcollowner = {
+                  app_name:requestee_app,
+                  collection_name:collection_name,
+                  _owner:req.session.logged_in_user_id
+                }
+                if (query_criteria) query_criteria._owner = req.session.logged_in_user_id;
+
+                db_handler.db_find(req.freezr_environment, appcollowner,
+                  (data_object_id? {'_id':data_object_id,'_owner':req.session.logged_in_user_id}
+                                  : query_criteria),
+                  {},cb)
             }
         },
 
-        // 5. open object by id 
-        function (theCollection, cb) {
-            dbCollection = theCollection;
-            if (data_object_id){
-                real_object_id = freezr_db.real_id(data_object_id,app_config,collection_name);
-                dbCollection.find({'_id':real_object_id,'_owner':req.session.logged_in_user_id}).toArray(cb);
-            } else if (query_criteria) {
-                query_criteria._owner = req.session.logged_in_user_id;
-                dbCollection.find(query_criteria).toArray(cb);
-
-            }
-        },
 
         // 6. If object exists, continue and write _
         function (results, cb) {
@@ -1262,11 +1244,11 @@ exports.setObjectAccess = function (req, res) {
 
                     // nb this part only works ith one - to fix
 
-                    if (data_object._owner != req.session.logged_in_user_id) {cb2(helpers.auth_failure("app_handler", exports.version, "setObjectAccess", req.params.app_name +  "Attempt to try and set access permissions for others"));} 
+                    if (data_object._owner != req.session.logged_in_user_id) {cb2(helpers.auth_failure("app_handler", exports.version, "setObjectAccess", req.params.app_name +  "Attempt to try and set access permissions for others"));}
 
                     if (new_shared_with_group == "public") the_one_public_data_object.push(data_object);
 
-                    // set _accessible_By field 
+                    // set _accessible_By field
                     var accessibles = data_object._accessible_By? data_object._accessible_By:{groups:[],users:[], group_perms:{}, user_perms:{}};
                     // _accessible_By: {groups: ['public'], users:[], group_perms:{"public":["requestor_app1/perm1","requestor_app1/perm2"], user_perms:{someone:["requestor_app3/perm2"]} }
                     if (doGrant) {
@@ -1310,60 +1292,51 @@ exports.setObjectAccess = function (req, res) {
 
                     // add _pubishdate if it exists
 
+                    // note purposefully hardoded so only these changes will be accepted in db_handler: _accessible_By, _publicid, _date_Published
                     var changes = {_accessible_By:accessibles}
                     if (addToAccessibles) changes._publicid = (doGrant? accessibles_object_id: null);
                     changes._date_Published = date_Published;
+                    records_changed++
+                    db_handler.update_object_accessibility (req.freezr_environment, appcollowner, data_object._id, data_object, changes, cb)
 
-
-                    records_changed++;
-                    dbCollection.update({ _id: data_object._id },
-                        {$set: changes}, {safe: true }, cb2); 
-                    },
-                    function (err) {
-                        if (err) {
-                            console.warn("COULD NOT SET OBJECT ACCESS IN QUERY "+JSON.stringify(err))
-                        } 
-                        cb(err)
-                    }
-                )
+                  },
+                  function (err) {
+                      if (err) {
+                          console.warn("COULD NOT SET OBJECT ACCESS IN QUERY "+JSON.stringify(err))
+                      }
+                      cb(err)
+                  }
+              )
             }
         },
 
-        //7a get accessible_objects
-        function (cb) {
-            if (addToAccessibles) {
-                freezr_db.app_db_collection_get("info_freezr_permissions" , "accessible_objects", cb);
-            } else {cb(null, null)}
-        },
-        // 7b. oand write to it
-        function (theCollection, cb) {
-            if (addToAccessibles) {
-                accessibles_collection = theCollection;
-                if (the_one_public_data_object.length>1) {
-                    cb(app_err("Cannot set multiple records to accessible. Feature to be created later."));
-                    console.warn(the_one_public_data_object)
-                } else {
-                    accessibles_collection.find({_id:accessibles_object_id}).toArray(cb)
-                }
-            } else {cb(null, null)}
-        },
-
-        // 9. write or update the results
+        //7 get accessible_objects and write to it
         function (results, cb) {
+          if (the_one_public_data_object.length>1) {
+              cb(app_err("Cannot set multiple records to accessible. Feature to be created later."));
+              console.warn(the_one_public_data_object)
+          } else if (addToAccessibles) {
+            //onsole.log("7 find "+req.session.logged_in_user_id+" for "+data_object_id+ " accessibles_object_id:"+accessibles_object_id)
+
+            db_handler.db_find(req.freezr_environment, accessibles_collection, {"data_owner":req.session.logged_in_user_id,"data_object_id":data_object_id}, {}, cb)
+
+          } else {cb(null, null)}
+        },
+        // 8. write or update the results
+        function (results, cb) {
+          //onsole.log("results",results)
             if (addToAccessibles) {
                 if (results == null || results.length == 0) {
                     //  accessibles_object_id automated version is req.session.logged_in_user_id+"/"+req.params.requestor_app+"/"+req.params.permission_name+"/"+requestee_app+"/"+collection_name+"/"+data_object_id;
-                    var accessibles_object = {   
+                    var accessibles_object = {
                         'requestee_app':requestee_app,
-                        '_owner':req.session.logged_in_user_id,
+                        'data_owner':req.session.logged_in_user_id,
                         'data_object_id': data_object_id,
                         'permission_name':req.params.permission_name,
                         'requestor_app':req.params.requestor_app,
                         'collection_name': collection_name,
                         'shared_with_group':[new_shared_with_group],
                         'shared_with_user':[new_shared_with_user],
-                        '_date_Modified' : new Date().getTime(),
-                        '_date_Created' : new Date().getTime(),
                         '_date_Published' :date_Published,
                         'data_object' : the_one_public_data_object[0], // make this async and go through al of them
                         'search_words' : search_words,
@@ -1375,43 +1348,43 @@ exports.setObjectAccess = function (req, res) {
                         app_err("cannot remove a permission that doesnt exist");
                         cb(null); // Internal error which can be ignored as non-existant permission was being removed
                     } else { // write new permission
-                        //onsole.log("writing new ",accessibles_object)
-                        accessibles_collection.insert(accessibles_object, { w: 1, safe: true }, cb);
+                        db_handler.db_insert (req.freezr_environment, accessibles_collection, null, accessibles_object, {keepReservedFields:true}, cb)
                     }
-                } else if (results.length == 1) { // update existing perm
+                } else  { // update existing perm
+                  if (results.length >1) {helpers.state_error( "app_handler", exports.version, "setObjectAccess","multiple_permissions", new Error("Retrieved mkroe than one permission where there should only be one "+JSON.stringify(results)), null)} // todo delete other ones?
                     var write = {};
-                    if (results[0].granted && results[0]._owner != req.session.logged_in_user_id) {
+                    if (results[0].granted && results[0].data_object && results[0].data_object._owner != req.session.logged_in_user_id) {
                         cb(app_err("Cannot overwrite an existing accessible object - other user"));
                     } else if (results[0].granted && results[0].requestor_app != req.params.requestor_app){
                         cb(app_err("Cannot overwrite an existing accessible object - other app"));
                     } else if (results[0].granted && results[0].data_object_id != data_object_id){
                         cb(app_err("Cannot overwrite an existing accessible object - other app"));
-                    } if (doGrant) {
+                    }
+                    // todo - flag if regranting...
+                    if (doGrant) {
                         write.granted=true;
                         write.shared_with_group = helpers.addToListAsUnique(results[0].shared_with_group,new_shared_with_group);
                         if (new_shared_with_group=="user") write.shared_with_user = helpers.addToListAsUnique(results[0].shared_with_user,new_shared_with_user);
                     } else if (!doGrant) {
-                        if (new_shared_with_group=="user" && results[0].shared_with_user.indexOf(new_shared_with_user)>-1) 
+                        if (new_shared_with_group=="user" && results[0].shared_with_user.indexOf(new_shared_with_user)>-1)
                         if ( (new_shared_with_group=="user" && (!results[0].shared_with_user || results[0].shared_with_user.length==0 ) && results[0].indexOf("user")>-1)
                             || results[0].indexOf(new_shared_with_group)>-1) {
                             write.shared_with_group = results[0].shared_with_group;
                             write.shared_with_group.splice(results[0].indexOf(new_shared_with_group),1);
                         }
                         write.granted = ( (write.shared_with_group && write.shared_with_group.length>0) ) ;
-                    } 
-                    write._date_Modified = new Date().getTime();
+                    }
+                    // to review why this was repeted - replace_accessible_record now should handle just the changes. Any reason to redo all?
                     write._date_Published = date_Published;
                     write.data_object = the_one_public_data_object[0];
                     write.search_words = search_words;
                     write.requestee_app = requestee_app;  // in case of re-use of another object
-                    write._owner = req.session.logged_in_user_id;  // in case of re-use of another object
+                    write.data_owner = req.session.logged_in_user_id;  // in case of re-use of another object
                     write.data_object_id = data_object_id; // in case of re-use of another object
                     write.permission_name = req.params.permission_name;  // in case of re-use of another object
                     write.requestor_app = req.params.requestor_app; // in case of re-use of another object
                     write.collection_name = collection_name; // in case of re-use of another object
-                    accessibles_collection.update({ _id: accessibles_object_id }, {$set : write}, {safe: true }, cb);
-                } else {
-                    cb(app_err("Can not update multiple objects retrieved - SNBH"));
+                    db_handler.replace_accessible_record (req.freezr_environment, accessibles_collection, accessibles_object_id, write, cb)
                 }
             } else {cb(null, null)}
         },
@@ -1419,11 +1392,11 @@ exports.setObjectAccess = function (req, res) {
         // 10 Add accessible id back to object
         function(results, cb) {
             if (addToAccessibles) {
-                dbCollection.update({ _id: real_object_id},
-                    {$set: {_publicid:(doGrant? accessibles_object_id: null)}}, {safe: true }, cb); 
+              the_one_public_data_object[0]._publicid = doGrant? accessibles_object_id: null;
+              db_handler.update_app_record (req.freezr_environment, appcollowner, data_object_id, the_one_public_data_object[0], the_one_public_data_object[0], cb)
             } else {cb(null, null)}
         }
-    ], 
+    ],
     function (err, results) {
         if (err) {
             console.warn(err)
@@ -1441,7 +1414,7 @@ exports.setObjectAccess = function (req, res) {
         var app_config, collection_names = null;
 
         function app_err(message) {return helpers.app_data_error(exports.version, "getConfig", req.params.app_name + " - " + message);}
-        
+
         async.waterfall([
             // 0. get app config
             function (cb) {
@@ -1459,15 +1432,15 @@ exports.setObjectAccess = function (req, res) {
 
             // 2. checkapp code (make sure the right app is sending data) and device_code (to make sure rights exist)
             function (cb) {
-                freezr_db.check_app_code(req.session.logged_in_user_id, req.params.app_name, req.params.source_app_code, cb)
+                db_handler.check_app_code(req.freezr_environment, req.session.logged_in_user_id, req.params.app_name, req.params.source_app_code, cb)
             },
             function (cb) {
-                freezr_db.check_device_code_specific_session(req.session.device_code, req.session.logged_in_user_id, req.params.app_name, cb)
+                db_handler.check_device_code_specific_session(req.freezr_environment, req.session.device_code, req.session.logged_in_user_id, req.params.app_name, cb)
             },
 
             // 3. open database connection & get collections
             function (cb) {
-                freezr_db.getAllCollectionNames(req.params.app_name.replace(/\./g,"_"), cb);
+                db_handler.getAllCollectionNames(req.freezr_environment, req.params.app_name.replace(/\./g,"_"), cb);
             },
 
             // 4. keep names
@@ -1476,7 +1449,7 @@ exports.setObjectAccess = function (req, res) {
                 cb(null)
             },
 
-        ], 
+        ],
         function (err) {
             if (err) {
                 helpers.send_failure(res, err, "app_handler", exports.version, "getConfig");
@@ -1494,7 +1467,7 @@ exports.setObjectAccess = function (req, res) {
         console.log("updateFileList NEEDS TO BE REDONE!!!!!")
         console.log("=======================================")
 
-        //onsole.log("got to updateFileDb request for body"+JSON.stringify(req.body)); 
+        //onsole.log("got to updateFileDb request for body"+JSON.stringify(req.body));
 
         /*
 
@@ -1507,7 +1480,7 @@ exports.setObjectAccess = function (req, res) {
         var dbCollection = null, warning_list =[], files_added_list = [];
 
         function app_err(message) {return helpers.app_data_error(exports.version, "updateFileList", req.params.app_name, message);}
-        
+
         async.waterfall([
             // 1. make sure all data exits
             function (cb) {
@@ -1528,15 +1501,15 @@ exports.setObjectAccess = function (req, res) {
 
             // 2. checkapp code (make sure the right app is sending data) and device_code (to make sure rights exist)
             function (cb) {
-                freezr_db.check_app_code(req.session.logged_in_user_id, req.params.app_name, req.params.source_app_code, cb)
+                db_handler.check_app_code(req.session.logged_in_user_id, req.params.app_name, req.params.source_app_code, cb)
             },
             function (cb) {
-                freezr_db.check_device_code_specific_session(req.session.device_code, req.session.logged_in_user_id, req.params.app_name, cb)
+                db_handler.check_device_code_specific_session(req.session.device_code, req.session.logged_in_user_id, req.params.app_name, cb)
             },
 
             // 3. open database connection & get collection
             function (cb) {
-                freezr_db.app_db_collection_get(req.params.app_name.replace(/\./g,"_") , collection_name, cb);
+                db_handler.app_db_collection_get(req.params.app_name.replace(/\./g,"_") , collection_name, cb);
             },
 
             // 4. read files
@@ -1584,10 +1557,10 @@ exports.setObjectAccess = function (req, res) {
                                 function (results, cb3) {
                                     if (!results  || results.length == 0) {
                                         var write = {};
-                                        write._owner = req.session.logged_in_user_id; 
+                                        write._owner = req.session.logged_in_user_id;
                                         write._date_Modified = new Date().getTime();
                                         write._id = data_object_id;
-                                        write._folder = req.params.folder_name? req.params.folder_name:file_handler.sep();                                       
+                                        write._folder = req.params.folder_name? req.params.folder_name:file_handler.sep();
                                         write._date_Created = new Date().getTime();
                                         dbCollection.insert(write, { w: 1, safe: true }, cb3);
                                     } else if (results.length > 1) {
@@ -1595,17 +1568,17 @@ exports.setObjectAccess = function (req, res) {
                                     } else {
                                         cb3(null, null);
                                     }
-                                }, 
+                                },
 
                                 function (written_object, cb3) {
-                                    if (written_object) files_added_list.push(file_name); // else done with file: file_name 
+                                    if (written_object) files_added_list.push(file_name); // else done with file: file_name
                                     cb3(null);
                                 }
                             ],
                             function (err) { // end cb3 - back to cb2
                                 if (err) {
                                     warning_list.push(file_name+": "+(err.message? err.message:"unknown error"));
-                                } 
+                                }
                                 cb2(null);
                             });
                         }
@@ -1613,17 +1586,17 @@ exports.setObjectAccess = function (req, res) {
                     function (err) {
                         if (err) {
                             warning_list.push("'unkown_file_error': "+JSON.stringify(err));
-                        } 
+                        }
                         cb(null)
                     }
 
                     )
                 } else {
                     cb(null);
-                }            
+                }
             },
 
-        ], 
+        ],
         function (err) {
             if (err) {
                 helpers.send_failure(res, err, "app_handler", exports.version, "updateFileList");
@@ -1636,7 +1609,7 @@ exports.setObjectAccess = function (req, res) {
 // ancillary functions and name checks
     var collectionIsValid = function (collection_name, app_config,is_file_record){
         // checkes collection name and versus app_config requirements
-        
+
         if (!helpers.valid_collection_name(collection_name,is_file_record) ) {
             return false
         } else if (!app_config || !app_config.meta || !app_config.meta.only_use_collections_listed) {
@@ -1667,7 +1640,7 @@ exports.setObjectAccess = function (req, res) {
             }
             //onsole.log("allFieldNameList are "+allFieldNameList.join(", "));
             //onsole.log("requiredFieldNameList are "+requiredFieldNameList.join();
-            
+
             if (req && req.body && req.body.data) {
                 for (key in req.body.data) {
                     if (req.body.data.hasOwnProperty(key)) {
@@ -1766,8 +1739,8 @@ exports.setObjectAccess = function (req, res) {
         // app.put('/v1/permissions/setfieldaccess/:requestor_app/:source_app_code/:permission_name', userDataAccessRights, app_hdlr.setFieldAccess);
         // Options: 'action': 'grant' // default - can also be 'deny'
             //'field_name': 'albums', // field name of value
-            //'field_value':'myVacationAlbum2014' // gives access to 
-            // can have one of:  'shared_with_group':'logged_in' or 'shared_with_user':a user id 
+            //'field_value':'myVacationAlbum2014' // gives access to
+            // can have one of:  'shared_with_group':'logged_in' or 'shared_with_user':a user id
             // 'requestee_app': app_name (defaults to self)
 
         var app_config = helpers.get app config(req.params.requestor_app);
@@ -1775,7 +1748,7 @@ exports.setObjectAccess = function (req, res) {
         var permission_model= (app_config && app_config.permissions && app_config.permissions[req.params.permission_name])? app_config.permissions[req.params.permission_name]: null;
 
         var permission_type = (permission_model && permission_model && permission_model.type)? permission_model.type: null;
-        var requestee_app = req.body.requestee_app? req.body.requestee_app: req.params.requestor_app; 
+        var requestee_app = req.body.requestee_app? req.body.requestee_app: req.params.requestor_app;
 
         var shared_with_user = req.body.shared_with_user? req.body.shared_with_user: null;
         var shared_with_group = shared_with_user? "user": (req.body.shared_with_group? req.body.shared_with_group: 'logged_in');
@@ -1801,7 +1774,7 @@ exports.setObjectAccess = function (req, res) {
                     'requestee_app':requestee_app,
                     '_owner':req.session.logged_in_user_id,
                     'permission_name':req.params.permission_name,
-                    'field_name':requested_field_name, 
+                    'field_name':requested_field_name,
                     'field_value':requested_field_value,
                     'shared_with_group':shared_with_group
                 }
@@ -1837,15 +1810,15 @@ exports.setObjectAccess = function (req, res) {
                 }
             },
             function (cb) {
-                freezr_db.check_app_code(req.session.logged_in_user_id, req.params.requestor_app, req.params.source_app_code, cb)
+                db_handler.check_app_code(req.session.logged_in_user_id, req.params.requestor_app, req.params.source_app_code, cb)
             },
             function (cb) {
-                freezr_db.check_device_code_specific_session(req.session.device_code, req.session.logged_in_user_id, req.params.requestor_app, cb)
+                db_handler.check_device_code_specific_session(req.session.device_code, req.session.logged_in_user_id, req.params.requestor_app, cb)
             },
 
-            // 3. get app permissions 
+            // 3. get app permissions
             function(cb) {
-                freezr_db.permission_by_owner_and_permissionName (req.session.logged_in_user_id, req.params.requestor_app, requestee_app, req.params.permission_name, cb)
+                db_handler.permission_by_owner_and_permissionName (req.freezr_environment, req.session.logged_in_user_id, req.params.requestor_app, requestee_app, req.params.permission_name, cb)
             },
 
             // 4. check permission is granted and can authorize requested fields, and if so, open db
@@ -1854,10 +1827,10 @@ exports.setObjectAccess = function (req, res) {
                     cb(app_auth_err("permission does not exist"))
                 }  else if (!results[0].granted) {
                     cb(app_auth_err("permission not granted yet"));
-                } else if (!freezr_db.field_requested_is_permitted(results[0],requested_field_name, requested_field_value)) {
+                } else if (!db_handler.field_requested_is_permitted(results[0],requested_field_name, requested_field_value)) {
                     cb(app_auth_err("app permission granted does not corresppnd to request"))
                 } else {
-                    freezr_db.app_db_collection_get("info_freezr_permissions", "field_permissions", cb);
+                    db_handler.app_db_collection_get("info_freezr_permissions", "field_permissions", cb);
                 }
             },
 
@@ -1884,16 +1857,16 @@ exports.setObjectAccess = function (req, res) {
                     var newgrant = (!req.body.action || req.body.action == "grant")? true:false;
                     if (newgrant != results[0].granted) {
                         flags.add('notes','Updated grant permission from '+results[0].granted+' to '+newgrant);
-                        write.granted = newgrant; 
+                        write.granted = newgrant;
                         dbCollection.update({ _id: results[0]._id }, {$set : write}, {safe: true }, cb);
                     } else {
                         cb(app_err("record was already updated"));
-                    }                
+                    }
                 } else {
                     cb(helpers.internal_error("app_handler", exports.version, "setFieldAccess", req.params.requestor_app,  message+" - cant update if multiple objects retrieved - SNBH"));
                 }
             },
-        ], 
+        ],
         function (err, final_object) {
             if (err) {
                 helpers.send_failure(res, err, "app_handler", exports.version, "setFieldAccess");
@@ -1927,7 +1900,7 @@ exports.setObjectAccess = function (req, res) {
             case 'ihaveccessto':
             // options: permission_name, collection, field_name, granted,  _owner
                 field_permission_attributes.requestor_app = req.params.requestor_app;
-                field_permission_attributes.$or = 
+                field_permission_attributes.$or =
                         [{'shared_with_group': 'logged_in'},
                          {'shared_with_user' :  req.session.logged_in_user_id} ];
                 if (req.query._owner) field_permission_attributes._owner = req.query._owner;
@@ -1951,15 +1924,15 @@ exports.setObjectAccess = function (req, res) {
 
             // 2. checkapp code (make sure the right app is sending data) and device_code (to make sure rights exist)
             function (cb) {
-                freezr_db.check_app_code(req.session.logged_in_user_id, req.params.requestor_app, req.params.source_app_code, cb)
+                db_handler.check_app_code(req.session.logged_in_user_id, req.params.requestor_app, req.params.source_app_code, cb)
             },
             function (cb) {
-                freezr_db.check_device_code_specific_session(req.session.device_code, req.session.logged_in_user_id, req.params.requestor_app, cb)
+                db_handler.check_device_code_specific_session(req.session.device_code, req.session.logged_in_user_id, req.params.requestor_app, cb)
             },
 
             // 3. get collection
             function (cb) {
-                freezr_db.app_db_collection_get("info_freezr_permissions" , "field_permissions", cb);
+                db_handler.app_db_collection_get("info_freezr_permissions" , "field_permissions", cb);
             },
 
             // 3. find permissions
@@ -1968,7 +1941,7 @@ exports.setObjectAccess = function (req, res) {
                 dbCollection.find(field_permission_attributes).toArray(cb);
             },
 
-        ], 
+        ],
         function (err, results) {
             if (err) {
                 helpers.send_failure(res, err, "app_handler", exports.version, "getFieldPermissions");
@@ -1978,12 +1951,3 @@ exports.setObjectAccess = function (req, res) {
         });
     }
 */
-
-
-
-
-
-
-
-
-

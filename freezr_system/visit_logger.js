@@ -9,10 +9,9 @@
 */
 
 var helpers = require('./helpers.js'),
-    freezr_db = require("./freezr_db.js"),
-	async = require('async'),
-	file_handler = require('./file_handler.js');
-
+    db_handler = require("./db_handler.js"),
+    async = require('async'),
+    file_handler = require('./file_handler.js');
 
 exports.version = '0.0.122'
 
@@ -27,40 +26,35 @@ var current_date = dateString();
 var day_db_log = {};
 var saveTimer = null;
 
-exports.reloadDb = function (callback) {
+exports.reloadDb = function (env_params, callback) {
 	// get the latest from db
 	// get the latest file, if any and have the counter
 	var today = dateString();
-	async.waterfall([
-        function (cb) {
-        	freezr_db.app_db_collection_get('info_freezr_admin', 'visit_log_daysum', cb);
-        },
-        function (theCollection, cb) {
-            theCollection.find({ _id: today }).toArray(cb);
-        }
-	], 
-    function (err, results) {
-        if (err) {
-        	helpers.state_error("visit_logger", exports.version, "saveToDb", err, "err_reading_visit_logs_db_onInit");
-        } else {
-        	if ( (results == null || results.length == 0) ) {
-        		day_db_log[today] = {}
-            } else { 
-            	day_db_log[today] = results[0]
-            }
-        }
-        callback(err)
-    });
+  const appcollowner = {
+    app_name:'info_freezer_admin',
+    collection_name:'visit_log_daysum',
+    _owner:'freezr_admin'
+  }
+  db_handler.db_getbyid (env_params, appcollowner, today, (err, object) => {
+    //onsole.log("visit_logger got today object :",today)
+    if (err) {
+      console.warn(err)
+      helpers.state_error("visit_logger", exports.version, "reloadDb", err, "err_reloading db");
+    } else {
+          day_db_log[today] = object || {};
+    }
+    callback(err)
+  })
 }
 
-exports.record = function(req, prefs, options){
+exports.record = function(req, env_params, prefs, options){
 	//onsole.log("RECORD? "+get_app_name(req)+" "+req.originalUrl)
 	if (!prefs) console.warn("PREFS NOT DEFINED ********************")
 	if (prefs && prefs.log_visits) {
 
 		// init variables
 		if (!prefs.log_details) prefs.log_details={}
-		options.ipaddress = getClientAddress(req); 
+		options.ipaddress = getClientAddress(req);
 		options.app_name = get_app_name(req, options);
 		options.exteralRef = get_external_referer(req);
 
@@ -72,7 +66,7 @@ exports.record = function(req, prefs, options){
 					req.originalUrl,
 					req.session.logged_in_user_id,
 					options.ipaddress,
-					req.header('Referer'), 
+					req.header('Referer'),
 					(options.auth_error?"Auth-Err":"")
 					];
 				full_file_log.push(full_record)
@@ -87,16 +81,16 @@ exports.record = function(req, prefs, options){
 					addRecordToDailySummary(req, prefs, options);
 					clearTimeout(saveTimer);
 					saveTimer = setTimeout(function(){
-						write_full_log_file(req, saveToDb)
+						write_full_log_file(req, env_params, function() {saveToDb(env_params)})
 					},0.2*60*1000)
 				}
 
 			}
 		}
 	}
-} 
+}
 
-function write_full_log_file (req, callback) {
+function write_full_log_file (req, env_params, callback) {
 	//onsole.log("goig to write_full_log_file- make_new_file is "+make_new_file)
 	var newLogFile = [];
 	if (current_date != dateString()) newLogFile.push(full_file_log.pop());
@@ -105,11 +99,11 @@ function write_full_log_file (req, callback) {
 
 	var the_url = "userfiles/freezr_admin/daily_log_files/"+(new Date().getFullYear())
 	file_handler.writeTextToUserFile (
-		file_handler.normUrl(the_url), 
+		file_handler.normUrl(the_url),
 		last_file_name,
 		JSON.stringify({'app':'info,freezr.visit_logger' ,version:exports.version,logs:full_file_log}),
-		{fileOverWrite: !make_new_file}, 
-		{}, 
+		{fileOverWrite: !make_new_file},
+		{},
 		"info.freezr.logs",
 		req.freezr_environment,
 		function(err, written_filename) {
@@ -125,25 +119,41 @@ function write_full_log_file (req, callback) {
 			}
 			current_date = dateString();
 			callback();
-		});           
+		});
 }
-function saveToDb() {
+function saveToDb(env_params) {
 	//onsole.log("saveToDb")
 	//onsole.log(JSON.stringify(day_db_log))
-	var dbCollection = null;
-	// iterate through records
-	// Find one  
-	var theDateString = null, today = dateString();
+  var theDateString = null, today = dateString();
+
+	// iterate through records and find one
 	Object.keys(day_db_log).forEach(function(aDay) {if (aDay != today) theDateString=aDay;})
 	theDateString = theDateString || today;
-	// find one date to log. if mre old days exist (unlikely), it will deal with one on each save
+	// find one date to log. if more old days exist (unlikely), it will deal with one on each save
 
 	var write = day_db_log[theDateString]
 	write._owner = 'freezr_admin';
+  appcollowner = {
+    app_name:'info_freezer_admin',
+    collection_name:'params',
+    _owner:'freezr_admin'
+  }
 
+  db_handler.db_upsert (env_params, appcollowner, theDateString, write, (err, entity)=>{
+    if (err) {
+      helpers.state_error("visit_logger", exports.version, "saveToDb", err, "err_writing_logs_to_db")
+    } else {
+      if (theDateString != today ) {
+        delete day_db_log[theDateString]
+      }
+    }
+
+  })
+
+/* OLD temp DELETE THIS (TODO)
 	async.waterfall([
         function (cb) {
-        	freezr_db.app_db_collection_get('info_freezr_admin', 'visit_log_daysum', cb);
+        	db_handler.app_db_collection_get('info_freezr_admin', 'visit_log_daysum', cb);
         },
         function (theCollection, cb) {
             dbCollection = theCollection;
@@ -156,13 +166,13 @@ function saveToDb() {
                 write._date_Created = new Date().getTime();
                 write._id = theDateString;
                 dbCollection.insert(write, { w: 1, safe: true }, cb);
-            } else { 
+            } else {
             	delete write._id;
                 dbCollection.update({_id: theDateString },
                     {$set: write}, {safe: true }, cb);
             }
         },
-	], 
+	],
     function (err) {
         if (err) {
         	helpers.state_error("visit_logger", exports.version, "saveToDb", err, "err_writing_logs_to_db")
@@ -172,7 +182,7 @@ function saveToDb() {
         	}
         }
     });
-
+*/
 }
 
 function addRecordToDailySummary(req, prefs, options) {
@@ -246,7 +256,7 @@ function addRecordToDailySummary(req, prefs, options) {
 		  	day_db_log[today][user_type].numdbWrites++
 		  } else {day_db_log[today][user_type].numDbReads++}
 		} else { // parts[2] == permissions, account, developer...
-			if (parts[3] == "setobjectaccess" || parts[3] == "change" || parts[3] == "changePassword.json" || parts[3] == "upload_app_zipfile.json" ) {
+			if (parts[3] == "setobjectaccess" || ["change","changePassword.json","app_install_from_zipfile.json","app_install_from_url.json"].indexOf(parts[3])>-1 ) {
 				day_db_log[today][user_type].numAcctChges++
 			} else {day_db_log[today][user_type].numDbReads++}
 		}
@@ -280,10 +290,13 @@ function addRecordToDailySummary(req, prefs, options) {
 		console.warn("visit_logger: No choices left on source "+req.originalUrl+" source:"+options.source)
 	}
 }
-function getClientAddress(request){ 
+function getClientAddress(request){
 	// https://stackoverflow.com/questions/8107856/how-to-determine-a-users-ip-address-in-node
+    //console.log("with incompatible with strict mode - reqq.ip works? "+req.ip)
+    /* Alternate code to test console todo
+    return request.ip */
     with(request)
-        return (headers['x-forwarded-for'] || '').split(',')[0] 
+        return (headers['x-forwarded-for'] || '').split(',')[0]
             || connection.remoteAddress
 }
 
@@ -291,12 +304,12 @@ function get_app_name(req, options) {
 	if (req.params.app_name) return req.params.app_name.replace(/\./g,"_")
 	if (req.params.requestor_app) return req.params.requestor_app.replace(/\./g,"_")
 	if (options.source == "home") return "home_redirect"
-	
+
 	if (req.originalUrl.split('?')[0] == "/") return "root"
 	var parts = req.originalUrl.split('?')[0].split("/");
 	const PARTS2URLS =  ['app_files', 'apps', 'v1']
 	const PARTS1URLS =  ['allmydata', 'favicon.ico', 'ppage', 'papp', 'account', 'login', 'admin']
-	
+
 	if (parts.length<2) return "account"
 	if (PARTS2URLS.indexOf (parts[1]) >-1 ) return parts[2].replace(/\./g,"_");
 	if (PARTS1URLS.indexOf (parts[1]) >-1 )  return parts[1].replace(/\./g,"_");
@@ -323,12 +336,9 @@ function dateString (time) {
 const APP_FILE_SOURCES = ['servePublicAppFile','serveAppFile']
 function sourceIsFile(source) {
 	return APP_FILE_SOURCES.indexOf(source) >-1
-} 
+}
 function isSysFile(url) {
 	return FREEZR_SYS_FILES.indexOf(url)>-1
 }
 
 const FREEZR_SYS_FILES = ['/app_files/info.freezr.public/freezr_style.css', '/app_files/info.freezr.public/freezr_core.css', '/app_files/info.freezr.public/freezr_core.js', '/app_files/info.freezr.public/static/freezr_texture.png', '/app_files/info.freezr.public/static/freezer_log_top.png', '/favicon.ico']
-
-
-

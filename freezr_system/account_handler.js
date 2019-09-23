@@ -1,8 +1,8 @@
 // freezr.info - nodejs system files - account_handler
-exports.version = "0.0.122";
+exports.version = "0.0.131";
 
-var helpers = require('./helpers.js'),
-    freezr_db = require("./freezr_db.js"),
+const helpers = require('./helpers.js'),
+    db_handler = require("./db_handler.js"),
     user_obj = require("./user_obj.js"),
     async = require('async'),
     flags_obj = require("./flags_obj.js"),
@@ -25,7 +25,7 @@ exports.generate_login_page = function (req, res) {
             app_name: (req.params.app_name? req.params.app_name:"info.freezr.account"),
             other_variables: "var login_for_app_name="+(req.params.app_name? ("'"+req.params.app_name+"';"):"null")+";" + " var loginAction = "+(req.params.loginaction? ("'"+req.params.loginaction+"';"):"null")+";" + " var freezrServerStatus = "+JSON.stringify(req.freezrStatus) +";"
         }
-        freezr_db.all_users("_date_Created", true, 0, null, function (err, results) {
+        db_handler.all_users(req.freezr_environment, (err, results) => {
             if (err && req.freezr_is_setup) {
                 res.redirect('/admin/public/starterror');
             } else if ((err || !results || results.length==0) && !req.freezr_is_setup){
@@ -108,7 +108,7 @@ exports.login = function (req, res) {
     // /v1/account/login
     // "/v1/account/applogin"
     //onsole.log("login req host:"+req.hostname+" url"+req.url+" baseUrl "+req.baseUrl+" BODY "+JSON.stringify(req.body));
-    var user_id = (req.body && req.body.user_id)? freezr_db.user_id_from_user_input(req.body.user_id): null;
+    var user_id = (req.body && req.body.user_id)? db_handler.user_id_from_user_input(req.body.user_id): null;
     var source_app_code = null;
 
     async.waterfall([
@@ -127,7 +127,7 @@ exports.login = function (req, res) {
 
         // 1. get user_id
         function (cb) {
-            freezr_db.user_by_user_id(user_id, cb);
+            db_handler.user_by_user_id(req.freezr_environment, user_id, cb);
         },
 
         // 2. check the password
@@ -137,7 +137,7 @@ exports.login = function (req, res) {
             if (u.check_passwordSync(req.body.password)) {
                 req.session.logged_in = true;
 
-                req.session.logged_in_user_id = freezr_db.user_id_from_user_input(req.body.user_id);
+                req.session.logged_in_user_id = db_handler.user_id_from_user_input(req.body.user_id);
                 req.session.logged_in_date = new Date();
                 req.session.logged_in_as_admin = u.isAdmin;
 
@@ -156,13 +156,13 @@ exports.login = function (req, res) {
 
         // 3. Set or update device code
         function (cb) {
-            freezr_db.set_or_update_user_device_code(req.session.device_code, user_id,  req.body.login_for_app_name, cb)
+            db_handler.set_or_update_user_device_code(req.freezr_environment, req.session.device_code, user_id,  req.body.login_for_app_name, cb)
         },
 
         // 4. get an app_code (used for app_specific login only)
         function(results, cb) {
             if (req.body.login_for_app_name) {
-                freezr_db.get_user_app_code(user_id, req.body.login_for_app_name, cb)
+                db_handler.get_user_app_code(req.freezr_environment, user_id, req.body.login_for_app_name, cb)
             } else {
                 cb(null, null)
             }
@@ -188,7 +188,7 @@ exports.ping = function (req, res) {
         async.waterfall([
             // 1. get user
             function (cb) {
-                freezr_db.user_by_user_id(req.query.user_id, cb);
+                db_handler.user_by_user_id(req.query.user_id, cb);
             },
 
             // 2. check the password
@@ -203,7 +203,7 @@ exports.ping = function (req, res) {
 
             // 3. get code
             function(cb){
-                freezr_db.get_or_set_user_app_code (req.session.logged_in_user_id,req.query.login_for_app_name, cb);
+                db_handler.get_or_set_user_app_code (req.freezr_environment, req.session.logged_in_user_id,req.query.login_for_app_name, cb);
             }
         ],
         function (err, results) {
@@ -255,7 +255,7 @@ exports.changePassword = function (req, res) {
 
         // 1. get user record
         function (cb) {
-            freezr_db.user_by_user_id(user_id, cb);
+            db_handler.user_by_user_id(req.freezr_environment, user_id, cb);
         },
 
         // 2. check the password
@@ -270,7 +270,7 @@ exports.changePassword = function (req, res) {
 
         // 3. change pw for the user.
         function (cb) {
-            freezr_db.changeUserPassword(
+            db_handler.changeUserPassword(
                 req.body.user_id,
                 req.body.newPassword,
                 cb);
@@ -301,9 +301,10 @@ exports.list_all_user_apps = function (req, res) {
 
         // 2. get all user apps, and add the names to the appropriate lists
         function(cb) {
-            freezr_db.all_user_apps(user_id, null, true, 0, null, cb);
+            db_handler.all_user_apps(req.freezr_environment, user_id, 0, null, cb);
         },
         function(results, cb) {
+            //onsole.log("all_user_apps",results)
             if (results && results.length>0) {
                 for (var i =0; i<results.length; i++) {
                     if (results[i].removed) {
@@ -318,7 +319,7 @@ exports.list_all_user_apps = function (req, res) {
 
         // 3. get all apps, and match the records to the right list
         function(cb) {
-            freezr_db.all_apps(null, true, 0, null, cb);
+            db_handler.all_apps(req.freezr_environment, null, cb);
         },
         function(results, cb) {
             if (results && results.length>0) {
@@ -339,12 +340,14 @@ exports.list_all_user_apps = function (req, res) {
     ],
     function (err, user_json) {
         if (err) {
+          console.warn("ERROR in list_all_user_apps ",err)
             if (req.freezrInternalCallFwd) {
                 req.freezrInternalCallFwd(err, null)
             } else {
                 helpers.send_failure(res, err,"account_handler", exports.version,"list_all_user_apps");
             }
         } else {
+            //onsole.log(" results",{removed_apps:removed_apps, user_apps:user_apps, new_apps:new_apps})
             if (req.freezrInternalCallFwd) {
                 req.freezrInternalCallFwd(null, {removed_apps:removed_apps, user_apps:user_apps, new_apps:new_apps})
             } else {
@@ -353,75 +356,135 @@ exports.list_all_user_apps = function (req, res) {
         }
     });
 };
-exports.add_uploaded_app_zip_file = function (req, res) {
-    // app.put ('/v1/account/upload_app_zipfile.json', requireUserRights, uploadAppZipFile);
-    helpers.log (req,"add_uploaded_app_zip_file body") //+JSON.stringify(req.body));
+exports.get_file_from_url_to_install_app = function(req,res) {
+  // app.put ('/v1/account/app_install_from_url.json', requireUserRights, installAppFromUrl);
+  //onsole.log("get_file_from_url_to_install_app",req.body)
 
-    var app_name, app_path, app_version=null; app_display_name=null;
+
+  const fs = require('fs');
+  const request = require('request');
+
+  const download = (url, dest, cb) => {
+      // from stackoverflow.com/questions/11944932/how-to-download-a-file-with-node-js-without-using-third-party-libraries
+
+      const file = fs.createWriteStream(dest);
+      const sendReq = request.get(url);
+
+      // verify response code
+      sendReq.on('response', (response) => {
+          if (response.statusCode !== 200) {
+              return cb(new Error ('Bad Connection - Response status was ' + response.statusCode));
+          }
+          sendReq.pipe(file);
+      });
+
+      // close() is async, call cb after close completes
+      file.on('finish', () => file.close(cb));
+
+      // check for request errors
+      sendReq.on('error', (err) => {
+          fs.unlink(dest);
+          return cb(err);
+      });
+
+      file.on('error', (err) => { // Handle errors
+          fs.unlink(dest); // Delete the file async. (But we don't check the result)
+          return cb(err);
+      });
+  };
+
+
+  let partialPathDir = file_handler.partPathToUserAppFiles (null, req.body.app_name+".zip").slice(1)
+
+  download(req.body.app_url, partialPathDir, function(err) {
+    if (!err && req.body.app_name) {
+      req.app_name = req.body.app_name
+      req.file={}
+      req.file.originalname = req.body.app_name+".zip"
+      req.file.buffer=partialPathDir
+      req.installsource = "get_file_from_url_to_install_app"
+      exports.install_app (req, res)
+      // console todonow  delete tempfile... determine name ... put file under userfiles
+    } else { // err or missing app name
+      let flags = new Flags({});
+      flags.meta.app_name = req.body.app_name;
+      if (!err) err = {code:'Missing App name', message:'app name is required to create an app.'}
+      if (!err.code) err.code = 'err_unknown';
+      if (!err.message) err.message = 'Could not connect to the requested URL';
+      flags.add('errors', err.code, {'function':'install_app', 'text':err.message});
+
+      helpers.send_success(res, {success:false, err:err, flags:flags, text:""});
+    }
+  })
+}
+exports.install_app = function (req, res) {
+    // app.put ('/v1/account/app_install_from_zipfile.json', requireUserRights, installAppFromZipFile);
+    // exports.get_file_from_url_to_install_app
+    //onsole.log("install_app file.originalname ",req.file.originalname,"app_name ",req.app_name)
+
+    helpers.log (req,"install_app "+req.file.originalname+(req.installsource || "")) //+;
+
+    var app_name = req.app_name, app_path, app_version=0; app_display_name=null;
+
+    if (!app_name) {
+      let parts = req.file.originalname.split('.');
+      if (helpers.endsWith(parts[(parts.length-2)],"-master")) parts[(parts.length-2)] = parts[(parts.length-2)].slice(0,-7);
+
+      if (helpers.startsWith((parts[(parts.length-2)]),"_v_")) {
+          app_version = parts[parts.length-2].slice(3);
+          parts.splice(parts.length-2,2);
+      } else {
+          parts.splice(parts.length-1,1);
+      }
+      app_name = parts.join('.');
+      app_name = app_name.split(' ')[0];
+    }
+
     var flags = new Flags({});
 
     async.waterfall([
-    // 1. make sure data and file names exist
+    // 1. make sure data and file names exist and app_name is correct
         function (cb) {
             if (!req.session.logged_in_user_id)
                 cb(helpers.missing_data("user_id"));
             else if (!req.session.logged_in_as_admin)
-                helpers.auth_failure("account_handler", exports.version,"add_uploaded_app_zip_file","Could not add apps without admin privelages.");
+                helpers.auth_failure("account_handler", exports.version,"install_app","Could not add apps without admin privelages.");
             else if (!req.file)
-                cb(helpers.missing_data("file","account_handler", exports.version, "add_uploaded_app_zip_file"));
+                cb(helpers.missing_data("file","account_handler", exports.version, "install_app"));
             else if (!req.file.originalname)
-                cb(helpers.missing_data("file name","account_handler", exports.version, "add_uploaded_app_zip_file"));
+                cb(helpers.missing_data("file name","account_handler", exports.version, "install_app"));
             else if (req.file.originalname.length<5 || req.file.originalname.substr(-4) != ".zip")
-                cb(helpers.invalid_data("file name not zip: "+req.file.originalname, "account_handler", exports.version, "add_uploaded_app_zip_file"));
-            else
-                cb(null);
-        },
-
-    // 2. Make sure it is a zip file and extract the app_name
-        function (cb) {
-
-            var parts = req.file.originalname.split('.');
-            if (helpers.endsWith(parts[(parts.length-2)],"-master")) parts[(parts.length-2)] = parts[(parts.length-2)].slice(0,-7);
-
-            if (helpers.startsWith((parts[(parts.length-2)]),"_v_")) {
-                app_version = parts[parts.length-2].slice(3);
-                parts.splice(parts.length-2,2);
-            } else {
-                parts.splice(parts.length-1,1);
-            }
-            app_name = parts.join('.');
-            app_name = app_name.split(' ')[0];
-
-            if (app_name.length<1) {
-                cb(helpers.invalid_data("app name missing - that is the name of the app zip file name before any spaces.", "account_handler", exports.version, "add_uploaded_app_zip_file"));
+                cb(helpers.invalid_data("file name not zip: "+req.file.originalname, "account_handler", exports.version, "install_app"));
+            else if (app_name.length<1) {
+                cb(helpers.invalid_data("app name missing - that is the name of the app zip file name before any spaces.", "account_handler", exports.version, "install_app"));
             } else if (!helpers.valid_app_name(app_name)) {
-                cb(helpers.invalid_data("app name: "+app_name, "account_handler", exports.version, "add_uploaded_app_zip_file"));
+                cb(helpers.invalid_data("app name: "+app_name, "account_handler", exports.version, "install_app"));
             } else if (helpers.system_apps.indexOf(app_name)>-1  || !helpers.valid_app_name(app_name)){
-                cb(helpers.invalid_data("app name not allowed: "+app_name, "account_handler", exports.version, "add_uploaded_app_zip_file"));
+                cb(helpers.invalid_data("app name not allowed: "+app_name, "account_handler", exports.version, "install_app"));
             } else {
                 flags = new Flags({'app_name':app_name,'didwhat':'installed'});
                 cb(null);
             }
         },
 
-    // 3. Make sure app directory exists
+    // 2. Make sure app directory exists
         function (cb) {
             file_handler.checkExistsOrCreateUserAppFolder(app_name, req.freezr_environment, cb);
         },
 
-    // 4. Extract Zip File Contents
+    // 3. Extract Zip File Contents
         function (cb) {
             file_handler.extractZippedAppFiles(req.file.buffer, app_name, req.file.originalname, req.freezr_environment, cb);
         },
 
-        // 5a. Get and check app_config (populate app_version and app_display_name and permissons)
+        // 4. Get and check app_config (populate app_version and app_display_name and permissons)
         function (cb) {
             file_handler.async_app_config(app_name, req.freezr_environment,cb);
         },
-        // 5b. make sure all data exits
+        // 5. make sure all data exits
         function (app_config, cb) {
             if (app_config)  {
-                if (!app_version && app_config.meta && app_config.meta.app_version) app_version = app_config.meta.app_version;
+                if (app_config.meta && app_config.meta.app_version) app_version = app_config.meta.app_version;
                 if (app_config && app_config.meta && app_config.meta.app_display_name) app_display_name = app_config.meta.app_display_name;
                 flags = file_handler.check_app_config(app_config, app_name, app_version, flags);
             } else {
@@ -431,7 +494,7 @@ exports.add_uploaded_app_zip_file = function (req, res) {
             if (!app_version) app_version = 1;
 
             if (app_config) {
-                freezr_db.update_permission_records_from_app_config(app_config, app_name, req.session.logged_in_user_id, flags, cb);
+                db_handler.update_permission_records_from_app_config(req.freezr_environment, app_config, app_name, req.session.logged_in_user_id, flags, cb);
             } else {
                 cb(null, null)
             }
@@ -446,7 +509,7 @@ exports.add_uploaded_app_zip_file = function (req, res) {
         // 7. See if app exists
         function (newflags, dummy, cb) {
             if (newflags && Object.keys(newflags).length > 0) flags = newflags;
-            freezr_db.get_app_info_from_db(app_name, cb);
+            db_handler.get_app_info_from_db(req.freezr_environment, app_name, cb);
         },
 
         // 8. If app already exists, flag it as an update
@@ -461,7 +524,8 @@ exports.add_uploaded_app_zip_file = function (req, res) {
                 }
             } else {
                 flags.meta.didwhat = "uploaded";
-                freezr_db.add_app(
+                  db_handler.add_app(
+                    req.freezr_environment,
                     app_name,
                     app_display_name,
                     req.session.logged_in_user_id,
@@ -469,9 +533,19 @@ exports.add_uploaded_app_zip_file = function (req, res) {
             }
         },
 
+        // 9. delete temporary file when app has been downloaded
         function(app_info, cb) {
+          if (req.installsource == "get_file_from_url_to_install_app"){
+            const fs=require('fs')
+            fs.unlink(req.file.buffer, cb)
+          } else {
+            cb(null);
+          }
+        },
+
+        function(cb) {
             if (flags.meta.didwhat == "uploaded") {
-                freezr_db.get_or_set_user_app_code(req.session.logged_in_user_id,app_name, cb);
+                db_handler.get_or_set_user_app_code(req.freezr_environment, req.session.logged_in_user_id,app_name, cb);
             } else {
                 cb (null, null);
             }
@@ -485,12 +559,11 @@ exports.add_uploaded_app_zip_file = function (req, res) {
         // todo: also better to wipe out old files so old files dont linger if they dont exist in new version
         flags.meta.app_name = app_name;
         if (err) {
-            // todo later: perhaps delete the zip file
             if (!err.code) err.code = 'err_unknown';
-            flags.add('errors', err.code, {'function':'add_uploaded_app_zip_file', 'text':err.message});
+            flags.add('errors', err.code, {'function':'install_app', 'text':err.message});
         }
-        //onsole.log(flags)
-        helpers.send_success(res, flags.sentencify() );
+        //onsole.log(flags.sentencify())
+        helpers.send_success(res, {err:err, flags:flags.sentencify()} );
     });
 }
 exports.appMgmtActions  = function (req,res) /* deleteApp updateApp */ {
@@ -498,21 +571,21 @@ exports.appMgmtActions  = function (req,res) /* deleteApp updateApp */ {
     //onsole.log("At app mgmt actions "+JSON.stringify(req.body));
     var action = (req.body && req.body.action)? req.body.action: null;
     var app_name = (req.body && req.body.app_name)? req.body.app_name: null;
-    var user_id = req.session.logged_in_user_id;
+    var logged_in_user = req.session.logged_in_user_id;
     var app_version=null;
 
     if (action == 'removeApp') {
-        if (user_id) {
-            freezr_db.remove_user_app(user_id, app_name, function(feedback) { helpers.send_success(res, feedback)});
+        if (logged_in_user) {
+            db_handler.remove_user_app(req.freezr_environment, logged_in_user, app_name, function(feedback) { helpers.send_success(res, feedback)});
         } else {
             helpers.send_auth_failure(res, "account_handler", exports.version,"appMgmtActions","Could not remove app without user.","auth_noUser");
         }
     } else if (action == 'deleteApp') {
-        if (user_id) {
+        if (logged_in_user) {
             // remove all data
-            freezr_db.try_to_delete_app(user_id, app_name, req.freezr_environment, function(err, feedback) {
+            db_handler.try_to_delete_app(req.freezr_environment, logged_in_user, app_name, function(err, feedback) {
                 if (err) {
-                    helpers.send_internal_err_failure(res, "freezr_db", freezr_db.version, "try_to_delete_app", "Internal error trying to delete app. App was not deleted." )
+                    helpers.send_internal_err_failure(res, "db_handler", db_handler.version, "try_to_delete_app", "Internal error trying to delete app. App was not deleted." )
                 } else {
                     //onsole.log("success in deleting app")
                     helpers.send_success(res, {success: true})
@@ -565,10 +638,9 @@ exports.appMgmtActions  = function (req,res) /* deleteApp updateApp */ {
                     flags.add('notes','appconfig_missing');
                 }
                 if (!app_display_name) app_display_name = app_name;
-                if (!app_version) app_version = 1;
 
                 if (app_config) {
-                    freezr_db.update_permission_records_from_app_config(app_config, app_name, req.session.logged_in_user_id, flags, cb);
+                    db_handler.update_permission_records_from_app_config(req.freezr_environment, app_config, app_name, req.session.logged_in_user_id, flags, cb);
                 } else {
                     cb(null, null)
                 }
@@ -585,7 +657,7 @@ exports.appMgmtActions  = function (req,res) /* deleteApp updateApp */ {
                 if (newflags && Object.keys(newflags).length > 0) flags = newflags;
 
                 if (helpers.valid_app_name(app_name)) {
-                    freezr_db.get_app_info_from_db(app_name, cb);
+                    db_handler.get_app_info_from_db(req.freezr_environment, app_name, cb);
                 } else {
                     cb(helpers.invalid_data("app name: "+app_name, "account_handler", exports.version, "appMgmtActions"));
                 }
@@ -604,7 +676,8 @@ exports.appMgmtActions  = function (req,res) /* deleteApp updateApp */ {
                     }
                 } else {  //add to directory");
                     flags.meta.didwhat = "installed";
-                    freezr_db.add_app(
+                    db_handler.add_app(
+                        req.freezr_environment,
                         app_name,
                         app_display_name,
                         req.session.logged_in_user_id,
@@ -615,7 +688,7 @@ exports.appMgmtActions  = function (req,res) /* deleteApp updateApp */ {
 
             function(app_info, cb) {
                 if (flags.meta.didwhat == "installed") {
-                    freezr_db.get_or_set_user_app_code(req.session.logged_in_user_id,app_name, cb);
+                    db_handler.get_or_set_user_app_code(req.freezr_environment, req.session.logged_in_user_id,app_name, cb);
                 } else {
                     cb (null, null);
                 }
@@ -663,7 +736,7 @@ exports.changeNamedPermissions = function(req, res) {
                 app_config = the_app_config;
 
                 app_config_permissions = (app_config && app_config.permissions && Object.keys(app_config.permissions).length > 0)? JSON.parse(JSON.stringify( app_config.permissions)) : null;
-                schemad_permission = freezr_db.permission_object_from_app_config_params(app_config_permissions[permission_name], permission_name, requestee_app, requestor_app);
+                schemad_permission = db_handler.permission_object_from_app_config_params(app_config_permissions[permission_name], permission_name, requestee_app, requestor_app);
                 if (schemad_permission && schemad_permission.type == "folder_delegate") permission_object.collection="files";
                 if (schemad_permission && (typeof schemad_permission.sharable_groups == "string" || !isNaN(schemad_permission.sharable_groups))) schemad_permission.sharable_groups = [schemad_permission.sharable_groups];
 
@@ -692,31 +765,30 @@ exports.changeNamedPermissions = function(req, res) {
 
             // 2. Check user App Code
             function (cb) {
-                freezr_db.check_app_code(req.session.logged_in_user_id, requestee_app, req.params.source_app_code, cb);
+                db_handler.check_app_code(req.freezr_environment, req.session.logged_in_user_id, requestee_app, req.params.source_app_code, cb);
             },
 
             // 3. get current permission record
             function (cb) {
-                freezr_db.permission_by_owner_and_permissionName(req.session.logged_in_user_id, requestor_app, requestee_app, permission_name, cb);
-                    //onsole.log("getting existing perm: req.session.logged_in_user_id:"+req.session.logged_in_user_id+", requestor_app:"+requestor_app+", requestee_app:"+requestee_app+", permission_name:"+permission_name)
+                db_handler.permission_by_owner_and_permissionName(req.freezr_environment, req.session.logged_in_user_id, requestor_app, requestee_app, permission_name, cb);
             },
 
             // 4. Make sure of validity and update permission record
             function (results, cb) {
                 if (results.length == 0) {
                     helpers.warning ("account_handler", exports.version, "changeNamedPermissions","SNBH - permissions should be recorded already via app_config set up");
-                    freezr_db.create_query_permission_record(req.session.logged_in_user_id, requestor_app, requestee_app, permission_name, permission_object, action, cb);
+                    db_handler.create_query_permission_record(req.freezr_environment, req.session.logged_in_user_id, requestor_app, requestee_app, permission_name, permission_object, action, cb);
                 } else {
                     if (results.length > 1) {
-                        freezr_db.deletePermission(results[1]._id, null);
+                        db_handler.deletePermission(req.freezr_environment, results[1]._id, null);
                         helpers.internal_error ("account_handler", exports.version, "changeNamedPermissions","SNBH - more than 1 result");
                     }
 
                     if (schemad_permission && (action == "Accept" || action=="Deny" ) ) {
-                        freezr_db.updatePermission(results[0], action, schemad_permission, cb);
+                        db_handler.updatePermission(req.freezr_environment, results[0], action, schemad_permission, cb);
                     } else if (action == "Deny" && results[0].outDated) {
                         helpers.warning ("account_handler", exports.version, "changeNamedPermissions","ERR now REMOVED AS OUTDATED");
-                        freezr_db.deletePermission(results[0]._id, cb);
+                        db_handler.deletePermission(req.freezr_environment, results[0]._id, cb);
                     } else {
                         cb(helpers.invalid_data("action must be 'Accept' or 'Deny' only - SNBH","account_handler", exports.version, "changeNamedPermissions"));
                     }
@@ -728,7 +800,7 @@ exports.changeNamedPermissions = function(req, res) {
                 if (action == "Accept") {
                     cb(null, {aborted:false})
                 } else {
-                    removeAllAccessibleObjects(req.session.logged_in_user_id, requestor_app, requestee_app, permission_name, cb);
+                    removeAllAccessibleObjects(req.freezr_environment, req.session.logged_in_user_id, requestor_app, requestee_app, permission_name, cb);
                 }
 
             },
@@ -747,23 +819,26 @@ exports.changeNamedPermissions = function(req, res) {
         helpers.send_failure(res, helpers.invalid_data,("One request at a time can be accepted."),"account_handler", exports.version,"changeNamedPermissions");
     }
 }
-removeAllAccessibleObjects = function(user_id, requestor_app, requestee_app, permission_name, callback) {
+
+removeAllAccessibleObjects = function(env_params, user_id, requestor_app, requestee_app, permission_name, callback) {
     // assumes error checking all done
     var flags = new Flags({'function':'removeAllAccessibleObjects'});
-    var collection_list = [], collections_affected = {}, warning_list= [], accessibles_collection;
+    var collection_list = [], collections_affected = {}, warning_list= [];
     // collections_affected => { collection1:[id1, id2] , collection2:[id3,id4] }
     //  get app_config and colelctions_affected addasunique (collections in app_config) //redundancy
+    const accessibles_collection = {
+      app_name:'info_freezer_admin',
+      collection_name:"accessible_objects",
+      _owner:user_id
+    }
 
     async.waterfall([
     // 1.  get all accessibles collection
     function (cb) {
-        freezr_db.app_db_collection_get("info_freezr_permissions" , "accessible_objects", cb);
-    },
-    // 2.  get all relevant objects
-    function (theCollection, cb) {
-        if (!theCollection) cb(helpers.error("db access error","could not access info_freezr_permissions from removeAllAccessibleObjects"))
-        accessibles_collection = theCollection;
-        accessibles_collection.find({_owner:user_id, permission_name: permission_name, requestor_app: requestor_app, granted:true}).toArray(cb)
+      db_handler.db_find(env_params, accessibles_collection,
+        {_owner:user_id, permission_name: permission_name, requestor_app: requestor_app, granted:true},
+        {},
+        cb)
     },
     // 3. Set granted=false to all accessibles and create nice lists for future actions
     function (results, cb) {
@@ -780,8 +855,9 @@ removeAllAccessibleObjects = function(user_id, requestor_app, requestee_app, per
             //onsole.log({collections_affected})
             async.forEach(results, function (acc_obj, cb2) {
                 //onsole.log("setting "+acc_obj._id)
-                accessibles_collection.update({_id: acc_obj._id },
-                    {$set: {granted:false, '_date_Modified' : (new Date().getTime())}  }, {safe: true }, cb2);
+                db_handler.db_update(env_params, accessibles_collection, acc_obj._id,
+                    {granted:false, '_date_Modified' : (new Date().getTime())},
+                    cb2);
                 },
                 function (err) {
                     if (err) {
@@ -796,67 +872,60 @@ removeAllAccessibleObjects = function(user_id, requestor_app, requestee_app, per
 
     // 4. remove the relevant _accessible_By indicator of the actual objects
     function (cb) {
-        var db_collection;
         async.forEach(collection_list, function (collection_name, cb2) {
             if (collection_name) {
                 //onsole.log("getting collection name "+collection_name+" from requestee_app "+requestee_app)
-                freezr_db.app_db_collection_get(requestee_app.replace(/\./g,"_") , collection_name,
-                    function (err, theCollection) {
-                        if (err) {
-                            flags.add('major_warnings','data_object_update',{err:err,'function':'removeAllAccessibleObjects','async-part':4,'collection_name':collection_name,'message':'error geting collection '+collection_name});
-                            cb2(null);
-                        } else {
-                            db_collection = theCollection;
-                            what_to_find = {"_accessible_By.group_perms.public": requestor_app+"/"+permission_name};
-                                // later add or for other sharable gorups, base don app_config (ie do || for all permitted groups)
-                            //onsole.log({what_to_find})
-                            db_collection.find(what_to_find).toArray(function(err, results){
-                                if (err) {
-                                    flags.add('major_warnings','data_object_update',{err:err,'function':'removeAllAccessibleObjects','async-part':4, 'perm':requestor_app+"/"+permission_name,'message':'error geting data object for '+requestor_app+"/"+permission_name});
-                                    cb2(null);
-                                } else if (!results || results.length==0){
-                                    flags.add('minor_warnings_data_object','data_object_update',{err:err,'function':'removeAllAccessibleObjects','async-part':4, 'perm':requestor_app+"/"+permission_name,'message':'No data objects present for '+requestor_app+"/"+permission_name});
-                                    cb2(null);
-                                } else {
-                                    async.forEach(results, function (anObject, cb3) {
-                                        var newAccessibleBy = anObject._accessible_By;
-                                        if (!newAccessibleBy) {
-                                            flags.add('minor_warnings_data_object','data_object_update',{err:err,'function':'removeAllAccessibleObjects','async-part':4,'data_object_id':anObject._id, 'perm':requestor_app+"/"+permission_name,'message':'No _accessible_By present for '+requestor_app+"/"+permission_name+" in object "+anObject._id});
-                                            cb3(null);
-                                        } else if (!newAccessibleBy.group_perms || !newAccessibleBy.group_perms.public  || newAccessibleBy.group_perms.public.indexOf(requestor_app+"/"+permission_name)<0) {
-                                            flags.add('minor_warnings_data_object','data_object_update',{err:err,'function':'removeAllAccessibleObjects','async-part':4,'data_object_id':anObject._id, 'perm':requestor_app+"/"+permission_name,'message':'No permission_name found in _accessible_By for '+requestor_app+"/"+permission_name+" in object "+anObject._id});
-                                            cb3(null);
-                                        } else {
-                                            var idx = newAccessibleBy.group_perms.public.indexOf(requestor_app+"/"+permission_name);
-                                            newAccessibleBy.group_perms.public.splice(idx,1);
-                                            if (newAccessibleBy.group_perms.public.length== 0) {
-                                                idx = newAccessibleBy.groups.indexOf("public");
-                                                if (idx>=0) newAccessibleBy.groups.splice(idx,1) // should always be the case
-                                            }
-                                            idx = collections_affected[collection_name].indexOf(requestor_app+"/"+permission_name);
-                                            if (idx>=0) collections_affected[collection_name].splice(idx,1) // should always be the case
-                                            db_collection.update({_id: anObject._id },
-                                                {$set: {'_date_Modified' : (new Date().getTime())}  }, {safe: true }, cb3);
-                                        }
-                                    },
-                                    function (err) {
-                                        if (err) {
-                                            console.warn("Got an err in (a) within object retrieavel of removeAllAccessibleObjects "+JSON.stringify(err))
-                                            warning_list.push("'unkown_error_removing_accessible_indiccator': "+JSON.stringify(err));
-                                        }
-                                        cb2(null)
-                                    })
-                                }
-
-                            })
-                        }
-                    }
-                );
+                const appcollowner = {
+                  app_name:requestee_app,
+                  collection_name:collection_name,
+                  _owner:user_id
+                }
+                what_to_find = {"_accessible_By.group_perms.public": requestor_app+"/"+permission_name};
+                    // later add or for other sharable gorups, base don app_config (ie do || for all permitted groups)
+                db_handler.db_find(req.freezr_environment, appcollowner, what_to_find, {}, (err, results)=>{
+                  if (err) {
+                      flags.add('major_warnings','data_object_update',{err:err,'function':'removeAllAccessibleObjects','async-part':4, 'perm':requestor_app+"/"+permission_name,'message':'error geting data object for '+requestor_app+"/"+permission_name});
+                      cb2(null);
+                  } else if (!results || results.length==0){
+                      flags.add('minor_warnings_data_object','data_object_update',{err:err,'function':'removeAllAccessibleObjects','async-part':4, 'perm':requestor_app+"/"+permission_name,'message':'No data objects present for '+requestor_app+"/"+permission_name});
+                      cb2(null);
+                  } else {
+                      async.forEach(results, function (anObject, cb3) {
+                          var newAccessibleBy = anObject._accessible_By;
+                          if (!newAccessibleBy) {
+                              flags.add('minor_warnings_data_object','data_object_update',{err:err,'function':'removeAllAccessibleObjects','async-part':4,'data_object_id':anObject._id, 'perm':requestor_app+"/"+permission_name,'message':'No _accessible_By present for '+requestor_app+"/"+permission_name+" in object "+anObject._id});
+                              cb3(null);
+                          } else if (!newAccessibleBy.group_perms || !newAccessibleBy.group_perms.public  || newAccessibleBy.group_perms.public.indexOf(requestor_app+"/"+permission_name)<0) {
+                              flags.add('minor_warnings_data_object','data_object_update',{err:err,'function':'removeAllAccessibleObjects','async-part':4,'data_object_id':anObject._id, 'perm':requestor_app+"/"+permission_name,'message':'No permission_name found in _accessible_By for '+requestor_app+"/"+permission_name+" in object "+anObject._id});
+                              cb3(null);
+                          } else {
+                              var idx = newAccessibleBy.group_perms.public.indexOf(requestor_app+"/"+permission_name);
+                              newAccessibleBy.group_perms.public.splice(idx,1);
+                              if (newAccessibleBy.group_perms.public.length== 0) {
+                                  idx = newAccessibleBy.groups.indexOf("public");
+                                  if (idx>=0) newAccessibleBy.groups.splice(idx,1) // should always be the case
+                              }
+                              idx = collections_affected[collection_name].indexOf(requestor_app+"/"+permission_name);
+                              if (idx>=0) collections_affected[collection_name].splice(idx,1) // should always be the case
+                              db_handler.db_update (req.freezr_environment, appcollowner, anObject._id,
+                                   {'_date_Modified' : (new Date().getTime())}, // updates_to_entity
+                                   {replaceAllFields:false}, // options
+                                   cb3);
+                          }
+                      },
+                      function (err) {
+                          if (err) {
+                              console.warn("Got an err in (a) within object retrieavel of removeAllAccessibleObjects "+JSON.stringify(err))
+                              warning_list.push("'unkown_error_removing_accessible_indiccator': "+JSON.stringify(err));
+                          }
+                          cb2(null)
+                      })
+                  }
+                });
             } else {
                 flags.add('minor_warnings_data_object','data_object_update',{err:{'message':'missing colelction name - SNBH - possible internal error'},'function':'removeAllAccessibleObjects','async-part':4})
                 cb2(null);
             }
-
         },
         function (err) {
             if (err) {
@@ -891,7 +960,7 @@ exports.all_app_permissions = function(req, res) {
         async.waterfall([
             // check app code
             function (cb) {
-                freezr_db.check_app_code(req.session.logged_in_user_id, requestee_app, req.params.source_app_code, cb);
+                db_handler.check_app_code(req.freezr_environment, req.session.logged_in_user_id, requestee_app, req.params.source_app_code, cb);
             },
 
             // get app config
@@ -902,7 +971,7 @@ exports.all_app_permissions = function(req, res) {
 
             function (the_app_config, cb) {
                 app_config = the_app_config;
-                freezr_db.all_userAppPermissions(req.session.logged_in_user_id, requestee_app, cb);
+                db_handler.all_userAppPermissions(req.freezr_environment, req.session.logged_in_user_id, requestee_app, cb);
             },
 
 
@@ -924,8 +993,8 @@ exports.all_app_permissions = function(req, res) {
                         // Need to check changes here.
                         returnPermissions.push(aPermission);
                     } else if (app_config_permissions && app_config_permissions[permission_name]) {
-                        schemad_permission = freezr_db.permission_object_from_app_config_params(app_config_permissions[permission_name], permission_name, requestee_app)
-                        if (freezr_db.permissionsAreSame(aPermission,schemad_permission)) {
+                        schemad_permission = db_handler.permission_object_from_app_config_params(app_config_permissions[permission_name], permission_name, requestee_app)
+                        if (db_handler.permissionsAreSame(aPermission,schemad_permission)) {
                             returnPermissions.push(aPermission);
                         // todo - if not the same then should at least update the old stored permission so itis in the future? to review
                         } else if (aPermission.granted){ // permissions generated but not the same
@@ -953,7 +1022,7 @@ exports.all_app_permissions = function(req, res) {
                     var newPermission={};
                     for (var key in app_config_permissions) {
                         if (app_config_permissions.hasOwnProperty(key)) {
-                            newPermission = freezr_db.permission_object_from_app_config_params(app_config_permissions[key], key, requestee_app);
+                            newPermission = db_handler.permission_object_from_app_config_params(app_config_permissions[key], key, requestee_app);
                             returnPermissions.push(newPermission);
                             user_permissions_to_add.push(newPermission);
                         }

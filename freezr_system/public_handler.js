@@ -2,7 +2,7 @@
 exports.version = "0.0.122";
 
 var helpers = require('./helpers.js'),
-    freezr_db = require("./freezr_db.js"),
+    db_handler = require("./db_handler.js"),
     async = require('async'),
     file_handler = require('./file_handler.js');
 
@@ -32,36 +32,43 @@ const ALL_APPS_HMTL_CONFIG = { // html and configuration for generic public page
         }
     },
 
-    genericHTMLforRecord = function(record) {      
-        const RECORDS_NOT_SHOW = ["_accessible_By","_date_Created","_date_Modified","_date_Published"]   
-        var text = "<div class='freezr_public_genericCardOuter freezr_public_genericCardOuter_overflower'>" 
+    genericHTMLforRecord = function(record) {
+        const RECORDS_NOT_SHOW = ["_accessible_By","_date_Created","_date_Modified","_date_Accessibility_Mod","_date_Published","_owner", "_app_name","_permission_name","_collection_name","_id"]
+        var text = "<div class='freezr_public_genericCardOuter freezr_public_genericCardOuter_overflower'>"
         text+= '<div class="freezr_public_app_title">'+record._app_name+"</div>";
         text+= '<br><div class="freezr_public_app_title">The developer has not defined a format for this record.</div><br>';
-        text += "<table>"     
+        text += "<table>"
         for (var key in record) {
             if (Object.prototype.hasOwnProperty.call(record, key) && RECORDS_NOT_SHOW.indexOf(key)<0) {
-                text+= "<tr style='width:100%; font-size:12px; overflow:normal'><td style='width:100px'>"+key +": </td><td>"+((typeof record[key] ==="string")? record[key] : JSON.stringify(record[key]) )+"</td></tr>"   
-            };
+              // "_date_Published","_owner":"publisher", "_app_name"
+              text+= "<tr style='width:100%; font-size:12px; overflow:normal'><td style='width:100px'>"+key +": </td><td>"+((typeof record[key] ==="string")? record[key] : JSON.stringify(record[key]) )+"</td></tr>"
+            }
         }
+        text+= "<tr style='width:100%; font-size:12px; overflow:normal'><td style='width:100px'>"+" </td><td>"+"</td></tr>"
+        text+= "<tr style='width:100%; font-size:12px; overflow:normal'><td style='width:100px'>"+"Published by" +": </td><td>"+record._owner+"</td></tr>"
+        let theDate = new Date(record._date_Published || record._date_Modified)
+        text+= "<tr style='width:100%; font-size:12px; overflow:normal'><td style='width:100px'>"+" on (date) " +": </td><td>"+theDate.toLocaleDateString()+"</td></tr>"
+        text+= "<tr style='width:100%; font-size:12px; overflow:normal'><td style='width:100px'>"+" with app " +": </td><td>"+record._app_name+"</td></tr>"
+
         text+="</table>"
         text+="</div>"
         return text;
     }
 
-exports.generatePublicPage = function (req, res) { 
-    //    app.get('/pcard/:user_id/:app_name/:collection_name/:data_object_id'    
-    //    app.get('/pcard/:user_id/:requestor_app/:permission_name/:app_name/:collection_name/:data_object_id', addVersionNumber, public_handler.generatePublicPage); 
-    //    app.get('/v1/pobject/:user_id/:app_name/:collection_name/:data_object_id', public_handler.generatePublicPage); // collection_name is files 
+exports.generatePublicPage = function (req, res) {
+    //    app.get('/pcard/:user_id/:app_name/:collection_name/:data_object_id'
+    //    app.get('/pcard/:user_id/:requestor_app/:permission_name/:app_name/:collection_name/:data_object_id', addVersionNumber, public_handler.generatePublicPage);
+    //    app.get('/v1/pobject/:user_id/:app_name/:collection_name/:data_object_id', public_handler.generatePublicPage); // collection_name is files
             // Note: for pcard, app_name is requestee_app
-    
-    //    app.get('/papp/:app_name/:page', addVersionNumber, public_handler.generatePublicPage); 
-    //    app.get('/papp/:app_name', addVersionNumber, public_handler.generatePublicPage); 
-    //    app.get('/ppage/:object_id', addVersionNumber, public_handler.generatePublicPage); 
-    //    app.get('/ppage', addVersionNumber, public_handler.generatePublicPage); 
-    //    app.get('/rss', addVersionNumber, public_handler.generatePublicPage); 
+
+    //    app.get('/papp/:app_name/:page', addVersionNumber, public_handler.generatePublicPage);
+    //    app.get('/papp/:app_name', addVersionNumber, public_handler.generatePublicPage);
+    //    app.get('/ppage/:object_id', addVersionNumber, public_handler.generatePublicPage);
+    //    app.get('/ppage', addVersionNumber, public_handler.generatePublicPage);
+    //    app.get('/rss', addVersionNumber, public_handler.generatePublicPage);
 
     console.log("generating public page ",req.url," with query ",req.query);
-   
+
     var isCard    = helpers.startsWith(req.path,"/pcard");
     var isRss     = helpers.startsWith(req.path,"/rss.xml");
     var objectOnly= helpers.startsWith(req.path,"/v1/pobject/");
@@ -69,23 +76,29 @@ exports.generatePublicPage = function (req, res) {
     var app_name  = allApps? "info.freezr.public" : req.params.app_name;
     var useGenericFreezrPage = allApps;
 
-    var page_name; page_params = {};
+    let page_name = (req.params && req.params.page)? req.params.page: null;
+    let page_params = {};
 
     file_handler.async_app_config(app_name, req.freezr_environment, function (err, app_config) {
+        if (!page_name && app_config && app_config.public_pages) page_name = firstElementKey(app_config.public_pages);
+        if (page_name && helpers.endsWith(page_name, '.html')) page_name = page_name.slice(0,-5);
         if (allApps) app_config  = ALL_APPS_HMTL_CONFIG;
         if (isRss) app_config = ALL_APPS_RSS_CONFIG;
-        if (err) {
-            helpers.send_failure(res, err, "public_handler", exports.version, "generatePublicPage");
-            //"problem getting app config while accessing public "+ (isCard?"card.":"page.")
-        } else if (!app_config ){
-            err = helpers.error("missing_app_config","app config missing while accessing public "+ (isCard?"card.":"page."))
-            helpers.send_failure(res, err, "public_handler", exports.version, "generatePublicPage");
-            // todo - consider landing on a "missing" page, but fo not redirect to default ppage as it could enter infinite loop
-            // permissions for public access re given in the app_config so no app config means no pubic records
+        if (err || !app_config || !app_config.public_pages ||
+                   (isRss && !app_config.public_pages.allPublicRSS)  ||
+                   (!isRss && (!app_config.public_pages &&
+                              !(app_config.public_pages.allPublicRecords ||
+                                  (app_config.public_pages[page_name] && app_config.public_pages[page_name].html_file))))
+                 ){
 
+            if (err) {helpers.state_error("public_handler", exports.version, "generatePublicPage", err, "Problem getting App Config for ppage on "+app_name ) }
+            if (isCard || isRss || objectOnly){
+              err = helpers.error("missing_app_config","app config missing while accessing public "+ (isCard?"card.":"page."))
+              helpers.send_failure(res, err, "public_handler", exports.version, "generatePublicPage");
+            } else {
+              res.redirect('/ppage?redirect=true&error=nosuchpagefound'+(app_name?("&app_name="+app_name):"")+(page_name?("&page_name="+page_name):"")+(err?("&error=NoAppConfig"):"") )
+            }
         } else { // Main Case
-            page_name   = req.params.page;
-            if (!page_name) page_name = firstElementKey(app_config.public_pages);
             if (isRss) {
                 useGenericFreezrPage = true;
                 page_params = app_config.public_pages.allPublicRSS
@@ -93,11 +106,10 @@ exports.generatePublicPage = function (req, res) {
                 useGenericFreezrPage = true;
                 page_params = app_config.public_pages.allPublicRecords
             } else {
-                if (helpers.endsWith(page_name, '.html')) page_name = page_name.slice(0,-5);
                 page_params = app_config.public_pages[page_name];
             }
             if (!isCard && !objectOnly) {
-                var options = { 
+                var options = {
                     page_url: page_params.html_file,
                     xml_url: page_params.xml_file,
                     page_title: (page_params.page_title? page_params.page_title:"Public info")+" - freezr.info",
@@ -116,8 +128,8 @@ exports.generatePublicPage = function (req, res) {
                     isPublic: true,
                     allApps: allApps,
                     isRss: isRss,
-                    useGenericFreezrPage: useGenericFreezrPage   
-                }     
+                    useGenericFreezrPage: useGenericFreezrPage
+                }
 
                 // query_params can come from req.query and initial query
                 Object.keys(req.query).forEach(function(key) {
@@ -125,15 +137,15 @@ exports.generatePublicPage = function (req, res) {
                 });
 
                 parse_attached_files(
-                    options, 
-                    page_params, 
-                    function(final_options) {gotoShowInitialData(res, req.freezr_environment, final_options)} 
+                    options,
+                    page_params,
+                    function(final_options) {gotoShowInitialData(res, req.freezr_environment, final_options)}
                 );
 
             } else { // isCard or one objectOnly
                 req.freezrInternalCallFwd = function(err, results) {
                     var contents;
-                    if (err) { 
+                    if (err) {
                         if (objectOnly) {
                             helpers.send_failure(res, err, "public_handler", exports.version, "generatePublicPage");
                         } else {
@@ -145,7 +157,7 @@ exports.generatePublicPage = function (req, res) {
                     } else {
                         var record, html_file;
                         if (!results || !results.results || results.results.length==0) {
-                            record = {}; 
+                            record = {};
                             record[app_name]="No records found."
                             html_file = ALL_APPS_HMTL_CONFIG.public_pages.allPublicRecords.html_file;
                         } else {
@@ -160,7 +172,7 @@ exports.generatePublicPage = function (req, res) {
                             file_handler.get_file_content(app_name, "public"+file_handler.sep()+html_file , req.freezr_environment, function(err, html_content) {
                                 if (err) {
                                     helpers.send_failure(res, helpers.error("file missing","html file missing - cannot generate card without a card html ("+page_name+")in app:"+app_name+"."), "public_handler", exports.version, "generatePublicPage" )
-                                
+
                                 } else {
                                     // todo may be "if html file is emppty generate generic page todo now")
                                     try {
@@ -180,7 +192,7 @@ exports.generatePublicPage = function (req, res) {
                     }
                 }
                 req.body = {
-                    _app_name:req.params.app_name, 
+                    _app_name:req.params.app_name,
                     user_id:req.params.user_id,
                     count: 1,
                     skip: 0,
@@ -220,7 +232,7 @@ gotoShowInitialData = function(res, freezr_environment, options) {
         req.url = ':/rss.xml';
         //if (!options.allApps) req.query.app_name = options.app_name;
         req.freezrInternalCallFwd = function(err, results) {
-            var rss_records=[]; 
+            var rss_records=[];
             var renderStream = function () {
                 file_handler.get_file_content("info.freezr.public", "public"+file_handler.sep()+options.xml_url , freezr_environment, function(err, xml_content) {
                     if (err) {
@@ -232,7 +244,7 @@ gotoShowInitialData = function(res, freezr_environment, options) {
                             app_name: (options.allApps? "": options.app_name),
                             results: rss_records
                         }
-                        
+
                         try {
                             options.page_xml= Mustache.render(xml_content, page_components);
                         } catch (e) {
@@ -241,7 +253,7 @@ gotoShowInitialData = function(res, freezr_environment, options) {
                         }
 
                         file_handler.load_page_xml(res,options)
-                    } 
+                    }
                 });
             }
 
@@ -269,7 +281,7 @@ gotoShowInitialData = function(res, freezr_environment, options) {
                         helpers.app_data_error(exports.version, "public_handler:gotoShowInitialData:freezrInternalCallFwd", "no_permission_or_app", "Uknown error - No permission or app name for a record ");
                     } else {
                         if (!app_configs[permission_record._app_name]) {
-                            file_handler.async_app_config(permission_record._app_name, req.freezr_environment,function (err, app_config) { 
+                            file_handler.async_app_config(permission_record._app_name, req.freezr_environment,function (err, app_config) {
                                 if (err) {
                                     helpers.app_data_error(exports.version, "public_handler:gotoShowInitialData:freezrInternalCallFwd", "ignore_error_getting_config", err.message);
                                 } else {
@@ -292,14 +304,14 @@ gotoShowInitialData = function(res, freezr_environment, options) {
                         renderStream();
                     }
                 })
-            }             
+            }
         }
         exports.dbp_query(req,res);
     } else if (options.useGenericFreezrPage) {
         req.url = '/ppage';
         if (!options.allApps) req.query.app_name = options.app_name;
         req.freezrInternalCallFwd = function(err, results) {
-            // get results from query and for each record, get the file and then merge the record 
+            // get results from query and for each record, get the file and then merge the record
                 /* from setObjectAccess for permission_record
                     var unique_object_permission_attributes =
                         {   'requestor_app':req.params.requestor_app,
@@ -312,7 +324,7 @@ gotoShowInitialData = function(res, freezr_environment, options) {
                             '_id':requestee_app+"_"+req.session.logged_in_user_id+"_"+data_object_id;
                         } nb also adds _app_name
                     */
-            var records_stream=[]; 
+            var records_stream=[];
             var renderStream = function () {
                 file_handler.get_file_content("info.freezr.public", "public"+file_handler.sep()+options.page_url , freezr_environment, function(err, html_content) {
                     if (err) {
@@ -344,7 +356,7 @@ gotoShowInitialData = function(res, freezr_environment, options) {
                         }
 
                         file_handler.load_page_html(res,options)
-                    }               
+                    }
                 });
             }
 
@@ -364,7 +376,7 @@ gotoShowInitialData = function(res, freezr_environment, options) {
                             helpers.app_data_error(exports.version, "gotoShowInitialData:freezrInternalCallFwd", temp_card._app_name, "error rendering app data with card template "+e);
                             temp_card._card  = null;
                         }
-                    } 
+                    }
                     if (app_cards[permission_record._app_name] == "NA" || !permission_record._card) {
                         temp_card._card = genericHTMLforRecord(permission_record);
                     }
@@ -377,22 +389,22 @@ gotoShowInitialData = function(res, freezr_environment, options) {
                         helpers.app_data_error(exports.version, "public_handler:gotoShowInitialData:freezrInternalCallFwd", "no_permission_or_app", "Uknown error - No permission or app name for a record ");
                     } else {
                         if (!app_cards[permission_record._app_name]) {
-                            file_handler.async_app_config(permission_record._app_name, req.freezr_environment,function (err, app_config) { 
+                            file_handler.async_app_config(permission_record._app_name, req.freezr_environment,function (err, app_config) {
                                 if (err) {
                                     helpers.app_data_error(exports.version, "public_handler:gotoShowInitialData:freezrInternalCallFwd", "ignore_error_getting_config", err.message);
                                 } else {
                                     app_configs[permission_record._app_name]= app_config;
-                                    html_file = (app_config && app_configs[permission_record._app_name].permissions && 
-                                                 app_configs[permission_record._app_name].permissions[permission_record._permission_name] && 
+                                    html_file = (app_config && app_configs[permission_record._app_name].permissions &&
+                                                 app_configs[permission_record._app_name].permissions[permission_record._permission_name] &&
                                                  app_configs[permission_record._app_name].permissions[permission_record._permission_name].pcard);
-                                    
+
                                     if (html_file ) {
                                         file_handler.get_file_content(permission_record._app_name, "public/"+html_file, freezr_environment, function(err, html_content) {
                                             var permission_record_card;
                                             if (!html_content || err) {
                                                 helpers.app_data_error(exports.version, "public_handler:gotoShowInitialData:freezrInternalCallFwd", "err_getting_html_content", ((err && err.message)?err.message: "Missing html content to create card"));
                                                 app_cards[permission_record._app_name] = "NA";
-                                                permission_record._card = genericHTMLforRecord(permission_record);   
+                                                permission_record._card = genericHTMLforRecord(permission_record);
                                                 records_stream.push(permission_record);
                                             } else {
                                                 app_cards[permission_record._app_name] = html_content;
@@ -404,7 +416,7 @@ gotoShowInitialData = function(res, freezr_environment, options) {
 
                                     } else {
                                         app_cards[permission_record._app_name] = "NA";
-                                        permission_record._card = genericHTMLforRecord(permission_record);   
+                                        permission_record._card = genericHTMLforRecord(permission_record);
                                         records_stream.push(permission_record);
                                         cb2(null);
                                     }
@@ -412,7 +424,7 @@ gotoShowInitialData = function(res, freezr_environment, options) {
                             });
                         } else {
                             var permission_record_card = permission_record_card_create(permission_record, app_configs[permission_record._app_name])
-                            
+
                             records_stream.push(permission_record_card);
                             cb2(null);
                         }
@@ -425,7 +437,7 @@ gotoShowInitialData = function(res, freezr_environment, options) {
                         renderStream();
                     }
                 })
-            }             
+            }
         }
         exports.dbp_query(req,res);
     } else { // Initial data capture (but not generic freezr page)
@@ -436,7 +448,7 @@ gotoShowInitialData = function(res, freezr_environment, options) {
                 helpers.send_failure(res, err, "public_handler", exports.version, "gotoShowInitialData" )
             } else {
 
-                file_handler.async_app_config(options.app_name, req.freezr_environment,function (err, app_config) { 
+                file_handler.async_app_config(options.app_name, req.freezr_environment,function (err, app_config) {
                     if (err) {
                         helpers.send_failure(res, err, "public_handler", exports.version, "gotoShowInitialData" )
                     } else {
@@ -455,7 +467,7 @@ gotoShowInitialData = function(res, freezr_environment, options) {
                         var html_file = (app_config && app_config.public_pages && app_config.public_pages[options.page_name] && app_config.public_pages[options.page_name].html_file)? app_config.public_pages[options.page_name].html_file: null;
                         if (!html_file) {
                             helpers.send_failure(res, helpers.error("file missing","html file missing - cannot generate page without file page_url 2 ("+html_file+")in app:"+options.app_name+" publc folder."), "public_handler", exports.version, "gotoShowInitialData" )
-                        } else {      
+                        } else {
                             file_handler.get_file_content(req.query.app_name, "public"+file_handler.sep()+html_file , freezr_environment, function(err, html_content) {
                                 if (err) {
                                     helpers.send_failure(res, helpers.error("file missing","html file missing - cannot generate page without file page_url 3f("+options.page_url+")in app:"+options.app_name+" publc folder."), "public_handler", exports.version, "gotoShowInitialData" )
@@ -477,8 +489,8 @@ gotoShowInitialData = function(res, freezr_environment, options) {
     }
 }
 
-exports.generatePublicObjectPage = function (req, res) { 
-    //    app.get('/ppage/:object_public_id', addVersionNumber, public_handler.generatePublicPage); 
+exports.generatePublicObjectPage = function (req, res) {
+    //    app.get('/ppage/:object_public_id', addVersionNumber, public_handler.generatePublicPage);
 
     req.freezrInternalCallFwd = function(err, results) {
         //onsole.log(results)
@@ -486,14 +498,14 @@ exports.generatePublicObjectPage = function (req, res) {
             res.redirect('/ppage?redirect=true&error=nosuchpublicobject&pid='+req.params.object_public_id)
         } else {
             theObj = results.results[0];
-            file_handler.async_app_config(theObj._app_name, req.freezr_environment,function (err, app_config) { 
+            file_handler.async_app_config(theObj._app_name, req.freezr_environment,function (err, app_config) {
                 if (err) {ount
 
                     helpers.send_failure(res, err, "public_handler", exports.version, "generatePublicObjectPage" )
                 } else if (!app_config){
-                    helpers.send_failure(res, helpers.error("missing app_config"), "public_handler", exports.version, "generatePublicObjectPage" )                    
+                    helpers.send_failure(res, helpers.error("missing app_config"), "public_handler", exports.version, "generatePublicObjectPage" )
                 } else if (!app_config.permissions[theObj._permission_name]){
-                    helpers.send_failure(res, helpers.error("missing permission"), "public_handler", exports.version, "generatePublicObjectPage" )                    
+                    helpers.send_failure(res, helpers.error("missing permission"), "public_handler", exports.version, "generatePublicObjectPage" )
                 } else {
                     var Mustache = require('mustache');
                     theObj = formatFields(theObj, app_config);
@@ -503,7 +515,7 @@ exports.generatePublicObjectPage = function (req, res) {
                         if (!page_name) {
                             console.warn("DEVELOPPER ERROR - Public page (ppage) missing in configuration.")
                         } else {
-                            console.warn("html page missing in configuration") 
+                            console.warn("html page missing in configuration")
                         }
                         html_file = (app_config && app_config.permissions && app_config.permissions[theObj._permission_name] && app_config.permissions[theObj._permission_name].pcard)? app_config.permissions[theObj._permission_name].pcard : null;
                         if (html_file) console.warn(".. using pcard reference instead ");
@@ -535,14 +547,14 @@ exports.generatePublicObjectPage = function (req, res) {
                                 page_name: page_name,
                                 isPublic: true,
                                 allApps: false,
-                                useGenericFreezrPage: false   
-                            } 
+                                useGenericFreezrPage: false
+                            }
                             try {
                                 options.page_html =  Mustache.render(html_content, results.results[0]);
                             } catch (e) {
                                 options.page_html = "Error in processing mustached app html - "+JSON.stringify(e)+"</br>"+html_content
                             }
-                            
+
                             if (app_config && app_config.public_pages && app_config.public_pages[options.page_name] && app_config.public_pages[options.page_name].header_map) {
                                 options.meta_tags = createHeaderTags(app_config.public_pages[options.page_name].header_map, [theObj])
                             } else {
@@ -550,12 +562,12 @@ exports.generatePublicObjectPage = function (req, res) {
                             }
 
                             parse_attached_files(
-                                options, 
-                                page_params, 
-                                function(final_options) {file_handler.load_page_html(res,final_options)} 
+                                options,
+                                page_params,
+                                function(final_options) {file_handler.load_page_html(res,final_options)}
                             );
                         }
-                    })   
+                    })
                 }
             })
         }
@@ -580,7 +592,7 @@ function parse_attached_files(options, page_params, callback ){
             }
         });
     }
-    
+
     var outside_scripts = [];
     if (page_params.script_files) {
         if (typeof page_params.script_files == "string") page_params.script_files = [page_params.script_files];
@@ -600,7 +612,7 @@ function parse_attached_files(options, page_params, callback ){
     }
 
     if (outside_scripts.length>0) {
-        freezr_db.all_userAppPermissions(req.session.logged_in_user_id, req.params.app_name, function(err, perm_list, cb) {
+        db_handler.all_userAppPermissions(req.freezr_environment, req.session.logged_in_user_id, req.params.app_name, function(err, perm_list, cb) {
             if (err) {
                 helpers.send_internal_err_page(res, "app_handler", exports.version, "generatePage", "Could not get user app  permissions");
             } else {
@@ -614,7 +626,7 @@ function parse_attached_files(options, page_params, callback ){
                             }
                         }
                     });
-                }  
+                }
                 callback(options);
             }
         })
@@ -626,18 +638,18 @@ function parse_attached_files(options, page_params, callback ){
 
 // database operations
 exports.dbp_query = function (req, res){
-    //    app.get('/v1/pdbq', addVersionNumber, public_handler.dbp_query); 
-    //    app.get('/v1/pdbq/:app_name', addVersionNumber, public_handler.dbp_query); 
-    //    app.post('/v1/pdbq', addVersionNumber, public_handler.dbp_query); 
+    //    app.get('/v1/pdbq', addVersionNumber, public_handler.dbp_query);
+    //    app.get('/v1/pdbq/:app_name', addVersionNumber, public_handler.dbp_query);
+    //    app.post('/v1/pdbq', addVersionNumber, public_handler.dbp_query);
     //    exports.generatePublicPage directly && via gotoShowInitialData
-    /* 
-    options are, for get (ie req.params and req.query) and post (req.body): 
+    /*
+    options are, for get (ie req.params and req.query) and post (req.body):
         - app_name
         - user_id
         - skip
         - count
         - pid
-        - 
+        -
         - query_params (for post only)
     */
 
@@ -649,7 +661,7 @@ exports.dbp_query = function (req, res){
 
     var data_records= [],
         errs = [],
-        skip = (req.query && req.query.skip)? parseInt(req.query.skip): 0 , 
+        skip = (req.query && req.query.skip)? parseInt(req.query.skip): 0 ,
         count= (req.query && req.query.count)? parseInt(req.query.count): 10,
         sort =  {'_date_Published': -1}
 
@@ -657,16 +669,16 @@ exports.dbp_query = function (req, res){
         granted: true,
         shared_with_group: 'public'
     };
-    const VALID_SEARCH_PARAMS = ["_owner","_id","requestee_app"];
+    const VALID_SEARCH_PARAMS = ["data_owner","_owner","_id","requestee_app"];
     VALID_SEARCH_PARAMS.forEach((aParam) => {if (req.query[aParam]) {permission_attributes[aParam] = req.query[aParam].toLowerCase()}})
-    
+
     // note conflict if have app_name and requestee_app and req.param
     if (req.query.app_name) permission_attributes.requestee_app = req.query.app_name.toLowerCase();
     if (req.query.app) permission_attributes.requestee_app = req.query.app.toLowerCase();
     if (req.params && req.params.app_name) permission_attributes.requestee_app = req.params.app_name.toLowerCase();
     if (req.query.user_id && !permission_attributes._owner) permission_attributes._owner = req.query.user_id.toLowerCase();
     if (req.query.pid && !permission_attributes._id) permission_attributes._id = req.query.pid;
-            
+
     if (req.query.maxdate) permission_attributes._date_Published ={'$lt': parseInt(req.query.maxdate)}
     if (req.query.mindate) permission_attributes._date_Published ={'$gt': parseInt(req.query.mindate)}
 
@@ -686,22 +698,16 @@ exports.dbp_query = function (req, res){
     function app_auth(message) {return helpers.auth_failure("public_handler", exports.version, "dbp_query", message);}
 
     async.waterfall([
-        // 1. get permission collection
+        // 1 / 2. get the permission
         function (cb) {
-            freezr_db.app_db_collection_get("info_freezr_permissions" , "accessible_objects", cb);
+          const accessibles_collection = {
+            app_name:'info_freezr_permissions',
+            collection_name:"accessible_objects",
+            _owner:'freezr_admin'
+          }
+          db_handler.db_find (req.freezr_environment, accessibles_collection, permission_attributes, {sort:sort, count:count, skip:skip}, cb)
         },
-
-        // 2 get the permission
-        function (theCollection, cb) {
-            var permission_collection = theCollection;
-            permission_collection.find(permission_attributes)
-                .sort(sort)
-                .limit(count)
-                .skip(skip)
-                .toArray(cb);
-
-        },
-        // 3 see permission record and make sure it is still granted 
+        // 3 see permission record and make sure it is still granted
         function (results, cb) {
             if (!results || results.length==0) {
                 cb(null);
@@ -709,16 +715,16 @@ exports.dbp_query = function (req, res){
                 //onsole.log("QUERY RESULTS")
                 //onsole.log(results)
                 async.forEach(results, function (permission_record, cb2) {
-                    recheckPermissionExists(permission_record, req.freezr_environment,  function (err, results) {
+                    recheckPermissionExists(req.freezr_environment, permission_record, req.freezr_environment,  function (err, results) {
                         if (err) {
                             errs.push({error:err, permission_record:permission_record._id})
                             //cb2(null)
                         } else if (!permission_record.data_object){
                             errs.push({error:helpers.error("old data","no data-object associaetd with permsission"), permission_record:permission_record._id})
-                            //cb2(null)                            
+                            //cb2(null)
                         } else if (!results.success){
                             errs.push({error:helpers.error("unkown-err", results), permission_record:permission_record._id})
-                            //cb2(null)                                                        
+                            //cb2(null)
                         } else {
                             if (!permission_record.data_record) permission_record.data_record = {};
                             permission_record.data_object._app_name = permission_record.requestee_app;
@@ -737,13 +743,13 @@ exports.dbp_query = function (req, res){
                 function (err) {
                     if (err) {
                         errs.push({error:err, permission_record:null});
-                    } 
+                    }
                     cb(null)
                 }
                 );
             }
         }
-    ], 
+    ],
     function (err) {
         if (err) {
             helpers.send_failure(res, err, "public_handler", exports.version, "dbp_query");
@@ -784,6 +790,16 @@ exports.get_data_object= function(req, res) {
             user_id = req.params.user_id;
         }
 
+        const appcollowner = {
+          app_name:req.params.requestee_app,
+          collection_name:collection_name,
+          _owner:user_id
+        }
+        const accessibles_collection = {
+          app_name:'info_freezr_permissions',
+          collection_name:"accessible_objects",
+          _owner:'freezr_admin'
+        }
         function app_err(message) {return helpers.app_data_error(exports.version, "get_data_object", req.params.requestee_app, message);}
         function app_auth(message) {return helpers.auth_failure("public_handler", exports.version, "get_data_object", message);}
 
@@ -795,7 +811,7 @@ exports.get_data_object= function(req, res) {
             file_handler.async_app_config(req.params.requestee_app, req.freezr_environment,cb);
         },
 
-        // 1. make sure all data exits
+        // 1,2,3. make sure all data exits and get the record
         function (got_app_config, cb) {
             app_config = got_app_config;
             if (!data_object_id){
@@ -805,20 +821,10 @@ exports.get_data_object= function(req, res) {
             } else if (!collection_name){
                 cb(app_err("missing collection_name"));
             } else {
-                cb(null);
+              db_find(req.freezr_environment, appcollowner, {'_id':data_object_id}, {}, cb)
             }
         },
 
-        // 2. open app db
-        function (cb) {
-            freezr_db.app_db_collection_get(req.params.requestee_app.replace(/\./g,"_") , collection_name, cb);
-        },
-
-        // 3. get the record 
-        function (theCollection, cb) {
-            var real_object_id = freezr_db.real_id(data_object_id,app_config,collection_name);
-            theCollection.find({'_id':real_object_id}).toArray(cb);
-        },
 
         // 4. check if record fits permission criteria
         function (results, cb) {
@@ -838,14 +844,9 @@ exports.get_data_object= function(req, res) {
         },
 
         // The rest of this is double checking that permission is still granted. (normaly if not granted, the field is remvoed as well)
-        // 5. Deal with permissions and get app permissions and if granted, open field_permissions or object_permission collection 
-        function (cb) {
-            freezr_db.app_db_collection_get("info_freezr_permissions" , "accessible_objects", cb);
-        },
-
+        // 5. Deal with permissions and get app permissions and if granted, open field_permissions or object_permission collection
         // 6. check the permission - for files, could be one of many
-        function (theCollection, cb) {
-            permission_collection = theCollection;
+        function (cb) {
             possible_permissions = (resulting_record && resulting_record._accessible_By && resulting_record._accessible_By.group_perms && resulting_record._accessible_By.group_perms.public && resulting_record._accessible_By.group_perms.public.length>0)? resulting_record._accessible_By.group_perms.public:null;
 
             if (req.params.permission_name && possible_permissions.indexOf(req.params.requestee_app+"/"+req.params.permission_name)<0) {
@@ -858,7 +859,7 @@ exports.get_data_object= function(req, res) {
                     if (!a_perm_model || !permission_type || (helpers.permitted_types.type_names.indexOf(permission_type)<0 && permission_type!="db_query")) {
                         cb2(null);
                     } else {
-                        freezr_db.permission_by_owner_and_permissionName (user_id, req.params.requestee_app, req.params.requestee_app, permission_name, function(err, results){
+                        db_handler.permission_by_owner_and_permissionName (req.freezr_environment, user_id, req.params.requestee_app, req.params.requestee_app, permission_name, function(err, results){
                             if (!results || results.length==0 || !results[0].granted) {
                                 //onsole.log("no results")
                             }  else  { // it is granted and (permission_type=="object_delegate")
@@ -872,14 +873,14 @@ exports.get_data_object= function(req, res) {
                     }
                 },
                 function (err) {
-                    if (err) {helpers.state_error("public_handler", exports.version, "get_data_object", err, "async err" )} 
+                    if (err) {helpers.state_error("public_handler", exports.version, "get_data_object", err, "async err" )}
                     cb(null)
                 });
             }
         }
-    ], 
+    ],
     function (err) {
-        if (err) {helpers.state_error("public_handler", exports.version, "get_data_object", err, "waterfall err" )} 
+        if (err) {helpers.state_error("public_handler", exports.version, "get_data_object", err, "waterfall err" )}
         if (!record_is_permitted) {
             if (request_file){
                 res.sendStatus(401);
@@ -901,10 +902,10 @@ exports.get_data_object= function(req, res) {
 }
 
 
-var recheckPermissionExists = function(permission_record, freezr_environment, callback) {
+var recheckPermissionExists = function(env_params, permission_record, freezr_environment, callback) {
     // todo - consider removing this in future - this is redundant if app_handler.setObjectAccess works correctly
     //onsole.log("recheckPermissionExists", permission_record)
-    
+
     var app_config, permission_model, success = false;
 
     async.waterfall([
@@ -922,7 +923,10 @@ var recheckPermissionExists = function(permission_record, freezr_environment, ca
         } else if (!permission_model){
             cb(helpers.app_data_error(exports.version, "recheckPermissionExists", permission_record.requestee_app, "missing or removed app_config"));
         } else {
-            freezr_db.permission_by_owner_and_permissionName (permission_record._owner, permission_record.requestor_app, permission_record.requestee_app, permission_record.permission_name, cb)
+            //onsole.log("permission_record")
+            //onsole.log(permission_record)
+            if (!permission_record.data_owner && permission_record._owner!="freezr_admin") permission_record.data_owner=permission_record._owner; // fixing legacy
+            db_handler.permission_by_owner_and_permissionName (env_params, permission_record.data_owner, permission_record.requestor_app, permission_record.requestee_app, permission_record.permission_name, cb)
         }
     },
         /* from setObjectAccess for permission_record
@@ -996,9 +1000,9 @@ var recheckPermissionExists = function(permission_record, freezr_environment, ca
             var aDate = new Date(permission_record[name])
             permission_record["_"+name] = aDate.toLocaleString();
          })
-        var field_names = (app_config && 
-            app_config.collections && 
-            app_config.collections[permission_record._collection_name] && 
+        var field_names = (app_config &&
+            app_config.collections &&
+            app_config.collections[permission_record._collection_name] &&
             app_config.collections[permission_record._collection_name].field_names)? app_config.collections[permission_record._collection_name].field_names: null;
         if (field_names){
             for (var name in field_names) {
@@ -1006,7 +1010,7 @@ var recheckPermissionExists = function(permission_record, freezr_environment, ca
                     if (field_names[name].type == "date" && permission_record[name]) {
                         var aDate = new Date(permission_record[name])
                         permission_record[name] = aDate.toDateString()
-                    } 
+                    }
                 };
             }
         }
@@ -1026,9 +1030,3 @@ var recheckPermissionExists = function(permission_record, freezr_environment, ca
             })}
         return headertext;
     }
-
-
-
-
-
-

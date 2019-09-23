@@ -150,7 +150,7 @@ exports.db_find = function(env_params, appcollowner, idOrQuery, options, callbac
   if (typeof idOrQuery == "string") {
     dbToUse(env_params).db_getbyid(env_params, appcollowner, idOrQuery, function(err, object) {callback(err, (object? [object]:[]))})
   } else {
-    let [err, well_formed] = query_is_well_formed(idOrQuery)
+    let [err, well_formed] = [null, true] //todo fix // query_is_well_formed(idOrQuery)
     if (well_formed) {
       dbToUse(env_params).db_find(env_params, appcollowner, idOrQuery, options, callback)
     } else {

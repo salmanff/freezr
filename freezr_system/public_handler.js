@@ -821,7 +821,7 @@ exports.get_data_object= function(req, res) {
             } else if (!collection_name){
                 cb(app_err("missing collection_name"));
             } else {
-              db_find(req.freezr_environment, appcollowner, {'_id':data_object_id}, {}, cb)
+              db_handler.db_find(req.freezr_environment, appcollowner, {'_id':data_object_id}, {}, cb)
             }
         },
 

@@ -11,6 +11,7 @@ exports.version = "0.0.131"; // Changed names from freezr__db
 
 const async = require('async'),
       fs = require('fs'),
+      bcrypt = require('bcryptjs'),
       helpers = require("./helpers.js"),
       file_handler = require('./file_handler.js'),
       db_default_mongo = require("./environment/db_default_mongo.js") // Default db
@@ -307,7 +308,7 @@ exports.user_by_user_id = function (env_params, user_id, callback) {
 exports.all_users = function (env_params, callback) {
   exports.db_find(env_params, USERS_APC, null, {count:ARBITRARY_COUNT}, callback)
 };
-exports.changeUserPassword = function (user_id,password, callback) {
+exports.changeUserPassword = function (env_params, user_id,password, callback) {
 
     async.waterfall([
         // validate params

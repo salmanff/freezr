@@ -271,6 +271,7 @@ exports.changePassword = function (req, res) {
         // 3. change pw for the user.
         function (cb) {
             db_handler.changeUserPassword(
+                req.freezr_environment,
                 req.body.user_id,
                 req.body.newPassword,
                 cb);

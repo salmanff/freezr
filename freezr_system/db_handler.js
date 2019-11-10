@@ -11,8 +11,8 @@ exports.version = "0.0.131"; // Changed names from freezr__db
 
 const async = require('async'),
       fs = require('fs'),
-      bcrypt = require('bcryptjs'),
       helpers = require("./helpers.js"),
+      bcrypt = require('bcryptjs'),
       file_handler = require('./file_handler.js'),
       db_default_mongo = require("./environment/db_default_mongo.js") // Default db
 

@@ -19,7 +19,7 @@ freezr.initPageScripts = function() {
     } else {
       var theInfo = { user_id: freezr_user_id,
                       oldPassword: oldPassword,
-                      newPassword: newPassword 
+                      newPassword: newPassword
                     };
       freezer_restricted.connect.write("/v1/account/changePassword.json", theInfo, gotChangeStatus, "jsonString");
     }
@@ -27,12 +27,15 @@ freezr.initPageScripts = function() {
 }
 
 var gotChangeStatus = function(data) {
+  data = freezr.utils.parse(data)
   if (!data) {
       showError("Could not connect to server");
   } else if (data.error) {
-    showError("Error Logging in :"+data.message);
+    showError("Error changing password -  "+data.message);
   } else {
-    window.location = "/account/home";
+    showError("Password Changed !! ");
+    setTimeout(function() { window.location = "/account/home";},2000)
+    document.getElementById("changePassword").style.display="none";
   }
 }
 
@@ -40,4 +43,3 @@ var showError = function(errorText) {
   var errorBox=document.getElementById("errorBox");
   errorBox.innerHTML= errorText;
 }
-

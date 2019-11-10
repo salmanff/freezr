@@ -241,6 +241,7 @@ exports.changePassword = function (req, res) {
     //onsole.log("Changing password  "+JSON.stringify(req.body));
 
     var user_id = req.body.user_id;
+    let u = null
     async.waterfall([
         function (cb) {
             if (!user_id)
@@ -260,7 +261,7 @@ exports.changePassword = function (req, res) {
 
         // 2. check the password
         function (user_json, dummy_cb, cb) {
-            var u = new User(user_json);
+            u = new User(user_json);
             if (u.check_passwordSync(req.body.oldPassword)) {
                 cb(null);
             } else {
@@ -277,12 +278,13 @@ exports.changePassword = function (req, res) {
                 cb);
         }
     ],
-    function (err, user_json) {
+    function (err, returns) {
         if (err) {
             helpers.send_failure(res, err,"account_handler", exports.version,"changePassword");
+        } else if (returns != 1) {
+          helpers.send_failure(res, helpers.error("change error - expected 1 change and got: "+returns),"account_handler", exports.version,"changePassword");
         } else {
-            var u = new User(user_json);
-            helpers.send_success(res, {user: u.response_obj() });
+          helpers.send_success(res, {user: u.response_obj() });
         }
     });
 };

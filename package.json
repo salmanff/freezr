@@ -19,7 +19,7 @@
     "dropbox": "^2.5.4",
     "express": "4.x",
     "express-session": "1.x",
-    "mongodb": "3.0.x",
+    "mongodb": "3.6.x",
     "morgan": "1.x",
     "multer": "1.x",
     "mustache": "^2.3.0",

@@ -1,0 +1,46 @@
+<!--
+freezr Account contacts
+contacts: {
+  page_title: 'CEPS Contacts',
+  page_url: 'contacts.html',
+  css_files: ['contacts.css'],
+  script_files: ['contacts.js']
+}
+
+-->
+
+<div class="freezer_texture_outer">
+  <div class="freezer_texture_inner">
+		<div class="freezer_top_app_menu" id="adminFunctions">
+      <a href="/account/home">Home</a>
+			&nbsp;
+      <a href="/account/app_management">App Management</a>
+			&nbsp;
+		</div>
+
+		<div class="freezer_dialogueTitle">Contacts</div>
+
+    <div id="warnings"></div>
+
+    <div class="contacts_butt" id = "button_add">Create a new contact</div>
+    <div id ="add_new_details">
+        <div><div class="field_for_add">Nickname</div><div id="new_nickname" class="field_to_add" contentEditable="true"></div>  </div>
+        <div><div class="field_for_add">User name</div><div id="new_username" class="field_to_add" contentEditable="true"></div>  </div>
+        <div><div class="field_for_add">Server url</div><div id="new_serverurl" class="field_to_add" contentEditable="true"></div>  </div>
+        <div class="contacts_butt" id="button_saveNew">Save Contact</div>
+        <div style="min-height:50px" >
+          <img id="loader" src="/app_files/public/info.freezr.public/public/static/ajaxloaderBig.gif"/>
+        </div>
+        </div>
+
+		<div id="contacts_table">
+      <div class="gridlist grid-header">
+        <label>Nick<div style="display: inline-block;"> </div>name</label>
+        <label>User id (on server)</label>
+        <label>Server url</label>
+        <label>Actions</label>
+		  </div>
+		</div>
+
+  </div>
+</div>

@@ -7,7 +7,7 @@
 		<p class="freezer_dialogueTitle freezer_emphasis"> DANGER: The App may be attempting to send your data to the Cloud. </p>
 		<p class="freezer_BoxTitle"> This app may be trying to do bad things with your data. Please proceed with caution and even remove the app, unless you are sure about the developer. Other wise, the app may be able to send your data to the cloud.</p>
 		{{/illegal.length}}
-	    
+
 	    {{#illegal}}
 	    <li class="freezer_list">
 	        <span >{{text}}</span>
@@ -38,7 +38,7 @@
     	</li>
     {{/warnings}}
   </div>
-    
+
 	<div id="notes">
     {{#notes.length}}
 	 	<p class="freezer_dialogueTitle"> Developer Notes</p>
@@ -52,10 +52,14 @@
 </div>
 
 <div style="text-align:center">
-	{{#errors}}
-		<div class="freezer_dialogue_topTitle freezer_clickable" id="button_closeMenu_1">Close</div>
-	{{/errors}}
-	{{^errors}}
-		<div class="freezer_dialogue_topTitle freezer_clickable" id="button_goto_4_{{meta.app_name}}">Finalise Installation</div>
-	{{/errors}}
+
+	<div class="freezer_dialogue_topTitle freezer_clickable" id="button_closeMenu_1" style="display:"{{#errors}}block{{/errors}}{{^errors}}none{{/errors}}  >Close</div>
+
+	<br>
+
+	<div id="finalise_outer">
+		{{^errors}}
+			<div class="freezer_dialogue_topTitle freezer_clickable" id="button_goto_4_{{meta.app_name}}">Launch App</div>
+		{{/errors}}
+	</div>
 </div>

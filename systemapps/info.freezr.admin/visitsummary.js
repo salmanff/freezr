@@ -4,7 +4,7 @@
  Note quirks to be fixed: Currently searching for days based on date_Modified. This could result in 6 or 8 days being returned, instead of 7. Best to change to search based on dateString
 */
 
-var allLogs = {}, 
+var allLogs = {},
     allDatesList = [],
     shownData = {
       last_date: new Date(),
@@ -16,11 +16,11 @@ const MAX_COLS = 7;
 freezr.initPageScripts = function() {
   document.addEventListener('click', function (evt) {
     if(evt.target.id=="prev_week") {
-      shownData.last_date= new Date (shownData.last_date-(MAX_COLS*24*60*60*1000)); 
+      shownData.last_date= new Date (shownData.last_date-(MAX_COLS*24*60*60*1000));
       runQuery();
     }
     if(evt.target.id=="next_week") {
-      shownData.last_date = new Date(shownData.last_date.setDate(shownData.last_date.getDate() + MAX_COLS)); 
+      shownData.last_date = new Date(shownData.last_date.setDate(shownData.last_date.getDate() + MAX_COLS));
       runQuery();
     }
     if (startsWith(evt.target.id,"showdetail")) {
@@ -44,15 +44,16 @@ var runQuery = function(options) {
   options = options || {};
   options.app_name = 'info.freezr.admin';
   options.collection = 'visit_log_daysum';
-  options.query_params = options.query_params || {};
-  options.query_params = {$and: [{'_date_Modified':{$lt:(shownData.last_date.getTime())}},{'_date_Modified':{$gt:(shownData.last_date.getTime()-(MAX_COLS*24*60*60*1000))}}]}
-  options.sort ={'_date_Modified': -1}
+  options.q = options.q || {};
+  options.q = {$and: [{'_date_modified':{$lt:(shownData.last_date.getTime())}},{'_date_modified':{$gt:(shownData.last_date.getTime()-(MAX_COLS*24*60*60*1000))}}]}
+  options.sort ={'_date_modified': -1}
   options.count=MAX_COLS;
-  freezr.db.query(options, function(ret){
+  freezr.feps.postquery(options, function(error, ret) {
     //onsole.log(ret);
+    if (error) console.warn(error) // console.log('need to handle error')
     ret = JSON.parse(ret)
     ret.results.forEach((anItem) => {
-      allLogs[anItem._id] = anItem;  
+      allLogs[anItem._id] = anItem;
       allDatesList = addToListAsUnique(allDatesList, anItem._id);
     })
     allDatesList.sort().reverse()
@@ -69,18 +70,18 @@ var showTable = function(headers) {
   } else {
     theTable.innerHTML="";
     headers = headers || allDatesList.slice(0,10)
-  
+
     let theThead = makeEl('thead', null, theTable)
       let theRow   = makeEl('tr', null, theThead)
         makeEl('th',null, theRow)
         headers.forEach((aHeader) => {makeEl('th',formattedDate(aHeader),theRow, 'dateHeader')})
-  
+
     let theBody = makeEl('tbody' , null, theTable)
-      
+
     makeRow(theBody, 'Logged In Users',null,headers, {showNullAsDash:false, ignoreEmptyRows:false, titleClass:'bigtitle'})
     makeRow(theBody, ' Page Views',['logged_in','numAppPageViews'],headers, mainCellOptions)
     makeRow(theBody, ' admin Account',['logged_in','numpubadmin'],headers, mainCellOptions)
-  
+
     makeRow(theBody, ' Database Reads',['logged_in','numDbReads'],headers, mainCellOptions)
     makeRow(theBody, ' Database Writes',['logged_in','numdbWrites'],headers, mainCellOptions)
     makeRow(theBody, ' Account Changes',['logged_in','numAcctChges'],headers, mainCellOptions)
@@ -89,14 +90,14 @@ var showTable = function(headers) {
     makeRow(theBody, ' File Uploads',['logged_in','numFileUpload'],headers, mainCellOptions)
     makeRow(theBody, ' Public Page Views',['logged_in','numppage'],headers, mainCellOptions)
     makeRow(theBody, ' Public Page Cards',['logged_in','numpcard'],headers, mainCellOptions)
-    
+
     drawList('users', 'Users', 'logged_in', theBody, headers);
     drawList('apps', 'Applications', 'logged_in', theBody, headers);
     drawList('visitIps', 'IPs (logged in)', 'logged_in', theBody, headers);
     drawList('pages', 'Pages', 'logged_in', theBody, headers);
     drawList('someUnauthUrls', 'Unauthorized URLs', 'logged_in', theBody, headers);
     drawList('pageRefs', 'Page references', 'logged_in', theBody, headers);
-  
+
     makeRow(theBody, 'Anonymous / Public Visits',null,headers, {showNullAsDash:false, ignoreEmptyRows:false, titleClass:'bigtitle'})
     makeRow(theBody, ' Public Page Views',['anon','numppage'],headers, mainCellOptions)
     makeRow(theBody, ' Page Views',['anon','numAppPageViews'],headers, mainCellOptions)
@@ -105,7 +106,7 @@ var showTable = function(headers) {
     makeRow(theBody, ' Public Database Reads',['anon','numpdb'],headers, mainCellOptions)
     makeRow(theBody, ' Unauthorized',['anon','numUnauthzed'],headers, mainCellOptions)
     makeRow(theBody, ' Redirects',['anon','numredirect'],headers, mainCellOptions)
-  
+
     drawList('visitIps', 'IPs (public)', 'anon', theBody, headers);
     drawList('apps', 'Applications', 'anon', theBody, headers);
     drawList('pages', 'Pages', 'anon', theBody, headers);
@@ -169,7 +170,7 @@ var drawList = function(listKey, title, user_type, parent, headers){
 }
 
 
-// Other and generic 
+// Other and generic
 var showError = function(errorText) {
   var errorBox=document.getElementById("errorBox");
   errorBox.innerHTML= errorText;
@@ -190,16 +191,14 @@ var addToListAsUnique = function(aList,anItem) {
   if (!aList) {
     return [anItem]
   } else if (!anItem) {
-    return aList 
+    return aList
   } else  if (aList.indexOf(anItem) < 0) {
     aList.push(anItem);
-  } 
+  }
   return aList
 }
 var startsWith = function(longertext, checktext) {
-  if (!longertext || !checktext || !(typeof longertext === 'string')|| !(typeof checktext === 'string')) {return false} else 
+  if (!longertext || !checktext || !(typeof longertext === 'string')|| !(typeof checktext === 'string')) {return false} else
   if (checktext.length > longertext.length) {return false} else {
   return (checktext == longertext.slice(0,checktext.length));}
 }
-
-

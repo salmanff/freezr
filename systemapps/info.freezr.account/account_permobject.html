@@ -1,0 +1,17 @@
+
+
+
+    <div class="freezer_dialogueTitle">
+      {{{perm_grouping_intro}}}
+    </div>
+
+		<div id="perm_list">
+			{{#perm_list}}
+				<div class="freezer_BoxTitle">{{description}} ({{name}})</div>
+				<div class="freezer_butt" id="freezerperm_{{table_id}}_{{requestor_app}}_{{action}}_{{name}}">
+					{{action}}
+				</div>
+        <div class="freezer_butt_Text" id="sentence_{{table_id}}_{{requestor_app}}_{{name}}">{{{sentence}}}
+        </div>
+			{{/perm_list}}
+	  </div>

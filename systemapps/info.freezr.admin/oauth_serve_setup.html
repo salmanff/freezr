@@ -19,12 +19,12 @@
 
     <div id="errorBox" class="errorBox"></div>
     <br/>
-    <center id="loader" style="display:none" ><img src="/app_files/info.freezr.public/static/ajaxloaderBig.gif"></center>
+    <center id="loader" style="display:none" ><img src="/app_files/public/info.freezr.public/public/static/ajaxloaderBig.gif"></center>
 
 
     <div id="auth_list">
       <div class="freezer_dialogueTitle">
-        Existing o-auth permissions
+        Existing o-auth Authorizors
       </div>
       <div class="freezer_app_page_title"> There are {{ results.length }} o-auths</div>
       <ul id="oauths">
@@ -46,28 +46,24 @@
       </div>
       <table>
         <tr>
-          <td width="130px" align="right">Source:</td>
-          <td width="520px"><input type="text" size="40" id="oa_source" name="oa_source" value='dropbox'/> (Only option available)</td> 
-        </tr>
-        <tr>
-          <td width="130px" align="right">App type</td>
-          <td width="420px"><input type="text" size="40" id="oa_type" name="oa_type" value='file_env'/> (Only option available)</td> 
+          <td width="130px" align="right">Type:</td>
+          <td width="520px"><input type="text" size="40" id="oa_type" name="oa_type" value='dropbox'/> (dropbox or googleDrive)</td>
         </tr>
         <tr>
           <td width="130px" align="right">App name:</td>
-          <td width="420px"><input type="text" size="40" id="oa_name" name="oa_name"/></td> 
+          <td width="420px"><input type="text" size="40" id="oa_name" name="oa_name"/></td>
         </tr>
         <tr>
           <td width="130px" align="right">Redirect uri:</td>
-          <td width="420px"><input type="text" size="40" id="oa_redirecturi" name="oa_redirecturi"/></td> 
+          <td width="420px"><input type="text" size="40" id="oa_redirecturi" name="oa_redirecturi"/></td>
         </tr>
         <tr>
-          <td width="130px" align="right">App Key:</td>
-          <td width="420px"><input type="text" size="40" id="oa_key" name="oa_key"/></td> 
+          <td width="130px" align="right">Client Id (App Key):</td>
+          <td width="420px"><input type="text" size="40" id="oa_key" name="oa_key"/></td>
         </tr>
         <tr>
           <td width="130px" align="right">App Secret:</td>
-          <td width="420px"><input type="text" size="40" id="oa_secret" name="oa_secret"/></td> 
+          <td width="420px"><input type="text" size="40" id="oa_secret" name="oa_secret"/> Optional </td>
         </tr>
       </table>
 
@@ -77,6 +73,3 @@
     </div>
   </div>
 </div>
-
-
-

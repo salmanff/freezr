@@ -10,8 +10,6 @@
 	margin:10px;
 	cursor: pointer;
 	color: blue;
-	background-color: rgba(255, 255, 255, 0.2);;
-	opacity: 50%;
 	border-radius:5px;
 	border: 1px solid #f1f1f1;
 	font-weight: normal;
@@ -35,4 +33,3 @@
 	width: 90px;
 	text-align: center;
 }
-

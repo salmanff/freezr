@@ -1,5 +1,7 @@
 // freezr.info - nodejs system files - flags_obj.js
 // objects for keeping various error error and warning flags through out an async waterfall
+
+// THIS NEEDS TO BE REDONE COMPLETELY
 exports.version = "0.0.1";
 
 Flags = function (meta) {
@@ -42,7 +44,7 @@ var sentences = {};
 sentences.en = {
     'code':'sentence',
     'config_file_errors':'The app configuration file has errors and so it will have to be ignored.',
-    'appconfig_missing': "This app does not have a configuration file.",
+    'manifest_missing': "This app does not have a configuration file.",
     'config_inconsistent_version': "The configuration file for this app states a different app version from the one on the name of the file uploaded. The version on the file name was used. The other version number was ignored.",
     'config_inconsistent_app_name': "The configuration file for this app states a different app name from the name of the file uploaded. The file name was used. The other name '{{app_name}}' was discarded.",
     'file_illegal_words': 'Illegal words {{words}} found in file "{{fileName}}"',

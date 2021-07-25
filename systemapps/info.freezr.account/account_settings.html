@@ -1,0 +1,65 @@
+<!--
+options:
+settings: {
+  page_title: 'Account Settings (freezr)',
+  css_files: './public/info.freezr.public/public/freezr_style.css',
+  page_url: 'account_settings.html',
+  script_files: ['account_settings.js']
+-->
+<div class="freezer_texture_outer">
+  <div class="freezer_texture_inner">
+
+    <div class="freezer_top_app_menu" id="adminFunctions">
+      <a href="/account/home">Home</a>
+      &nbsp;
+      <a href="/account/logout">Log Out</a>
+    </div>
+
+    <div class="freezer_dialogueTitle" style="emphasis:bold">Account Settings for <span id="user_id"></span></div>
+
+    <div id="account_params">
+      <br>
+      <b>Current File System: </b><span id="fsParamsType"> {{fsParamsType}}</span>
+      <br>
+      <b>Current Database: </b><span id="dbParamsType"> {{dbParamsType}}</span>
+      <br>
+    </div>
+
+    <div id="errorBox" class="errorBox"></div>
+    <div id="error" class="error"></div>
+
+    <div id="changePasswordOuter">
+      <div class="freezer_dialogueTitle">Change password for user: <span id="user_id"></span></div>
+
+      <form name="changePassword" id="changePassword">
+        <dl>
+          <dt>Current Password:</dt>
+          <dd><input type="password" size="30" id="oldPassword" name="password"/></dd>
+          <dt>New Password:</dt>
+          <dd><input type="password" size="30" id="newPassword" name="newPassword"/></dd>
+          <dt>Password (confirm):</dt>
+          <dd><input type="password" size="30" id="password2" name="password2"/></dd>
+          <dt>&nbsp; </dt>
+          <dd><input type="submit"  class="freezer_butt" value=" Change Now " id="ChangeButt"/>
+        </dl>
+      </form>
+    </div>
+
+    <br>
+    <br>
+    <br>
+    <hr>
+    <br>
+
+    <div class="freezer_dialogueTitle">Get me out of this feeezr!!! <span id="user_id"></span></div>
+    <div class="">Click below to be fully removed from this server. (The server will remove all your credentials, and all your data. You will not be able to sign back in. (If your data is sitting on your own dropbox or google Drive, it will stay there.)</div>
+    <form name="removeMe" id="removeMe">
+      <dl>
+        <dt>Current Password:</dt>
+        <dd><input type="password" size="30" id="oldPasswordConfirm" name="oldPasswordConfirm"/></dd>
+        <dt>&nbsp; </dt>
+        <dd><input type="submit"  class="freezer_butt" align="center" value=" Remove Me Now " id="RemoveButt"/>
+      </dl>
+    </form>
+  </div>
+</div>

@@ -1,0 +1,142 @@
+
+
+<div id="mainouter" class="freezer_texture_outer">
+  <div id="maininner" class="freezer_texture_inner norm_text">
+
+    <div class="freezer_dialogueTitle">
+      Welcome to Freezr - Set Up your Personal Server.
+    </div>
+
+    <div id="top_register_finish_01" class="bigText">
+      <div class = "freezr_hiders firstSetUp">Congratulations! You have set up your freezr server. <br/>Please choose your file system and database.</div>
+      <div class = "freezr_hiders newParams">You are set up on freezr as <span id="loggedInUserId"> user id comes here</span>. <br/>Please choose your file system and database.</div>
+      <div class="freezr_hiders unRegisteredUser" ></div>
+    </div>
+    <div class = "freezr_hiders newParams"> <a href="/account/logout" class="small_text" style="float:right">.. or log out</a></div>
+
+    <br/>
+
+    <div class="freezr_hiders firstSetUp unRegisteredUser">
+
+      <div class="green bold freezer_dialogueTitle">User Information</div>
+
+      <div class="freezer_app_page_title spacer">
+          Enter a user name and password.
+      </div>
+      <div class="spacer"></div>
+
+      <table>
+        <tr>
+          <td width="150px" align="right">User Name:</td>
+          <td width="220px"><input type="text" size="40" id="userId" name="userId"/></td>
+        </tr>
+        <tr>
+          <td width="150px" align="right">Password:</td>
+          <td width="220px"><input type="password" size="40" id="password" name="password"/></td>
+        </tr>
+        <tr id="second-password">
+          <td width="150px"  align="right">Confirm Password:</td>
+          <td width="220px"><input type="password" size="40" id="password2" name="password2"/></td>
+        </tr>
+      </table>
+      <div class="spacer"></div>
+      <div class="bold green leftspace freezr_hiders firstSetUp">
+        Remember there is no way to recover a forgotten password! <br/>
+        (There are no outside servers that store your data.) <br/>
+      </div>
+      <div class="bold green leftspace freezr_hiders unRegisteredUser">
+        There are no password recovery options on freezr yet.<br/>
+        So please remember your password. <br/>
+      </div>
+
+    </div>
+
+
+    <div id="externalFs">
+      <div class="spacer"></div>
+      <hr/>
+      <div class="spacer"> </div>
+
+      <div class="green bold freezer_dialogueTitle">Your file system </div>
+      <div class="spacer"> </div>
+
+      <div class = "leftspace">
+          <select id="selector_FS">
+          </select>
+      </div>
+      <br/>
+        <div id = "msg_FS" class="leftspace"></div>
+
+        <center class="leftspace">
+          <div id="click_goAuthFS" class = "small_butt butt_strng">Authenticate</div>
+        </center>
+
+        <div id = "warning_FS" class="bold green leftspace"></div>
+
+        <div id="click_showOauthOptions" class = "leftspace no_butt">Click here for more (technical) options. </div>
+
+        <div id="table_elements_FS"></div>
+
+        <div id="oauth_elements_FS">
+          <div>The Authorization Code is retrieved automatically when you authenitcate with your account.<br>
+            If you are a developer, you can also find your access token, and use it instead.<br>
+            <br>
+            This freezr uses a default authentication service. However, you can choose another authenticator. You really need to trust the host of the authenticator, because it could potentially have access to all your data.
+          </div>
+            <table>
+                <tr>
+                  <td width="150px" align="right">authenticator url:</td>
+                  <td width="220px"><input type="text" size="40" id="fs_auth_Server" name="fs_auth_Server" value="https://alpha0freezr.herokuapp.com/admin/public/oauth_start_oauth"/></td>
+                </tr>
+            </table>
+
+        </div>
+    </div>
+
+    <br/>
+
+    <div id="externalDb">
+      <hr/>
+      <div class="spacer"> </div>
+
+      <div class="green bold freezer_dialogueTitle">Your database</div>
+      <div class="spacer"> </div>
+
+      <div class = "leftspace">
+          <select id="selector_DB"></select>
+      </div>
+      <br/>
+        <div id = "msg_DB" class="leftspace"></div>
+        <br>
+        <div id = "warning_DB" class="bold green leftspace"></div>
+        <br>
+        <div id="table_elements_DB"></div>
+
+    </div>
+
+    <div class="freezer_app_page_title spacer"></div>
+    <hr/>
+    <div class="freezer_app_page_title spacer"></div>
+    <div class="freezer_app_page_title spacer"></div>
+
+    <center>
+      <span id="click_checkResource_UserId" style="display:none" class="small_butt butt_weak">Check user id</span>
+      <span id="click_checkResource_FS" class="small_butt butt_weak">Check File System</span>
+      <span id="click_checkResource_DB"class="small_butt butt_weak">Check  Database</span>
+    </center>
+    <center style="margin-top:20px;"> <span >Or just...</span></center>
+    <div id="errorBox" class="errorBox freezr_hiders" style="margin-top:20px;"></div>
+
+    <div class="bigText">
+      <div id="click_launch" class="big_butt">Launch freezr</div>
+      <div id="launch_spinner" style="text-align:center; display:none"><img src="/app_files/public/info.freezr.public/public/static/ajaxloaderBig.gif"/></div>
+    </div>
+
+
+  </div>
+
+  <div class="spacer"></div>
+  <div class="freezr_hiders newParams">
+    Want to get out? <a href="/account/logout">Click here to log out.</a>
+  </div>
+</div>

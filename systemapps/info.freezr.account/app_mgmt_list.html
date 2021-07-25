@@ -12,15 +12,15 @@
             </td>
 
             <td class="app_inner" id="button_goto_2_{{app_name}}">
-              {{display_name}}
+              {{app_display_name}}
               <br/>
-              <span class="small_text" id="button_goto_3_{{app_name}}" >{{app_name}}</span> 
+              <span class="small_text" id="button_goto_3_{{app_name}}" >{{app_name}}</span>
             </td>
 
-            <td width="50px"> 
+            <td width="50px">
               <span id="button_installApp_{{app_name}}" class="right button" >
                 install and launch
-              </span>            
+              </span>
             </td>
 
             </td>
@@ -40,16 +40,33 @@
             </td>
 
             <td class="app_inner" id="button_goto_2_{{app_name}}">
-              {{display_name}}
+              <b>{{app_display_name}}</b>
               <br/>
-              <span class="small_text" id="button_goto_3_{{app_name}}">{{app_name}}</span> 
+              <span class="small_text" id="button_goto_3_{{app_name}}">{{app_name}}</span>
+              <br/>
+              {{#offThreadWip}}
+              <span class="small_text" style="color:palevioletred"> {{ offThreadParams.filesRemaining.length }} app files have not yet been copied to your freezr store.</span>
+              <br/>
+              <span class="small_text installdate">{{ offThreadParams.versionDate }}</span>
+              <br/>
+              {{/offThreadWip}}
+              <span class="blue" id="button_genAppPassword_{{app_name}}">Generate one-time password</span>
             </td>
 
             <td >
-                <span id="button_removeApp_{{app_name}}" class="right button">  
-                  remove app
+              <span id="button_removeAppFromHomePage_{{app_name}}" class="right button red">
+                remove app
+              </span>
+              <span id="empty_{{app_name}}" class="right emptybutt">
+
+              </span>
+              <span id="button_gotoAppPerms_{{app_name}}" class="right button">
+                App Permi- ssions
+              </span>
+                <span id="button_gotoAppData_{{app_name}}" class="right button">
+                  See App Data
                 </span>
-                <span class="right button dev_option" id="button_updateApp_{{app_name}}" style="display:none">
+                <span class="right button dev_option" id="button_updateApp_{{app_name}}">
                   refresh from files
                 </span>
             </td>
@@ -58,7 +75,6 @@
         </table>
       {{/user_apps}}
     </div>
-
 
     <div >
         <div class="freezer_app_page_title"> {{#removed_apps.length }}You have removed {{ removed_apps.length }} apps.  {{/removed_apps.length }}</div>
@@ -70,16 +86,16 @@
             </td>
 
             <td class="app_inner">
-              {{display_name}}
+              {{app_display_name}}
               <br/>
-              <span class="small_text">({{app_name}})</span> 
+              <span class="small_text">({{app_name}})</span>
             </td>
 
-            <td id="button_deleteApp_{{app_name}}" class="button right">  
+            <td id="button_deleteApp_{{app_name}}" class="button right">
               delete app
             </td>
 
-            <td id="button_reinstallApp_{{app_name}}" class="button right">  
+            <td id="button_reinstallApp_{{app_name}}" class="button right">
               re-install app
             </td>
 

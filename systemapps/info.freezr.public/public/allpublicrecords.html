@@ -7,7 +7,7 @@ allpublcirecords
 
 <div class="outer">
 	<div class="public_records_top" >
-		<div id="pagetitle"><span id="page_title_link"><a href="/account/home">freezr home<a/></span><br/>freezr Public Posts</div> 
+		<div id="pagetitle"><span id="page_title_link"><a href="/account/home">freezr home<a/></span><br/>freezr Public Posts</div>
 		<div id="public_top_search">
 			<div id="searchBox" contenteditable="true">{{current_search}}</div>
 			<div id="searchButt">Search</div>
@@ -15,16 +15,11 @@ allpublcirecords
 	</div>
 
 	<div id="user_id_note">
-	    {{freezr_user_id}}
+	    {{freezrMeta.userId}}
 	</div>
 
-		{{#records_stream}}
-        <div class="freezr_public_genericCardOuter freezr_public_genericCardOuter_overflower">
-        	<div class="freezr_expander"> >> </div> 
-			<div> {{{_card}}} </div>
-        </div>
-        {{/records_stream}}
-        {{^records_stream}}No more posts{{/records_stream}}
+		<div> {{{recordsStream}}} </div>
+    {{^recordsStream}}No more posts{{/recordsStream}}
 
 
 	<center ><a style="display:{{display_more}}" href="/ppage?{{search_url}}">More</a></center>

@@ -7,9 +7,9 @@ img {
 	overflow: hidden;
 }
 .public_records_top{
-	width:100%; 
-	font-size:18px; 
-	font-weight: bold; 
+	width:100%;
+	font-size:18px;
+	font-weight: bold;
 	margin-bottom: 10px;
 	text-align: right;
 }
@@ -55,9 +55,9 @@ img {
     color: #2060ff;
 }
 .outer {
-	font-family: "Lucida Sans Unicode", "Helvetica Neue", "Arial", sans-serif; 	
-	margin:0 auto; 
-	background-image:url(/app_files/info.freezr.public/static/freezr_texture.png); 
+	font-family: "Lucida Sans Unicode", "Helvetica Neue", "Arial", sans-serif;
+	margin:0 auto;
+	background-image:url(/app_files/public/info.freezr.public/public/static/freezr_texture.png);
 	background-repeat: repeat;
 	max-width: 800px;
 	padding:15px;
@@ -65,34 +65,34 @@ img {
 }
 
 .freezr_public_genericCardOuter {
-	padding:5px; 
-	border:1px solid grey; 
-	border-radius:5px; 
-	margin: 5px; 
-	margin-bottom: 10px; 
-	font-family: "Lucida Sans Unicode", "Helvetica Neue", "Arial", sans-serif; 
-} 
+	padding:5px;
+	border:1px solid grey;
+	border-radius:5px;
+	margin: 5px;
+	margin-bottom: 10px;
+	font-family: "Lucida Sans Unicode", "Helvetica Neue", "Arial", sans-serif;
+}
 
 .freezr_public_genericCardOuter_overflower{
-	max-height:350px; 
+	max-height:350px;
 	overflow:hidden;
-} 
+}
 
 .freezr_public_app_title {
-	font-size:14px; 
+	font-size:14px;
 	font-emphasis:bold
-} 
+}
 .freezr_expander {
-	position:relative; 
-	top: 360px; 
-	margin-top: -25px; 
-	float: right; 
-	border-style: double; 
-	border-color: grey; 
-	margin-right: -4px; 
-	text-align: top; 
-	padding-top: -5px; 
-	font-size: 8px; 
-	border-bottom-right-radius: 5px; 
+	position:relative;
+	top: 360px;
+	margin-top: -33px;
+	float: right;
+	padding: 5px;
+	border-style: double;
+	border-color: grey;
+	margin-right: -2px;
+	text-align: top;
+	font-size: 8px;
+	border-bottom-right-radius: 5px;
 	cursor: pointer;
 }

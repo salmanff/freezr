@@ -14,9 +14,9 @@ exports.params= [
               addAuth:false,
               unifiedDbName:null
           },
-          userDirParams:{},
-          freezr_is_setup:true,
-          first_user:"test_user",
+          fsParams:{},
+          freezrIsSetup:true,
+          firstUser:"test_user",
       },
 
       {
@@ -27,11 +27,11 @@ exports.params= [
               dbtype:"nedb",
               db_path : "testNedb",
           },
-          userDirParams:{
+          fsParams:{
             userRoot:".data"
           },
-          "freezr_is_setup":true,
-          "first_user":"test_user",
+          "freezrIsSetup":true,
+          "firstUser":"test_user",
       }
 
 ]
@@ -46,8 +46,8 @@ const other_tests = [
           gaeKeyFile:false,
           projectid:null
       },
-      "freezr_is_setup":true,
-      "first_user":"test_user",
+      "freezrIsSetup":true,
+      "firstUser":"test_user",
   }
 
 ]

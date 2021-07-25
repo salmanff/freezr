@@ -1,0 +1,65 @@
+<!--
+freezr Account Home
+	app_list refers to app_list.html
+	options:
+	 'home': {
+        page_title: "Accounts Home (Freezr)",
+        css_files: ['info.freezr.public/freezr_style.css', 'account_home.css'],
+        page_url: 'account_home.html',
+        app_name: "info.freezr.account",
+        script_files: ['/app_files/info.freezr.account/account_home.js']
+    },
+
+-->
+
+<div class="freezer_texture_outer">
+  <div class="freezer_texture_inner">
+		<div class="freezer_top_app_menu" id="adminFunctions">
+			<a href="/account/app_management">App Management</a>
+			&nbsp;
+		</div>
+    <br>
+    <br>
+
+    <div class="freezer_dialogue_topTitle freezr_dialogueBordered">
+        Permissions:
+    </div>
+
+    <div class="errorBox" id="errorBox" style="display:none">
+
+		</div>
+
+    <div class="" id="confirm_dialogue" style="display:none" >
+      <center>
+        <div id="confirm_spinner" style="display:none" width="100px;">
+          <br/>
+          <br/>
+          <img  src="/app_files/public/info.freezr.public/public/static/ajaxloaderBig.gif"/>
+          <br/>
+          <br/>
+        </div>
+        <div id="confirm_dialogue_inner">
+          <div class="freezer_dialogue_topTitle" id="confirm_title">aaa</div>
+          <div class="freezer_BoxTitle" id="confirm_app_name">bb</div>
+          <div class="freezer_BoxTitle" id="confirm_permission_name">cc</div>
+          <div class="freezer_BoxTitle" id="confirm_perm_sentence">ddd</div>
+          <br/>
+            <span class="freezer_butt" id="confirm_permission" style="float:none; width:150px">CONFIRM CHANGE</span>
+            <center><span class="freezer_butt" id="close_window" style="float:none; width:150px; position:absolute; top:0; margin-left: -75px;">Back to App</span></center>
+          <br/>
+        </div>
+      </center>
+
+      <br/>
+      <br/>
+      <div class="freezer_dialogue_topTitle freezr_dialogueBordered">
+         All App Permissions
+      </div>
+    </div>
+
+
+    {{{all_perms_in_html}}}
+
+
+  </div>
+</div>

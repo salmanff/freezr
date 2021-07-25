@@ -8,7 +8,7 @@ freezr Account Home
         page_url: 'account_home.html',
         app_name: "info.freezr.account",
         script_files: ['/app_files/info.freezr.account/account_home.js']
-    }, 
+    },
 
 -->
 
@@ -21,28 +21,30 @@ freezr Account Home
 			&nbsp;
 			<a id="freezer_admin_butt" href="/admin/home">Admin</a>
 			&nbsp;
-			<a href="/account/changePassword">Change Password</a>
+			<a href="/account/settings">Account Settings</a>
+			&nbsp;
+			<a href="/account/contacts">Contacts</a>
 			&nbsp;
 			<a href="/account/logout">Log Out</a>
-		</div>    
+		</div>
 
-		<div class="freezer_dialogueTitle">freezr home</div> 
+		<div class="freezer_dialogueTitle">freezr home</div>
 
 		<div id="app_list">
-			<div class="page_title"> {{#user_apps.length }}You have {{ user_apps.length }} installed apps {{/user_apps.length }}{{^user_apps}}You have No Installed Apps.{{/user_apps}}
+			<div class="page_title"> {{#user_apps.length }}You have {{ user_apps.length }} installed apps {{/user_apps.length }}{{^user_apps}}You have No Installed Apps. You can install apps from the <a href="/account/app_management">App Management page here</a>.{{/user_apps}}
 			      </div>
 
 			<div class="list_holder">
 
 			      {{#user_apps}}
-			          <div class="app_container">
+			          <div class="app_container" {{#offThreadWip}} style="border-color:palevioletred" {{/offThreadWip}}>
 			            <div class="app_inner" width="80px">
 			              <img src="{{logo}}" width="80px" class="logo_img" id="goto_2_{{app_name}}">
 			            </div>
 
 			            <div class="app_name" id="goto_4_{{app_name}}">
-			                {{display_name}}
-			            </div> 
+			                {{app_display_name}}
+			            </div>
 			          </div>
 			      {{/user_apps}}
 			</div>

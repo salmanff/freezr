@@ -3,7 +3,7 @@
 let oa_params = {};
 let edit_id = "";
 const EDIT_BUT_MSG = "Update Permission Parameters"
-const PARAM_LIST = ['source','type','name','key','secret','enabled','redirecturi']
+const PARAM_LIST = ['type','name','key','secret','enabled','redirecturi']
 const PARAM_OPTIONALS = ['secret','enabled']
 const SUCCESS_MESSAGE = "sucess_write=";
 const UNPLANNED_MESSAGE = "sucess_write=update_unplanned";
@@ -28,7 +28,7 @@ freezr.initPageScripts = function() {
             params = getParamsFromList(args[2]);
             oa_params.enabled = true;
             writeOauthPerm(params);
-            break;          
+            break;
           case 'disable':
             params = getParamsFromList(args[2]);
             oa_params.enabled = false;
@@ -46,7 +46,7 @@ var getParamsFromList = function(oauth_id) {
   PARAM_LIST.forEach(function(aParam) {
     if (document.getElementById(aParam+"_"+oauth_id) ) {
       oa_params[aParam] = document.getElementById(aParam+"_"+oauth_id).innerHTML;
-    } 
+    }
   } )
   return oa_params;
 }
@@ -54,13 +54,13 @@ var populateEditFields = function(params) {
   PARAM_LIST.forEach(function(aParam) {
     if (document.getElementById('oa_'+aParam) ) {
       document.getElementById('oa_'+aParam).value = (oa_params[aParam] || "") ;
-    } 
+    }
   } )
 }
 
 const states_issued = {}
 var makeOauth = function () {
-  console.log("todo - Basic error checking") // has to be string 
+  //onsole.log("todo - Basic error checking") // has to be string
   document.body.scrollTop = 0;
 
   var hasAll = true;
@@ -82,16 +82,16 @@ var makeOauth = function () {
 
 var writeOauthPerm = function (oa_params) {
     //onsole.log("sending theInfo: "+JSON.stringify (oa_params))
-    freezer_restricted.connect.write("/v1/admin/oauth_perm", oa_params, gotMakeOauthStatus, "jsonString");
+    freezerRestricted.connect.write("/v1/admin/oauth_perm", oa_params, gotMakeOauthStatus, "jsonString");
 }
-var gotMakeOauthStatus = function(data) {
+var gotMakeOauthStatus = function(error, data) {
   //onsole.log("gotMakeOauthStatus "+JSON.stringify(data));
   data = freezr.utils.parse(data)
-  if (!data) {
+  if (error) {
+    showError("Error: "+ error.message + ' ' + data.written);
+  } else if (!data) {
     showError("Could not connect to server");
-  } else if (data.error) {
-    showError("Error: "+data.written);
-  } else {
+  } else  {
     window.open("/admin/oauth_serve_setup?"+SUCCESS_MESSAGE+data.written,"_self")
   }
 }
@@ -100,5 +100,3 @@ var showError = function(errorText) {
   var errorBox=document.getElementById("errorBox");
   errorBox.innerHTML= errorText;
 }
-
-

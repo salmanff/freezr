@@ -1,3 +1,5 @@
+// admin/register
+
 
 freezr.initPageScripts = function() {
   document.getElementById('register').onsubmit = function (evt) {
@@ -14,24 +16,27 @@ freezr.initPageScripts = function() {
       showError("Passwords have to match");
     } else {
       var theInfo = { register_type: "normal",
-                      isAdmin: document.getElementById("isAdminId").checked?"true":"false",
+                      isAdmin: (document.getElementById("isAdminId").checked),
+                      useSysFsDb: (document.getElementById("useSysFsDbId").checked),
                       email_address: document.getElementById("email_address").value,
                       user_id: user_id,
                       full_name: document.getElementById("full_name").value,
-                      password: password 
+                      password: password
                     };
-      freezer_restricted.connect.write("/v1/admin/user_register", theInfo, gotRegisterStatus, "jsonString");
+      freezerRestricted.connect.write("/v1/admin/user_register", theInfo, gotRegisterStatus, "jsonString");
     }
   }
 }
 
-var gotRegisterStatus = function(data) {
-  if (data) data = freezr.utils.parse(data);
-  console.log("gotRegisterStatus "+JSON.stringify(data));
-  if (!data) {
-    showError("Could not connect to server");
+var gotRegisterStatus = function(error, data) {
+  if (data) data = freezr.utils.parse(data)
+  // console.log("gotRegisterStatus "+JSON.stringify(data));
+  if (error) {
+    showError("Error. "+ message);
   } else if (data.error) {
-    showError("Error. "+data.message);
+    showError("Error. "+ data.message)
+  } else if (!data) {
+    showError("Could not connect to server");
   } else {
     window.location = "/admin/list_users";
   }
@@ -42,5 +47,3 @@ var showError = function(errorText) {
   errorBox.innerHTML= errorText;
   window.scrollTo(0,0);
 }
-
-

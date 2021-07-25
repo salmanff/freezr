@@ -2,6 +2,8 @@
 // freezr.info - nodejs system files - logger.js
 
 /* TO DO
+  // THIS NEEDS TO BE REDONE COMPLETELY
+
 	//  reloadDb at the beginning
 
 	// get rid of "throw errors"...
@@ -9,7 +11,7 @@
 */
 
 var helpers = require('./helpers.js'),
-    db_handler = require("./db_handler.js"),
+    // db_handler = require("./db_handler.js"),
     async = require('async'),
     file_handler = require('./file_handler.js');
 
@@ -26,16 +28,21 @@ var current_date = dateString();
 var day_db_log = {};
 var saveTimer = null;
 
+const LOGGER_APC = {
+  app_name:'info.freezr.admin',
+  collection_name:"visit_log_daysum",
+  owner:'fradmin'
+}
+
+
 exports.reloadDb = function (env_params, callback) {
 	// get the latest from db
 	// get the latest file, if any and have the counter
 	var today = dateString();
-  const appcollowner = {
-    app_name:'info_freezer_admin',
-    collection_name:'visit_log_daysum',
-    _owner:'freezr_admin'
-  }
-  db_handler.db_getbyid (env_params, appcollowner, today, (err, object) => {
+  console.log("visitLogger env_params ccc")
+  console.log(env_params)
+
+  db_handler.read_by_id (env_params, LOGGER_APC, today, (err, object) => {
     //onsole.log("visit_logger got today object :",today)
     if (err) {
       console.warn(err)
@@ -47,7 +54,7 @@ exports.reloadDb = function (env_params, callback) {
   })
 }
 
-exports.record = function(req, env_params, prefs, options){
+exports.record = function(req, env_params, prefs, options={}){
 	//onsole.log("RECORD? "+get_app_name(req)+" "+req.originalUrl)
 	if (!prefs) console.warn("PREFS NOT DEFINED ********************")
 	if (prefs && prefs.log_visits) {
@@ -97,12 +104,12 @@ function write_full_log_file (req, env_params, callback) {
 	if (!last_file_name) make_new_file=true;
 	if (make_new_file) last_file_name = "full_logs_"+current_date+".json";
 
-	var the_url = "userfiles/freezr_admin/daily_log_files/"+(new Date().getFullYear())
+  var the_url = helpers.FREEZR_USER_FILES_DIR + '/fradmin/files/info.freezr.admin/daily_log_files/' + (new Date().getFullYear())
 	file_handler.writeTextToUserFile (
 		file_handler.normUrl(the_url),
 		last_file_name,
 		JSON.stringify({'app':'info,freezr.visit_logger' ,version:exports.version,logs:full_file_log}),
-		{fileOverWrite: !make_new_file},
+		{doNotOverWrite: make_new_file},
 		{},
 		"info.freezr.logs",
 		req.freezr_environment,
@@ -132,14 +139,8 @@ function saveToDb(env_params) {
 	// find one date to log. if more old days exist (unlikely), it will deal with one on each save
 
 	var write = day_db_log[theDateString]
-	write._owner = 'freezr_admin';
-  appcollowner = {
-    app_name:'info_freezer_admin',
-    collection_name:'params',
-    _owner:'freezr_admin'
-  }
 
-  db_handler.db_upsert (env_params, appcollowner, theDateString, write, (err, entity)=>{
+  db_handler.upsert (env_params, LOGGER_APC, theDateString, write, (err, entity)=>{
     if (err) {
       helpers.state_error("visit_logger", exports.version, "saveToDb", err, "err_writing_logs_to_db")
     } else {
@@ -149,40 +150,6 @@ function saveToDb(env_params) {
     }
 
   })
-
-/* OLD temp DELETE THIS (TODO)
-	async.waterfall([
-        function (cb) {
-        	db_handler.app_db_collection_get('info_freezr_admin', 'visit_log_daysum', cb);
-        },
-        function (theCollection, cb) {
-            dbCollection = theCollection;
-            dbCollection.find({ _id: theDateString }).toArray(cb);
-        },
-        function (results, cb) {
-        	// todo - have a function to "write or update"
-			write._date_Modified =  0 + (new Date().getTime() );
-            if ( (results == null || results.length == 0) ) { // new document
-                write._date_Created = new Date().getTime();
-                write._id = theDateString;
-                dbCollection.insert(write, { w: 1, safe: true }, cb);
-            } else {
-            	delete write._id;
-                dbCollection.update({_id: theDateString },
-                    {$set: write}, {safe: true }, cb);
-            }
-        },
-	],
-    function (err) {
-        if (err) {
-        	helpers.state_error("visit_logger", exports.version, "saveToDb", err, "err_writing_logs_to_db")
-        } else {
-        	if (theDateString != today ) {
-        		delete day_db_log[theDateString]
-        	}
-        }
-    });
-*/
 }
 
 function addRecordToDailySummary(req, prefs, options) {
@@ -245,11 +212,9 @@ function addRecordToDailySummary(req, prefs, options) {
 		day_db_log[today][user_type].numAppPageViews++
 	} else if(APP_FILE_SOURCES.indexOf(options.source)>-1) {
 		day_db_log[today][user_type].numAppFiles++
-	} else if (options.source == 'userDataAccessRights') {
+	} else if (options.source == 'userDataAccessRights' || options.source == 'userLoggedInRights') {
 		var parts = req.originalUrl.split('?')[0].split("/");
-		if (parts[2]=="userfiles" ) {
-			day_db_log[today][user_type].numUserFiles++
-		} else if (parts[2]=="db") {
+		if (parts[2]=="db") {
 		  if (parts[3] == "upload") {
 		  		day_db_log[today][user_type].numFileUpload++
 		  } else if (parts[3] == "write") {
@@ -271,14 +236,17 @@ function addRecordToDailySummary(req, prefs, options) {
 			day_db_log[today][user_type].numpcard++
 		} else if (parts[2]=="pdbq" || parts[2]=="pobject") {
 				day_db_log[today][user_type].numpdb++
+		} else if (parts[2]=="userfiles" ) {
+			day_db_log[today][user_type].numUserFiles++
 		} else if (parts[2]=="publicfiles") {
 				if (!day_db_log[today][user_type].numPubFiles) day_db_log[today][user_type].numPubFiles=0;
 				day_db_log[today][user_type].numPubFiles++
 		} else if (parts[1]=="account" || parts[2]=="account" || parts[1]=="login"|| parts[2]=="admin") {
 			day_db_log[today][user_type].numpubadmin++
 		} else {
+      if (!day_db_log[today][user_type].unknowncat) day_db_log[today][user_type].unknowncat=0;
+      day_db_log[today][user_type].unknowncat++
 			console.warn("unknown addVersionNumber category", req.originalUrl,parts)
-			throw helpers.error("unknown addVersionNumber category")
 		}
 	} else if (options.source == 'requireAdminRights') {
 		day_db_log[today][user_type].numpubadmin++
@@ -307,13 +275,15 @@ function get_app_name(req, options) {
 
 	if (req.originalUrl.split('?')[0] == "/") return "root"
 	var parts = req.originalUrl.split('?')[0].split("/");
-	const PARTS2URLS =  ['app_files', 'apps', 'v1']
-	const PARTS1URLS =  ['allmydata', 'favicon.ico', 'ppage', 'papp', 'account', 'login', 'admin']
+  if (parts[2]=="userfiles") return parts[3].replace(/\./g,"_");
+	const PARTS2URLS =  ['app_files', 'apps', 'v1','feps','ceps']
+	const PARTS1URLS =  ['appdata', 'favicon.ico', 'ppage', 'papp', 'account', 'login', 'admin']
 
 	if (parts.length<2) return "account"
+
 	if (PARTS2URLS.indexOf (parts[1]) >-1 ) return parts[2].replace(/\./g,"_");
 	if (PARTS1URLS.indexOf (parts[1]) >-1 )  return parts[1].replace(/\./g,"_");
-	console.warn("NO APP: "+req.originalUrl+ " "+parts.length+" "+parts.join("P"))
+	console.warn("NO APP: "+req.originalUrl+ " "+parts.length+" "+parts.join(" - "))
 	return "unknown_error"
 }
 function get_external_referer(req) {
@@ -341,4 +311,4 @@ function isSysFile(url) {
 	return FREEZR_SYS_FILES.indexOf(url)>-1
 }
 
-const FREEZR_SYS_FILES = ['/app_files/info.freezr.public/freezr_style.css', '/app_files/info.freezr.public/freezr_core.css', '/app_files/info.freezr.public/freezr_core.js', '/app_files/info.freezr.public/static/freezr_texture.png', '/app_files/info.freezr.public/static/freezer_log_top.png', '/favicon.ico']
+const FREEZR_SYS_FILES = ['/app_files/public/info.freezr.public/freezr_style.css', '/app_files/public/info.freezr.public/freezr_core.css', '/app_files/public/info.freezr.public/freezr_core.js', '/app_files/public/info.freezr.public/public/static/freezr_texture.png', '/app_files/public/info.freezr.public/static/freezer_log_top.png', '/favicon.ico']

@@ -1,27 +1,45 @@
 // freezr.info - nodejs system files - helpers.js
-exports.version = '0.0.122';
+// THIS NEEDS TO BE CLEANED AND re-organised
+exports.version = '0.0.122'
 
+const async = require('async')
+const flags_obj = require("./flags_obj.js")
 
-var async = require('async'),
-    flags_obj = require("./flags_obj.js");
+exports.RESERVED_FIELD_LIST = ["_id", "_date_created", "_date_modified","_accessible","_publicid","_date_published","_date_accessibility_mod"];
 
-exports.RESERVED_FIELD_LIST = ["_owner","_date_Created", "_date_Modified","_accessible_By","_publicid","_id", "_date_Published","_date_Accessibility_Mod"];
-exports.USER_DIRS = ["userfiles", "userapps", "userbackups"]
-
-exports.log = function(req, message) {
-    console.log((new Date())+" - "+(req? (req.session.logged_in_user_id || "no_user"): " server ")+" - "+message)
+exports.log = function (...messages) {
+  console.log(new Date(), ...messages)
 }
 
+exports.APP_MANIFEST_FILE_NAME = 'manifest.json'
+exports.FREEZR_USER_FILES_DIR = 'users_freezr'
+
 // Valid names
+// OTHER FUNCS TO REVIEW
+    exports.user_id_from_user_input = function (user_id_input) {
+      //
+      return user_id_input? user_id_input.trim().toLowerCase().replace(/ /g, "_"): null;
+    };
     exports.system_apps = ["info.freezr.account","info.freezr.admin","info.freezr.public","info.freezr.permissions","info.freezr.posts","info.freezr.logs"];
+    exports.SYSTEM_ADMIN_COLLS = ['users','permissions','visit_log_daysum','params','oauth_permissions','app_tokens','public_records']
+    exports.SYSTEM_ADMIN_APPTABLES = exports.SYSTEM_ADMIN_COLLS.map(coll => {return ('info_freezr_admin_'+coll)})
     exports.permitted_types = {
         groups_for_objects: ["user","logged_in","public"],
-        groups_for_fields: ["user","logged_in"],
-        type_names: ["folder_delegate","field_delegate","object_delegate", "db_query"], // used in getDataObject
+        //groups_for_fields: ["user","logged_in"],
+        type_names: ["object_delegate", "db_query"], // used in getDataObject
     }
     var reserved_collection_names = ["field_permissions", "accessible_objects"]; // "files" s also reserved but can write to it
-    const RESERVED_IDS =["freezr_admin"]
+    const RESERVED_IDS =['fradmin', 'public', 'test']
 
+exports.is_system_app = function (appName) {
+  let ret = false
+  appName = appName.replace(/\./g, '_')
+  exports.system_apps.forEach((item, i) => {
+    item = item.replace(/\./g, '_')
+    if (item === appName || exports.startsWith(appName, item)) ret = true
+  })
+  return ret
+}
     // note - App_name and user_id etc could have spaces but need to deCodeUri when in url
     exports.valid_app_name = function(app_name) {
         if (!app_name) return false;
@@ -69,7 +87,9 @@ exports.log = function(req, message) {
       return (name.indexOf(" ") < 0 && name.indexOf("/") < 0  && name.indexOf(" ") < 0 )
     }
     exports.valid_collection_name = function(collection_name,is_file_record)  {
-        if (collection_name.indexOf("_")>-1 || collection_name.indexOf("/")>-1 || collection_name.indexOf(" ")>-1  ||collection_name.indexOf("@")>-1  || collection_name.indexOf(".")>-1 || (exports.starts_with_one_of(collection_name, ['.','-','\\',"system"] )) ) {
+        if (!collection_name) {
+          return true
+        } else if (collection_name.indexOf("_")>-1 || collection_name.indexOf("/")>-1 || collection_name.indexOf(" ")>-1  ||collection_name.indexOf("@")>-1   || (exports.starts_with_one_of(collection_name, ['.','-','\\'] )) ) {
             return false
         } else if (reserved_collection_names.indexOf(collection_name)>-1){
             return false;
@@ -83,6 +103,7 @@ exports.log = function(req, message) {
         if (!data) data = {};
         data.error = null;
         //var output = { error: null, data: data };
+        // console.log('helpers sending ', JSON.stringify(data) )
         res.end(JSON.stringify(data) + "\n");
     }
 
@@ -102,9 +123,9 @@ exports.log = function(req, message) {
         return e;
     };
     exports.state_error = function (system_file, version, theFunction, error, errCode ) {
-        if (!errCode && error.code) errCode = error.code
+        if (!errCode && error && error.code) errCode = error.code
         console.warn ("* * * ERROR *** : Error in system_file "+system_file+" function: "+theFunction+" code: "+errCode+" message:"+error);
-        return exports.error((errCode? errCode : "uknown error"), error.message);
+        return exports.error((errCode? errCode : "uknown error"), ((error && error.message) ? error.message : 'unknown'));
     };
 
     exports.auth_failure = function (system_file, version, theFunction, message, errCode ) {
@@ -117,9 +138,9 @@ exports.log = function(req, message) {
         return exports.error("internal_error",
                              "Internal error: "+message);
     };
-    exports.warning = function (system_file, version, theFunction, message ) {
+    exports.warning = function (system_file, version, theFunction, ...messages) {
         //
-        console.warn ("* * * WARNING *** :  "+(new Date())+" Possible malfunction in system_file "+system_file+" function: "+theFunction+" message:"+message);
+        console.warn ("* * * WARNING *** :  "+(new Date())+" Possible malfunction in system_file "+system_file + 'version: '+ version + " function: "+theFunction+" message:", ...messages)
     };
     exports.auth_warning = function (system_file, version, theFunction, message ) {
         //
@@ -130,9 +151,9 @@ exports.log = function(req, message) {
         console.warn ("App Data ERROR in function: "+theFunction+" app_name: "+app_name+" message:"+message);
         return exports.error("app_data_error", message);
     }
-    exports.app_config_error = function(version, theFunction, app_name, message) {
+    exports.manifest_error = function(version, theFunction, app_name, message) {
         console.warn ("App Config ERROR (from "+theFunction+") for app_name: "+app_name+":"+message);
-        return exports.error("app_config_error", message);
+        return exports.error("manifest_error", message);
     }
 
     exports.rec_missing_error = function(version, theFunction, app_name, message) {
@@ -149,6 +170,7 @@ exports.log = function(req, message) {
         exports.send_failure(res, err, system_file, version, theFunction, message )
     };
     exports.send_internal_err_page= function (res, system_file, version, theFunction, message ) {
+        // todo 2019 - redo this page...
         var err = exports.internal_error (system_file, version, theFunction, message )
         res.redirect('/account/home?error=true&error_type=internal&file='+system_file+"&msg="+message)
     };
@@ -184,8 +206,18 @@ exports.log = function(req, message) {
     };
     exports.malformed_config = function (app_name) {
         return exports.error("malformed_config",
-                            "The app_config.json file for "+app_name+"could not be parsed. It may be configured badly, or the JSON structure is not valid");
+                            "The manifest.json file for "+app_name+"could not be parsed. It may be configured badly, or the JSON structure is not valid");
     };
+
+// SECURITY UTILITIES
+    exports.generateAppToken = function(userId, appName, deviceCode){
+      //console.log('to be redone - jwt can be issued here too')
+      return exports.randomText(50)
+    }
+    exports.generateOneTimeAppPassword = function(userId, appName, deviceCode){
+      //console.log('to be redone')
+      return exports.randomText(50)
+    }
 
 
 // UTILITIES
@@ -215,6 +247,17 @@ exports.log = function(req, message) {
         }
         return aList
     }
+    exports.removeFromListIfExists = function(aList,anItem) {
+        if (!anItem) {
+          return aList
+        } else if (!aList) {
+          return []
+        } else {
+          let i = aList.indexOf(anItem)
+          if (i>-1) aList.splice(i, 1);
+        }
+        return aList
+    }
     exports.now_in_s = function () {
         return Math.round((new Date()).getTime() / 1000);
     }
@@ -222,10 +265,16 @@ exports.log = function(req, message) {
         // http://stackoverflow.com/questions/1349404/generate-a-string-of-5-random-characters-in-javascript
         var text = "";
         var possible = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        if (!textlen) textlen = 10
 
         for( var i=0; i < textlen; i++ )
             text += possible.charAt(Math.floor(Math.random() * possible.length));
         return text;
+    }
+
+    exports.expiry_date_passed = function (expiry) { // expiry is a date in unix epochtime
+      const now = new Date().getTime();
+      return (now>expiry)
     }
 
 // Other..
@@ -337,5 +386,5 @@ var objects_are_similar = function (obj1, obj2) {
 
 exports.isEmpty = function(obj)  {
     if (!obj) return true
-    return Object.keys(obj).length === 0;
+    return Object.keys(obj).length === 0 && obj.constructor === Object;
 }

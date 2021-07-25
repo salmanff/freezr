@@ -1,9 +1,8 @@
-
-//
+// tests need to be redone -> db_handler removed
 
 var expect = require('chai').expect;
 var assert = require('chai').assert;
-var db_handler = require('../freezr_system/db_handler.js');
+var db_handler = require('../freezr_system/db_handler.js')
 var all_environments = require('../test/test_environment_params.js').params;
 
 var test_read = require('../freezr_system/environment/db_env_gaeCloudDatastore.js');
@@ -14,7 +13,7 @@ const TEST_APP_NAME = "test_app",
       TEST_ID1 =  'testid1',
       TEST_ID2 = 'testid2',
       TEST_TAG1 = 'tag1',
-      TEST_APPCOLLOWNER = {app_name:TEST_APP_NAME, collection_name:TEST_COLL_1, _owner:'testUser'}
+      TEST_APPCOLLOWNER = {app_name:TEST_APP_NAME, collection_name:TEST_COLL_1, owner:'testUser'}
 
 // check params {
 expect(all_environments).to.be.an('array')
@@ -54,12 +53,12 @@ all_environments.forEach((env_params) => {
           });
     })
     describe('Database fundamentals: '+env_params.test_name, function() {
-      context('db_insert '+env_params.test_name, function() {
+      context('create '+env_params.test_name, function() {
         it('inserts a no ID item in db '+env_params.test_name+"===================", function(done) {
-            db_handler.db_insert(env_params, TEST_APPCOLLOWNER, null,
+            db_handler.create(env_params, TEST_APPCOLLOWNER, null,
               { 'test_field':'hello - no id',
                 'tag':TEST_TAG1,
-                'allhave':'thisvalue','_owner':'testUser'},
+                'allhave':'thisvalue'},
               null,
               function(err, ret) {
                 if (err) {
@@ -71,7 +70,7 @@ all_environments.forEach((env_params) => {
               })
           });
           it('finds all items (1) '+env_params.test_name+"===================", function(done) {
-              db_handler.db_find(env_params, TEST_APPCOLLOWNER, {'_owner':'testUser'},{},
+              db_handler.query(env_params, TEST_APPCOLLOWNER, {},{},
                 (err, ret) => {
                   //onsole.log("find ALL items ret "+JSON.stringify(ret), (ret? ret.length:" no len") )
                   if (err) {
@@ -84,10 +83,10 @@ all_environments.forEach((env_params) => {
                 })
           });
         it('inserts item in db with an id '+env_params.test_name+"===================", function(done) {
-                db_handler.db_insert(env_params, {app_name:TEST_APP_NAME, collection_name:TEST_COLL_1, '_owner':'testUser'}, TEST_ID1,
+                db_handler.create(env_params, {app_name:TEST_APP_NAME, collection_name:TEST_COLL_1}, TEST_ID1,
                   { 'test_field':'hello2 with id',
                     'tag':TEST_TAG1,
-                    'allhave':'thisvalue' ,'_owner':'testUser'},
+                    'allhave':'thisvalue'},
                   null,
                   function(err, ret) {
                     //onsole.log("insert ret "+JSON.stringify(ret))
@@ -103,7 +102,7 @@ all_environments.forEach((env_params) => {
                   })
           });
           it('finds all items (2) '+env_params.test_name+"===================", function(done) {
-              db_handler.db_find(env_params, {app_name:TEST_APP_NAME, collection_name:TEST_COLL_1, '_owner':'testUser'}, {'_owner':'testUser'},{},
+              db_handler.query(env_params, {app_name:TEST_APP_NAME, collection_name:TEST_COLL_1}, {},{},
                 (err, ret) => {
                   //onsole.log("find ALL items ret "+JSON.stringify(ret), (ret? ret.length:" no len") )
                   if (err) {
@@ -116,7 +115,7 @@ all_environments.forEach((env_params) => {
                 })
           });
         it('inserts item with id - should generate error - '+env_params.test_name+"===================", function(done) {
-          db_handler.db_insert(env_params, TEST_APPCOLLOWNER, TEST_ID1, {'test_field':'hello duplicate id','tag':'tag1', 'allhave':'thisvalue', '_owner':'testUser'},null,
+          db_handler.create(env_params, TEST_APPCOLLOWNER, TEST_ID1, {'test_field':'hello duplicate id','tag':'tag1', 'allhave':'thisvalue'},null,
               function(err, ret) {
                 if (err) {
                   done();
@@ -126,7 +125,7 @@ all_environments.forEach((env_params) => {
               })
           });
           it('finds all items (2a) '+env_params.test_name+"===================", function(done) {
-              db_handler.db_find(env_params, TEST_APPCOLLOWNER, {'_owner':'testUser'},{},
+              db_handler.query(env_params, TEST_APPCOLLOWNER, {},{},
                 (err, ret) => {
                   //onsole.log("find ALL items ret "+JSON.stringify(ret), (ret? ret.length:" no len") )
                   if (err) {
@@ -142,10 +141,10 @@ all_environments.forEach((env_params) => {
 
       context('db_upsert and db_update '+env_params.test_name, function() {
         it('upserts item in db with a new id', function(done) {
-            db_handler.db_upsert(env_params, TEST_APPCOLLOWNER, TEST_ID2,
+            db_handler.upsert(env_params, TEST_APPCOLLOWNER, TEST_ID2,
               { 'test_field':'hello2 with id',
                 'tag':'tag2',
-                'allhave':'thisvalue', '_owner':'testUser'},
+                'allhave':'thisvalue'},
               function(err, ret) {
                 //onsole.log("ret From upsert",ret)
                 if (err) {
@@ -157,7 +156,7 @@ all_environments.forEach((env_params) => {
               })
         });
         it('finds all items (3)'+env_params.test_name+"===================", function(done) {
-            db_handler.db_find(env_params, TEST_APPCOLLOWNER, {'_owner':'testUser'},{},
+            db_handler.query(env_params, TEST_APPCOLLOWNER, {},{},
               (err, ret) => {
                 //onsole.log("find ALL items ret "+JSON.stringify(ret), (ret? ret.length:" no len") )
                 if (err) {
@@ -170,7 +169,7 @@ all_environments.forEach((env_params) => {
               })
         });
         it('upserts item in db replacing the old id '+env_params.test_name+"===================", function(done) {
-            db_handler.db_upsert(env_params, TEST_APPCOLLOWNER, TEST_ID1, {'test_field':'hello3 with id', 'allhave':'thisvalue','tag':'tag3','_owner':'testUser'},
+            db_handler.upsert(env_params, TEST_APPCOLLOWNER, TEST_ID1, {'test_field':'hello3 with id', 'allhave':'thisvalue','tag':'tag3'},
               function(err, ret) {
                 //onsole.log("insert ret "+JSON.stringify(ret))
                 if (err) {
@@ -184,7 +183,7 @@ all_environments.forEach((env_params) => {
               })
         });
         it('finds all items (3a) '+env_params.test_name+"===================", function(done) {
-            db_handler.db_find(env_params, TEST_APPCOLLOWNER, {'_owner':'testUser'},{},
+            db_handler.query(env_params, TEST_APPCOLLOWNER, {},{},
               (err, ret) => {
                 //onsole.log("find ALL items ret "+JSON.stringify(ret), (ret? ret.length:" no len") )
                 if (err) {
@@ -197,7 +196,7 @@ all_environments.forEach((env_params) => {
               })
         });
         it('upserts item using query '+env_params.test_name+"===================", function(done) {
-          db_handler.db_upsert(env_params, TEST_APPCOLLOWNER, {'tag':'tag2'}, {'test_field':'hello2 with id upserted via query', 'allhave':'thisvalue', 'tag':'tag2','_owner':'testUser'},
+          db_handler.upsert(env_params, TEST_APPCOLLOWNER, {'tag':'tag2'}, {'test_field':'hello2 with id upserted via query', 'allhave':'thisvalue', 'tag':'tag2'},
                 function(err, ret) {
                   //onsole.log("insert ret "+JSON.stringify(ret))
                   if (err) {
@@ -213,7 +212,7 @@ all_environments.forEach((env_params) => {
                 })
           });
           it('finds all items (3b) '+env_params.test_name+"==================="+env_params.test_name+"===================", function(done) {
-              db_handler.db_find(env_params, TEST_APPCOLLOWNER, {'_owner':'testUser'},{},
+              db_handler.query(env_params, TEST_APPCOLLOWNER, {},{},
                 (err, ret) => {
                   //onsole.log("find ALL items 3b post upsert ret "+JSON.stringify(ret), (ret? ret.length:" no len") )
                   if (err) {
@@ -230,7 +229,7 @@ all_environments.forEach((env_params) => {
 
       context('db_find and remove '+env_params.test_name, function() {
         it('finds all items '+env_params.test_name+"===================", function(done) {
-            db_handler.db_find(env_params, TEST_APPCOLLOWNER, {'_owner':'testUser'},{},
+            db_handler.query(env_params, TEST_APPCOLLOWNER, {},{},
               (err, ret) => {
                 //onsole.log("find ALL items before sorting "+JSON.stringify(ret), (ret? ret.length:" no len") )
                 if (err) {
@@ -243,7 +242,7 @@ all_environments.forEach((env_params) => {
               })
         });
         it('finds all items sorted (1) '+env_params.test_name+"===================", function(done) {
-            db_handler.db_find(env_params, TEST_APPCOLLOWNER, {'_owner':'testUser'},{sort:{'tag':-1},count:2},
+            db_handler.query(env_params, TEST_APPCOLLOWNER, {},{sort:{'tag':-1},count:2},
               (err, ret) => {
                 //onsole.log("find ALL items sorted (1)"+JSON.stringify(ret), (ret? ret.length:" no len") )
                 if (err) {
@@ -260,7 +259,7 @@ all_environments.forEach((env_params) => {
               })
         });
         it('finds all items sorted (2)'+env_params.test_name+"===================", function(done) {
-            db_handler.db_find(env_params, TEST_APPCOLLOWNER, {'_owner':'testUser'},{sort:{'tag':1},count:2,skip:1},
+            db_handler.query(env_params, TEST_APPCOLLOWNER, {},{sort:{'tag':1},count:2,skip:1},
               (err, ret) => {
                 //onsole.log("find ALL items sorted (2)"+JSON.stringify(ret), (ret? ret.length:" no len") )
                 if (err) {
@@ -277,7 +276,7 @@ all_environments.forEach((env_params) => {
               })
         });
         it('finds queried items '+env_params.test_name+"===================", function(done) {
-            db_handler.db_find(env_params, TEST_APPCOLLOWNER, {'tag':TEST_TAG1},{},
+            db_handler.query(env_params, TEST_APPCOLLOWNER, {'tag':TEST_TAG1},{},
               (err, ret) => {
                 //onsole.log("find  items ret "+JSON.stringify(ret), (ret? ret.length:" no len") )
                 if (err) {
@@ -290,7 +289,7 @@ all_environments.forEach((env_params) => {
               })
         });
         it('finds queried items (2) and checks upsert results'+env_params.test_name+"===================", function(done) {
-            db_handler.db_find(env_params, TEST_APPCOLLOWNER, {'tag':'tag2'},{},
+            db_handler.query(env_params, TEST_APPCOLLOWNER, {'tag':'tag2'},{},
               (err, ret) => {
                 //onsole.log("find ALL from upsert items ret "+JSON.stringify(ret), (ret? ret.length:" no len") )
                 if (err) {
@@ -305,7 +304,7 @@ all_environments.forEach((env_params) => {
               })
         });
         it('finds $AND queried items and checks results'+env_params.test_name+"===================", function(done) {
-            db_handler.db_find(env_params, TEST_APPCOLLOWNER,
+            db_handler.query(env_params, TEST_APPCOLLOWNER,
               {$and:[{"allhave":"thisvalue"},{test_field:'hello2 with id upserted via query'}]},
               {},
               (err, ret) => {
@@ -322,7 +321,7 @@ all_environments.forEach((env_params) => {
               })
         });
         it('finds $AND and $or queried items'+env_params.test_name+"===================", function(done) {
-            db_handler.db_find(env_params, TEST_APPCOLLOWNER,
+            db_handler.query(env_params, TEST_APPCOLLOWNER,
               {$and:[{"allhave":"thisvalue"},
                     {$or: [{'test_field':'hello2 with id upserted via query'},{'test_field':'hello - no id'}] }
                     ]},
@@ -339,7 +338,7 @@ all_environments.forEach((env_params) => {
               })
         });
         it('finds an id'+env_params.test_name+"===================", function(done) {
-            db_handler.db_getbyid(env_params, TEST_APPCOLLOWNER, TEST_ID1,
+            db_handler.read_by_id(env_params, TEST_APPCOLLOWNER, TEST_ID1,
               function(err, ret) {
                 //onsole.log("find by id ret "+JSON.stringify(ret))
                 if (err) {
@@ -352,7 +351,7 @@ all_environments.forEach((env_params) => {
               })
         });
         it('finds nothing if no id'+env_params.test_name+"===================", function(done) {
-            db_handler.db_getbyid(env_params, TEST_APPCOLLOWNER, 'NonExistantId',
+            db_handler.read_by_id(env_params, TEST_APPCOLLOWNER, 'NonExistantId',
               function(err, ret) {
                 //onsole.log("Got non existant id "+JSON.stringify(ret))
                 if (err) {
@@ -366,13 +365,13 @@ all_environments.forEach((env_params) => {
               })
         });
         it('updates an item '+env_params.test_name+"===================", function(done) {
-            db_handler.db_update(env_params, TEST_APPCOLLOWNER, {'tag':'tag2'},{'tag':'tag1'},{replaceAllFields:false, multi:true},
+            db_handler.update(env_params, TEST_APPCOLLOWNER, {'tag':'tag2'},{'tag':'tag1'},{replaceAllFields:false, multi:true},
               function(err, ret) {
                 //onsole.log("db_handler db_update an item ret "+JSON.stringify(ret))
                 if (err) {
                   done(err);
                 } else {
-                  db_handler.db_find(env_params, TEST_APPCOLLOWNER, {'tag':'tag1'},{},
+                  db_handler.query(env_params, TEST_APPCOLLOWNER, {'tag':'tag1'},{},
                     (err, ret) => {
                       //onsole.log("find updated items (1) items ret "+JSON.stringify(ret), (ret? ret.length:" no len") )
                       if (err) {
@@ -387,12 +386,12 @@ all_environments.forEach((env_params) => {
               })
         });
         it('tries to update non-existing item '+env_params.test_name+"===================", function(done) {
-            db_handler.db_update(env_params, TEST_APPCOLLOWNER, {'tag':'tag5'},{'tag':'tag1'},null,
+            db_handler.update(env_params, TEST_APPCOLLOWNER, {'tag':'tag5'},{'tag':'tag1'},null,
               function(err, ret) {
                 if (err) {
                   done(err);
                 } else {
-                  db_handler.db_find(env_params, TEST_APPCOLLOWNER, {'tag':'tag2'},{},
+                  db_handler.query(env_params, TEST_APPCOLLOWNER, {'tag':'tag2'},{},
                     (err, ret) => {
                       if (err) {
                         done(err);
@@ -406,7 +405,7 @@ all_environments.forEach((env_params) => {
               })
         });
         it('removed item with id'+env_params.test_name+"===================", function(done) {
-            db_handler.db_remove(env_params, TEST_APPCOLLOWNER, TEST_ID1,{},
+            db_handler.delete_record(env_params, TEST_APPCOLLOWNER, TEST_ID1,{},
               function(err, ret) {
                 if (err) {
                   done(err);
@@ -417,7 +416,7 @@ all_environments.forEach((env_params) => {
               })
         });
         it('tried to find non-existant id...'+env_params.test_name+"===================", function(done) {
-            db_handler.db_getbyid(env_params, TEST_APPCOLLOWNER, TEST_ID1,
+            db_handler.read_by_id(env_params, TEST_APPCOLLOWNER, TEST_ID1,
               function(err, ret) {
                 if (err) {
                   done(err);
@@ -430,7 +429,7 @@ all_environments.forEach((env_params) => {
         });
 
         it('finds all collection names '+env_params.test_name+"===================", function(done) {
-            db_handler.getAllCollectionNames(env_params, "test_app",
+            db_handler.getAllAppTableNames(env_params, "test_app",
               function(err, ret) {
                 if (err) {
                   done(err);
@@ -444,7 +443,7 @@ all_environments.forEach((env_params) => {
         });
 
         it('removes all items with query '+env_params.test_name+"===================", function(done) {
-            db_handler.db_remove(env_params, TEST_APPCOLLOWNER, {'_owner':'testUser'},{},
+            db_handler.delete_record(env_params, TEST_APPCOLLOWNER, {},{},
               function(err, ret) {
                 //onsole.log("returned from remove with ret",ret)
                 if (err) {

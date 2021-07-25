@@ -609,7 +609,8 @@ function parseAttachedFiles (options, pageParams, callback) {
         helpers.app_data_error(exports.version, 'generatePage', options.app_name, 'Cannot have script files referring to other folders')
       } else {
         if (fileHandler.fileExt(jsFile) === 'js') {
-          options.script_files.push('public/' + jsFile)
+          // options.script_files.push('public/' + jsFile)
+          options.script_files.push('./' + (options.user_queried || 'public') + '/' + (options.app_name || 'info.freezr.public') + '/public/' + jsFile)
         } else {
           helpers.app_data_error(exports.version, 'generatePage', options.app_name, 'Cannot have non js file used as js.')
         }

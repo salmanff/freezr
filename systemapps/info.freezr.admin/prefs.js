@@ -45,7 +45,8 @@ freezr.initPageScripts = function () {
         allowAccessToSysFsDb: document.getElementById('allowAccessToSysFsDbId').checked,
         log_visits: document.getElementById('logVisitsId').checked,
         redirect_public: document.getElementById('redirectPublicId').checked,
-        public_landing_page: document.getElementById('defaultPublicAppId').value,
+        public_landing_app: document.getElementById('defaultPublicAppId').value,
+        public_landing_page: document.getElementById('defaultLandingUrl').value,
         password: password
       }
 
@@ -61,7 +62,7 @@ var gotChangeStatus = function(error, data) {
   } else if (!data) {
     showError("Could not connect to server");
   } else {
-    window.location = 'account/home?show=welcome'
+    showError('Preferences Saved')
   }
 }
 

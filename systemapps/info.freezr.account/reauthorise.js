@@ -127,7 +127,7 @@ const recordAuthParams = function () {
     showError('Something went wrong. Access token missing')
   } else {
     hideDivs(['passEnterDiv', 'click_goAuthFS'])
-    var theInfo = { action: 'updateFsParams', userId, password, env: { fsParams: receivedParams } }
+    var theInfo = { action: 'updateReAuthorisedFsParams', userId, password, env: { fsParams: receivedParams } }
     freezerRestricted.connect.send('/v1/admin/self_register', JSON.stringify(theInfo), gotRegisterStatus, 'POST', 'application/json')
   }
 }

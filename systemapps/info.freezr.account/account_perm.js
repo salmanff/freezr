@@ -67,16 +67,18 @@ var showError = function(errorText) {
 }
 
 const changePermission = function(details, theButt, callback) {
+  console.log('changePermission' , { details, theButt })
     if (!theButt) { //
       document.getElementById("confirm_dialogue_inner").style.display="none"
       document.getElementById("confirm_spinner").style.display="block"
-      theButt=document.getElementById("freezerperm_"+details.table_id+"_"+details.requestor_app+"_"+details.action+"_"+details.name)
+      theButt=document.getElementById("freezerperm_"+ details.table_id +"_"+details.requestor_app+"_"+details.action+"_"+details.name)
     }
     if (theButt) {
       theButt.innerHTML=". . . "
       theButt.className = "freezer_butt_pressed";
       theButt.id="freezerperm_"+details.table_id+"_"+details.requestor_app+"_pending_"+details.name
-      const url = '/v1/permissions/change/'+details.table_id;
+      const url = '/v1/permissions/change' + (details.table_id ? ('/' + details.table_id) : '');
+      console.log({ url })
       const data = {'changeList':[details]};
       freezerRestricted.connect.write(url, data, function(error, returnJson) {changePermissionCallBack(error, returnJson, details, theButt)});
     } else {

@@ -126,7 +126,6 @@ var buttons = {
       app_url = normliseGithubUrl(app_url)
       freezerRestricted.menu.resetDialogueBox(true);
       freezerRestricted.connect.ask('/v1/account/app_install_from_url.json', {'app_url':app_url,'app_name':app_name }, function(error, returndata) {
-          console.log(returndata)
           var d = freezr.utils.parse(returndata);
           if (error || d.err) {
             writeErrorsToFreezrDialogue(d)
@@ -138,7 +137,6 @@ var buttons = {
   },
   'feature': function(args, targetEl) {
     const appName = targetEl.id.split('_')[2]
-    console.log({appName})
     document.getElementById('appUrl').innerText = 'https://github.com/salmanff/' + appName
     document.getElementById("appNameFromUrl").innerText = appName
     buttons.addAppViaUrl()
@@ -171,13 +169,15 @@ var buttons = {
     document.getElementById("freezer_dialogue_homeButt").style.display="none";
     document.getElementById("freezer_dialogueScreen").onclick=null;
     freezerRestricted.connect.ask('/v1/account/appMgmtActions.json', {'action':'updateApp', 'app_name':args[0]}, function(error, returndata) {
-        console.log(returndata)
         document.getElementById("freezer_dialogue_closeButt").style.display="block";
         document.getElementById("freezer_dialogue_homeButt").style.display="block";
-        if (error || returndata.err) {
-          if (document.getElementById("freezer_dialogueInnerText")) document.getElementById("freezer_dialogueInnerText").innerHTML= "<br/>"+JSON.stringify(returndata.err);
+        console.log("error" + JSON.stringify(error))
+        if (error || returndata.error || returndata.errors) {
+          if (error) returndata.error = JSON.stringify(error)
+          if (!returndata.error) returndata.error = returndata.errors[0].text
+          if (document.getElementById("freezer_dialogueInnerText")) document.getElementById("freezer_dialogueInnerText").innerHTML= "<br/>"+JSON.stringify(returndata.error);
         } else {
-          ShowAppUploadErrors(returndata.flags, 'updateApp', showDevOptions)
+          ShowAppUploadErrors(returndata, 'updateApp', showDevOptions)
         }
         buttons.updateAppList();
     })
@@ -332,7 +332,7 @@ var ShowAppUploadErrors = function (theData, type, callFwd) {
     try {
       //onsole.log("theHtml",theHtml)
       //onsole.log("theData",theData)
-      theEl.innerHTML = Mustache.to_html( theHtml,theData );
+      theEl.innerHTML = Mustache.to_html( theHtml, theData );
       if (type == "addBlankApp") {
         document.getElementById("button_closeMenu_1").style.display="block"
         document.getElementById("finalise_outer").style.display="none"

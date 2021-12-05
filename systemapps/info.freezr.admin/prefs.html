@@ -8,7 +8,7 @@ options:
 -->
 <div class="freezer_texture_outer">
   <div class="freezer_texture_inner">
-    <div class="freezer_top_app_menu changeNormal" id="adminFunctions">
+    <div class="freezer_top_app_menu" id="adminFunctions">
       <a href="/account/home">Home</a>
       &nbsp;
       <a href="/account/settings">Account Settings</a>
@@ -40,9 +40,13 @@ options:
 
         <dt><b>Public Landing Page:</b></dt>
         <dt><input type="checkbox" name="redirectPublic" id="redirectPublicId" value="redirectPublic" {{#redirect_public}}checked{{/redirect_public}}>Redirect non-logged-in visitors to a publicly accessible landing page</dt>
+
+        <dt class="changeNormal">Enter a default public url:</dt>
+        <dd class="changeNormal"><input size="30" id="defaultLandingUrl" name="defaultLandingUrl" value="{{ public_landing_page }}"/></dd>
+
         <dt>&nbsp; &nbsp; &nbsp; Specific app public page (optional):</dt>
 
-        <span style="display:none" id="oldChoice">{{ public_landing_page }}</span>
+        <span style="display:none" id="oldChoice">{{ public_landing_app }}</span>
         <dd>
           <select id="defaultPublicAppId"> <option value=" ">Default Page</option> </select>
 
@@ -53,8 +57,12 @@ options:
 
         <br>
 
-        <dd ><input id="submitButt" class="freezer_dialogue_topTitle" style="padding-left: 60px;" type="submit" value="Update Preferences"/></dd>
+        <dd ><input id="submitButt" class="freezer_dialogue_topTitle" style="padding-left: 60px; cursor: pointer;" type="submit" value="Update Preferences"/></dd>
       </dl>
     </form>
+
+    <br>
+    <a class="freezer_dialogueTitle setup" style="padding-left: 60px; cursor: pointer;" href="/">Go on to freezr's home page</a>
+
   </div>
 </div>

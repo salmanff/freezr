@@ -31,11 +31,10 @@ exports.readWriteUserData = function (req, res, dsManager, next) {
   if (!req.query) req.query = {}
   freezrAttributes.permission_name = req.params.permission_name /* for files get */ || req.query.permission_name /* for CEPS get */
 
-  const requestFile = helpers.startsWith(req.path, '/feps/getuserfiletoken')
+const requestFile = helpers.startsWith(req.path, '/feps/getuserfiletoken') ||  helpers.startsWith(req.path, '/feps/upload/')// /feps/getuserfiletoken
   if (requestFile) {
-    req.params.app_table = req.params.requestee_app_name + '.files'
-    freezrAttributes.owner_user_id = req.params.requestee_user_id
-    // console.log('todo should requestee user id be used here - should be redundant as of 2021')
+    req.params.app_table = req.params.app_name + '.files'
+    freezrAttributes.owner_user_id = req.params.user_id
   }
 
   if (!freezrAttributes.owner_user_id) freezrAttributes.owner_user_id = freezrAttributes.requestor_user_id
@@ -49,6 +48,9 @@ exports.readWriteUserData = function (req, res, dsManager, next) {
       if (err) {
         helpers.error('Could not access main user AOC db - read_by_id_perms')
         res.sendStatus(401)
+      } else if (!freezrRequesteeDB || !freezrRequesteeDB.read_by_id) {
+        helpers.error('Could not access requested db - err for ' + req.params.app_tablep)
+        res.sendStatus(401)
       } else {
         req.freezrRequesteeDB = freezrRequesteeDB
         req.freezrAttributes = freezrAttributes
@@ -57,7 +59,7 @@ exports.readWriteUserData = function (req, res, dsManager, next) {
     })
   }
 
-  fdlog('req.params.app_table ' + req.params.app_table + ' freezrAttributes.requestor_app :', freezrAttributes.requestor_app)
+  fdlog('pre attributes ', freezrAttributes, 'req.params.app_table ' + req.params.app_table)
   if (!req.params.app_table || !freezrAttributes.requestor_app || !freezrAttributes.requestor_user_id) {
     helpers.error('Missing parameters for permissions - read_by_id_perms')
     felog('perm_handler.js', 'Missing parameters', { freezrAttributes })
@@ -78,7 +80,6 @@ exports.readWriteUserData = function (req, res, dsManager, next) {
     ((helpers.startsWith(req.path, '/feps/query') && req.body.q && req.body.q.app_id && req.body.q.app_id && req.body.q.app_id === req.freezrTokenInfo.app_name) ||
      (helpers.startsWith(req.path, '/ceps/query') && req.query && req.query.app_id && req.query.app_id === req.freezrTokenInfo.app_name))) {
     // Each app can query its own messages. (For other app messages, a permission is required)
-    console.log('PERMS -  gor a feps cep query')
     freezrAttributes.own_record = true
     freezrAttributes.record_is_permitted = true
     getDbTobeRead()
@@ -343,6 +344,9 @@ exports.addUserPermsAndRequesteeDB = function (req, res, dsManager, next) {
     if (err) {
       felog('addUserPermsAndRequesteeDB', 'Could not access main freezrRequesteeDB  - addUserPermsAndRequesteeDB', err)
       res.sendStatus(401)
+    } else if (!freezrRequesteeDB || !freezrRequesteeDB.read_by_id) {
+      console.error('Could not access requested db in addUserPermsAndRequesteeDB- err for ' + requesteeAppTable + ' and owner ' + owner)
+      res.sendStatus(401)
     } else {
       req.freezrRequesteeDB = freezrRequesteeDB
 
@@ -470,11 +474,18 @@ exports.addPublicRecordsDB = function (req, res, dsManager, next) {
     if (err) {
       helpers.state_error('Could not access main freezrPublicRecordsDB db - addPublicRecordsDB')
       res.sendStatus(401)
+    } else if (!freezrPublicRecordsDB || !freezrPublicRecordsDB.query) {
+      helpers.state_error('Could not initiate main freezrPublicRecordsDB db - addPublicRecordsDB')
+      console.warn('could not initiate ', { freezrPublicRecordsDB })
+      res.sendStatus(401)
     } else {
       req.freezrPublicRecordsDB = freezrPublicRecordsDB
       dsManager.getorInitDb({ app_table: 'info.freezr.admin.public_manifests', owner: 'fradmin' }, {}, function (err, freezrPublicManifestsDB) {
         if (err) {
           helpers.state_error('Could not access main freezrPublicPermDB db - addPublicRecordsDB')
+          res.sendStatus(401)
+        } else if (!freezrPublicManifestsDB || !freezrPublicManifestsDB.read_by_id) {
+          console.warn('error intiating freezrPublicManifestsDB')
           res.sendStatus(401)
         } else {
           // got and added freezrPublicPermDB
@@ -482,6 +493,7 @@ exports.addPublicRecordsDB = function (req, res, dsManager, next) {
           // this will also be used to okay accessing public files
           req.freezrPublicManifestsDb = freezrPublicManifestsDB
           if (req.path.indexOf('permissions/change') > 0) {
+            // todo security above should be starts with /v1/permissions/change
             dsManager.getOrInitUserAppFS(req.session.logged_in_user_id, req.freezrRequestorManifest.identifier, {}, (err, appFs) => {
               if (err || !appFs) {
                 felog('addPublicRecordsDB', 'handle error getting appFs for user ', req.session.logged_in_user_id, ' and app: ', req.freezrRequestorManifest.identifier, { err })
@@ -489,9 +501,10 @@ exports.addPublicRecordsDB = function (req, res, dsManager, next) {
               } else {
                 var permlist = []
                 var cards = {}
+                var ppages = {}
                 for (const [permName, permObj] of Object.entries(req.freezrRequestorManifest.permissions)) {
-                  // fdlog(`${permName}: ${permObj}`)
-                  if (permObj.pcard) {
+                  fdlog('building card for ', { permName, permObj })
+                  if (permObj.pcard || (permObj.ppage && req.freezrRequestorManifest.public_pages[permObj.ppage])) {
                     if (!permObj.name) {
                       felog('this should not happen', { permName, permObj })
                       permObj.name = permName
@@ -502,14 +515,18 @@ exports.addPublicRecordsDB = function (req, res, dsManager, next) {
                 // fdlog(permlist)
 
                 async.forEach(permlist, function (aPerm, cb2) {
-                  appFs.readAppFile('public/' + aPerm.pcard, null, (err, theCard) => {
-                    if (err) {
-                      felog('addPublicRecordsDB', 'handle error reading card for ', { aPerm, err })
-                    } else {
-                      cards[aPerm.name] = theCard
-                    }
+                  if (aPerm.pcard) {
+                    appFs.readAppFile('public/' + aPerm.pcard, null, (err, theCard) => {
+                      if (err) {
+                        felog('addPublicRecordsDB', 'handle error reading card for ', { aPerm, err })
+                      } else {
+                        cards[aPerm.name] = theCard
+                      }
+                      cb2(null)
+                    })
+                  } else {
                     cb2(null)
-                  })
+                  }
                 },
                 function (err) {
                   if (err) {
@@ -517,7 +534,28 @@ exports.addPublicRecordsDB = function (req, res, dsManager, next) {
                   }
                   // fdlog('cards got, ', { cards })
                   req.freezrPublicCards = cards
-                  next()
+                  async.forEach(permlist, function (aPerm, cb2) {
+                    if (aPerm.ppage && req.freezrRequestorManifest.public_pages[aPerm.ppage] && req.freezrRequestorManifest.public_pages[aPerm.ppage].html_file) {
+                      appFs.readAppFile('public/' + req.freezrRequestorManifest.public_pages[aPerm.ppage].html_file, null, (err, thePage) => {
+                        if (err) {
+                          felog('addPublicRecordsDB', 'handle error reading card for ', { aPerm, err })
+                        } else {
+                          ppages[aPerm.name] = thePage
+                        }
+                        cb2(null)
+                      })
+                    } else {
+                      cb2(null)
+                    }
+                  },
+                  function (err) {
+                    if (err) {
+                      felog('addPublicRecordsDB', 'need to handle err in creating freezrPublicManifestsDb: ' + err)
+                    }
+                    fdlog('ppages got, ', { ppages })
+                    req.freezrPublicPages = ppages
+                    next()
+                  })
                 })
               }
             })
@@ -526,6 +564,105 @@ exports.addPublicRecordsDB = function (req, res, dsManager, next) {
           }
         }
       })
+    }
+  })
+}
+exports.addPublicRecordAndIfFileFileFS = function (req, res, dsManager, next) {
+  //   app.get('/ppage/:user_id/:app_table/:data_object_id', publicUserPage, addPublicRecordAndIfFileFileFS, publicHandler.generateSingleObjectPage)
+  //  app.get('/ppage/:object_public_id', publicUserPage, addPublicRecordAndIfFileFileFS, publicHandler.generateSingleObjectPage)
+  // app.get('*')
+
+  fdlog('addPublicRecordAndIfFileFileFS for adding freezrPublicPermDB ', req.originalUrl)
+  if (!helpers.startsWith(req.path, '/ppage/')) { // ie path ~ '/*'
+    req.params.object_public_id = req.path.slice(1)
+  } else if (!req.params.object_public_id) { // ie path = /ppage/:user_id/:app_table/:data_object_id
+    if (req.params.user_id && req.params.app_table && req.params.data_object_id) {
+      req.params.object_public_id = req.params.user_id + '/' + req.params.app_table + '/' + req.params.data_object_id
+    }
+  }
+
+  async.waterfall([
+    // 1. get public records
+    function (cb) {
+      if (!req.params.object_public_id) {
+        cb(new Error('invalid url'))
+      } else {
+        cb(null)
+      }
+    },
+    function (cb) {
+      dsManager.getorInitDb({ app_table: 'info.freezr.admin.public_records', owner: 'fradmin' }, {}, cb)
+    },
+    function (freezrPublicRecordsDB, cb) {
+      req.freezrPublicRecordsDB = freezrPublicRecordsDB
+      cb(null)
+    },
+    // 2. get manifests (neededed?)
+    function (cb) {
+      dsManager.getorInitDb({ app_table: 'info.freezr.admin.public_manifests', owner: 'fradmin' }, {}, cb)
+    },
+    function (freezrPublicManifestsDB, cb) {
+      req.freezrPublicManifestsDb = freezrPublicManifestsDB
+      cb(null)
+    },
+    // 3. get record
+    function (cb) {
+      req.freezrPublicRecordsDB.query({ _id: req.params.object_public_id }, {}, cb)
+    },
+    function (items, cb) {
+      if (!items || items.length === 0) {
+        if (helpers.endsWith(req.params.object_public_id, '.html')) {
+          req.params.object_public_id = req.params.object_public_id.slice(0, -5)
+          req.freezrPublicRecordsDB.query({ _id: req.params.object_public_id }, {}, function (err, items) {
+            if (err) {
+              cb(err)
+            } else if (!items || items.length === 0) {
+              cb(new Error('Public id not found'))
+            } else {
+              req.freezrPublicObject = items[0]
+              cb(null)
+            }
+          })
+        } else {
+          cb(new Error('Public id not found'))
+        }
+      } else {
+        req.freezrPublicObject = items[0]
+        cb(null)
+      }
+    },
+
+    // 4. if a file, get the file db
+    function (cb) {
+      if (helpers.endsWith(req.freezrPublicObject.original_app_table, '.files') && !req.freezrPublicObject.isHtmlMainPage) {
+        // if isHtmlMainPage then the file content is in the record
+        dsManager.getOrSetUserDS(req.freezrPublicObject.data_owner, function (err, userDS) {
+          if (err) {
+            cb(err)
+          } else {
+            let appName = req.freezrPublicObject.original_app_table.split('.')
+            appName.pop() // '.files'
+            appName = appName.join('.')
+            userDS.getorInitAppFS(appName, {}, function (err, appFS) {
+              if (err) {
+                cb(err)
+              } else {
+                req.freezrUserFS = appFS
+                cb(null)
+              }
+            })
+          }
+        })
+      } else {
+        cb(null)
+      }
+    }
+  ], function (err) {
+    if (err) {
+      console.warn('COuld not get public page ' + req.params.object_public_id, err)
+      res.redirect('/public') // redirecting here to avoidinfinite loop in case redirected public page is missing
+    } else {
+      next()
     }
   })
 }
@@ -543,8 +680,22 @@ exports.addoAuthers = function (req, res, dsManager, next) {
     }
   })
 }
+exports.addPublicFs = function (req, res, dsManager, next) {
+  // this is not used 2021-10
+  dsManager.getOrInitUserAppFS('public', 'info.freezr.public', {}, (err, appFs) => {
+    if (err || !appFs) {
+      felog('addPublicFs', 'handle error getting public appFs', { err })
+      res.sendStatus(401)
+    } else {
+      req.freezrPublicAppFS = appFs
+      next()
+    }
+  })
+}
+
+
 exports.addPublicUserFs = function (req, res, dsManager, next) {
-  fdlog('addPublicUserFs - todo - review this - not checked')
+  fdlog('addPublicUserFs ', req.params)
   req.freezrPublicManifestsDb.query({ user_id: req.params.user_id, app_name: req.params.app_name }, null, (err, results) => {
     if (err || !results || results.length === 0) { // fdlog todo - also add results[0].granted??
       res.sendStatus(401)
@@ -568,19 +719,51 @@ exports.addPublicUserFs = function (req, res, dsManager, next) {
     }
   })
 }
-exports.addUserFilesDb = function (req, res, dsManager, next) {
-  fdlog('addUserFilesDb', 'todo - review this - not checked')
-
-  const oat = {
-    owner: req.params.user_id,
-    app_name: req.params.requestee_app,
-    collection_name: 'files'
-  }
-  dsManager.getorInitDb(oat, null, function (err, userFilesDb) {
+exports.addUserFs = function (req, res, dsManager, next) {
+  fdlog('addUserFs ', req.params)
+  dsManager.getOrSetUserDS(req.params.user_id, function (err, userDS) {
     if (err) {
       res.sendStatus(401)
     } else {
+      userDS.getorInitAppFS(req.params.app_name, {}, function (err, appFS) {
+        if (err) {
+          felog('addUserFs', 'err get-setting app-fs', err)
+          res.sendStatus(401)
+        } else {
+          req.freezrAppFS = appFS
+          next()
+        }
+      })
+    }
+  })
+}
+exports.addUserFsFromTokenInfo = function (req, res, dsManager, next) {
+  // /feps/perms/share_records
+  dsManager.getOrInitUserAppFS(req.session.logged_in_user_id, req.freezrTokenInfo.app_name, {}, (err, appFs) => {
+    if (err || !appFs) {
+      felog('addPublicFsAnduserFs', 'handle error getting appFs for user ', req.session.logged_in_user_id, ' and app: ', req.freezrTokenInfo.app_name, { err })
+      res.sendStatus(401)
+    } else {
+      req.freezrUserAppFS = appFs
+      next()
+    }
+  })
+}
+exports.addUserFilesDb = function (req, res, dsManager, next) {
+  fdlog('addUserFilesDb', 'todo - review this - not checked')
+  const oat = {
+    owner: req.params.user_id,
+    app_table: req.params.app_name + '.files'
+  }
+  dsManager.getorInitDb(oat, {}, function (err, userFilesDb) {
+    if (err) {
+      res.sendStatus(401)
+    } else if (!userFilesDb || !userFilesDb.read_by_id) {
+      console.warn('error reading userFilesDb fir ', { oat })
+      res.sendStatus(401)
+    } else {
       req.freezruserFilesDb = userFilesDb
+      next()
     }
   })
 }
@@ -592,10 +775,18 @@ exports.selfRegAdds = function (req, res, dsManager, next) {
   } else if (dsManager.freezrIsSetup) {
     req.freezrAllUsersDb = dsManager.getDB(USER_DB_OAC)
     req.freezrIsSetup = dsManager.freezrIsSetup
-    if (req.session.logged_in_user_id) { // resetting params
-      req.freezrUserDS = dsManager.users[req.session.logged_in_user_id]
+    if (req.session.logged_in_user_id) { // resetting newParams for logged in user
+      dsManager.getOrSetUserDS(req.session.logged_in_user_id, function (err, userDS) {
+        if (!err || err.message !== 'user incomplete') {
+          res.sendStatus(401)
+        } else {
+          req.freezrUserDS = userDS
+          next()
+        }
+      })
+    } else {
+      next()
     }
-    next()
   } else { // first setup
     req.freezrDsManager = dsManager
     next()

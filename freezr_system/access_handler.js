@@ -163,8 +163,6 @@ exports.publicUserPage = function (req, res, dsManager, next) {
       sendFailureOrRedirect(res, req, '/')
     }
   } else if (req.params.user_id) {
-    console.log('todo - need to block responses if owner_id has not posted anything to public and is not a ligin page')
-
     dsManager.getOrSetUserDS(req.params.user_id, function (err, userDS) {
       if (err) felog('publicUserPage', err)
       if (err) {
@@ -181,8 +179,7 @@ exports.publicUserPage = function (req, res, dsManager, next) {
         })
       }
     })
-  } else { // if (!req.params.user_id)
-    console.log('(!req.params.user_id No AppFS is required as this is a db query??? ')
+  } else { // if (!req.params.user_id) -> ie this is a dbquery? or a publicid ppage
     // No AppFS is required as this is a a db query????
     next()
   }
@@ -199,7 +196,7 @@ exports.accountLoggedInAPI = function (req, res, dsManager, next) {
     felog('accountLoggedInAPI', 'unauthorised access to admin API')
     res.sendStatus(401)
   } else if (owner && dsManager.freezrIsSetup && req.session && req.header('Authorization')) {
-    felog('accountLoggedInAPI', owner, dsManager.freezrIsSetup)
+    fdlog('accountLoggedInAPI', owner, dsManager.freezrIsSetup)
     // visitLogger.record(req, freezr_environment, freezr_prefs, {source:'userDataAccessRights'});
     getAppTokenParams(dsManager.getDB(APP_TOKEN_OAC), req, function (err, tokenInfo) {
       // {userId, appName, loggedIn}
@@ -425,6 +422,7 @@ exports.userAPIRights = function (req, res, dsManager, next) {
         felog(' userAPIRights', 'err in getAppTokenParams', err)
         res.sendStatus(401)
       } else {
+        fdlog('got token info ', tokenInfo)
         req.freezrTokenInfo = tokenInfo
         next()
       }

@@ -72,8 +72,13 @@ MONGO_FOR_FREEZR.prototype.create = function (id, entity, options, cb) {
 }
 MONGO_FOR_FREEZR.prototype.query = function (query, options = {}, cb) {
   fdlog('mongo query ', query)
-  if (!query) query = {}
-  if (query._id && typeof (query._id) === 'string') query._id = getRealObjectId(query._id)
+  if (!query) {
+    query = {}
+  } else if (typeof query === 'string') {
+    query = { _id: getRealObjectId(query) }
+  } else if (query._id && typeof (query._id) === 'string') {
+    query._id = getRealObjectId(query._id)
+  }
   this.db.find(query)
     .sort(options.sort || null)
     .limit(options.count || ARBITRARY_FIND_COUNT_DEFAULT)
@@ -107,7 +112,6 @@ MONGO_FOR_FREEZR.prototype.replace_record_by_id = function (id, updatedEntity, c
 }
 
 MONGO_FOR_FREEZR.prototype.delete_record = function (idOrQuery, options = {}, cb) {
-  console.log('mognodb delete_record remove ', { idOrQuery })
   if (typeof idOrQuery === 'string') {
     idOrQuery = { _id: getRealObjectId(idOrQuery) }
   } else if (idOrQuery._id && typeof idOrQuery._id === 'string') {
@@ -193,7 +197,7 @@ const dbConnectionString = function (envParams) {
   const DEFAULT_UNIFIED_DB_NAME = 'freezrdb'
   const unfiedDbName = envParams.dbParams.unifiedDbName || DEFAULT_UNIFIED_DB_NAME
 
-  felog('NEED TO Check maxIdleTimeMS')
+  // console.log('NEED TO Check maxIdleTimeMS')
   if (envParams.dbParams.connectionString) {
     return envParams.dbParams.connectionString + '&authSource=admin&useUnifiedTopology=true&maxIdleTimeMS=30000'
   } else if (envParams.dbParams.mongoString) {
@@ -213,7 +217,7 @@ const getRealObjectId = function (objectId) {
     try {
       realId = new ObjectID(objectId)
     } catch (e) {
-      felog('getRealObjectId', 'Could not get mongo real_id - using text id for ' + objectId)
+      fdlog('getRealObjectId', 'Could not get mongo real_id - using text id for ' + objectId)
     }
   }
   return realId

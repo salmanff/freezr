@@ -33,7 +33,7 @@ const ALL_APPS_RSS_CONFIG = { // html and configuration for generic public pages
 }
 
 const genericHTMLforRecord = function (record) {
-  const RECORDS_NOT_SHOW = ['_accessible_By', '_date_created', '_date_modified', '_date_accessibility_mod', '_date_published', '_app_name', '_data_owner', '_permission_name', '_collection_name', '_id']
+  const RECORDS_NOT_SHOW = ['_accessible_By', '_date_created', '_date_modified', '_date_accessibility_mod', '_date_published', '_app_name', '_data_owner', '_permission_name', '_collection_name'] // , '_id'
   var text = "<div class='freezr_public_genericCardOuter freezr_public_genericCardOuter_overflower'>"
   text += '<div class="freezr_public_app_title">' + record._app_name + '</div>'
   text += '<br><div class="freezr_public_app_title">The developer has not defined a format for this record.</div><br>'
@@ -55,51 +55,6 @@ const genericHTMLforRecord = function (record) {
   return text
 }
 
-
-exports.generateMainPublicPage = function (req, res) {
-  /*
-  NOT USED - temporary -> todo clean up generatePublicPage to be separate functions like this
-  app.get('/ppage', publicUserPage, addPublicRecordsDB, publicHandler.generatePublicPage)
-  */
-  req.query.allApps = true
-
-  const manifest = ALL_APPS_HMTL_CONFIG
-  const pageParams = manifest.public_pages.allPublicRecords
-
-  const options = {
-    page_url: pageParams.html_file,
-    xml_url: pageParams.xml_file,
-    page_title: 'Public info - freezr.info',
-    css_files: [], // pageParams.css_files,
-    q: pageParams.initial_query ? pageParams.initial_query : {},
-    script_files: [], //, //[],
-    app_name: null,
-    app_display_name: 'All Freezr Apps',
-    app_version: 'N/A',
-    freezr_server_version: req.freezr_server_version,
-    other_variables: null,
-    server_name: req.protocol + '://' + req.get('host'),
-    user_id: req.session.user_id,
-
-    // extra items
-    page_name: 'ALl public posts',
-    isPublic: true,
-    allApps: true,
-    isRss: false,
-    useGenericFreezrPage: true
-  }
-
-  // q can come from req.query and initial query ??? - todo to review - 2021 still relevant
-  Object.keys(req.query).forEach(function (key) {
-    options.q[key] = req.query[key]
-  })
-
-  parseAttachedFiles(
-    options,
-    pageParams,
-    function (finalOptions) { gotoShowInitialData(res, req, finalOptions) }
-  )
-}
 exports.generatePublicPage = function (req, res) {
   /*
   app.get('/papp/:user_id/:app_name/:page', publicUserPage, addPublicRecordsDB, addPublicUserFs, publicHandler.generatePublicPage)
@@ -110,6 +65,7 @@ exports.generatePublicPage = function (req, res) {
   app.get('/v1/pobject/:user_id/:requestee_app_table/:data_object_id', addPublicRecordsDB, publicHandler.generatePublicPage)
 
   */
+  fdlog('generatePublicPage')
 
   const isCard = helpers.startsWith(req.path, '/pcard')
   const isRss = helpers.startsWith(req.path, '/rss.xml')
@@ -120,18 +76,23 @@ exports.generatePublicPage = function (req, res) {
   let useGenericFreezrPage = allApps
   const userId = req.params.user_id
 
+  if (req.query && req.query.user && !req.params.user_id) req.params.user_id = req.query.user
+  if (req.query && req.query.u && !req.params.user_id) req.params.user_id = req.query.u
+
   fdlog('generating public page ', req.url, ' with query ', req.query, 'path ', req.path, { allApps, userId, appName })
 
   let pageName = (req.params && req.params.page) ? req.params.page : null
   let pageParams = {}
 
+  if (!isCard && !objectOnly) req.query.doNotGetDoNotLists = true
+
   req.freezrPublicManifestsDb.query({ user_id: userId, app_name: appName }, null, (err, results) => {
     // note: this is not needed when have allApps so skip errors
-    if (!allApps && (err || !results)) {
-      felog('todo - redirect to error page - freezrPublicPermDB ', err)
+    if (err || !results) {
+      felog('todo - redirect to error page - freezrPublicPermDB ', { userId, appName }, err)
       res.sendStatus(401)
     } else {
-      let manifest = results[0] ? results[0].manifest : null
+      let manifest = (results && results[0]) ? results[0].manifest : null
       if (!pageName && manifest && manifest.public_pages) pageName = firstElementKey(manifest.public_pages)
       if (pageName && helpers.endsWith(pageName, '.html')) pageName = pageName.slice(0, -5)
       if (allApps) manifest = ALL_APPS_HMTL_CONFIG
@@ -168,7 +129,7 @@ exports.generatePublicPage = function (req, res) {
             css_files: [], // pageParams.css_files,
             q: pageParams.initial_query ? pageParams.initial_query : {},
             script_files: [], //, //[],
-            app_name:  appName,
+            app_name: appName,
             app_display_name: (allApps ? 'All Freezr Apps' : ((manifest && manifest.display_name) ? manifest.display_name : appName)),
             app_version: (manifest && manifest.version && !allApps) ? manifest.version : 'N/A',
             freezr_server_version: req.freezr_server_version,
@@ -268,7 +229,7 @@ exports.generatePublicPage = function (req, res) {
 }
 const gotoShowInitialData = function (res, req, options) {
   // used when generating a page of accessible items
-  fdlog("gotoShowInitialData ", { options })
+  fdlog('gotoShowInitialData ', { options })
 
   if (!options) options = {}
   if (!options.q) options.q = {}
@@ -455,7 +416,6 @@ const gotoShowInitialData = function (res, req, options) {
       if (err) {
         helpers.send_failure(res, err, 'public_handler', exports.version, 'gotoShowInitialData')
       } else {
-        console.log('todo -- 2020-07 not clear if req.params.user_id is available here ')
         req.freezrPublicManifestsDb.query({ user_id: req.params.user_id, app_name: req.params.app_name }, null, (err, manifs) => {
           // note: this is not needed when have allApps so skip errors
           if (err || !manifs || manifs.length === 0) {
@@ -503,40 +463,42 @@ const gotoShowInitialData = function (res, req, options) {
 exports.generatePublicObjectPage = function (req, res) {
   // app.get('/ppage/:object_public_id', addVersionNumber, public_handler.generatePublicPage);
   fdlog('generatePublicObjectPage')
-
   req.freezrInternalCallFwd = function (err, results) {
-    // onsole.log(results)
     if (err || !results.results || results.results.length === 0 || !results.results[0]) {
       res.redirect('/ppage?redirect=true&error=nosuchpublicobject&pid=' + req.params.object_public_id)
     } else {
       let theObj = results.results[0]
-      fdlog('WARNING 2020-07 todo 1 - need to specifiy user_id of manifest ??? ', theObj)
-      req.freezrPublicManifestsDb.query({ user_id: theObj._data_owner, app_name: theObj._app_name }, null, (err, results) => {
-        if (err || !results) {
+      req.freezrPublicManifestsDb.query({ user_id: theObj._data_owner, app_name: theObj._app_name }, null, (err, manifests) => {
+        if (err || !manifests) {
+          felog('NO  manifests found ', { err })
           helpers.send_failure(res, err, 'public_handler', exports.version, 'generatePublicObjectPage')
-        } else if (results.length === 0) {
+        } else if (manifests.length === 0) {
           helpers.send_failure(res, helpers.error('missing manifest'), 'public_handler', exports.version, 'generatePublicObjectPage')
         } else {
-          const manifest = results[0].manifest
+          const manifest = manifests[0].manifest
           theObj = formatFields(theObj, manifest)
-          const htmlCard = results[0].cards[theObj._permission_name]
-          let pageName = null
-          manifest.permissions.forEach(item => { if (item.name === theObj._permission_name) pageName = item.ppage })
+          let htmlCard = manifests[0].ppages ? manifests[0].ppages[theObj._permission_name] : null
+          if (!htmlCard && manifests[0].cards) htmlCard = manifests[0].cards[theObj._permission_name]
           if (!htmlCard) {
             const htmlContent = genericHTMLforRecord(theObj)
             res.writeHead(200, { 'Content-Type': 'text/html' })
             res.end(htmlContent)
-          } else if (!pageName) {
-            helpers.send_failure(res, helpers.error('missing ppage name'), 'public_handler', exports.version, 'generatePublicObjectPage')
+            // } else if (!pageName) {
+            //  helpers.send_failure(res, helpers.error('missing ppage name'), 'public_handler', exports.version, 'generatePublicObjectPage')
           } else {
+            let pageName = null
+            manifest.permissions.forEach(item => { if (item.name === theObj._permission_name) pageName = item.ppage })
+
             var htmlFile = (manifest && manifest.public_pages && pageName && manifest.public_pages[pageName] && manifest.public_pages[pageName].html_file) ? manifest.public_pages[pageName].html_file : null
+
             var pageParams = manifest.public_pages[pageName] || {}
+
             var Mustache = require('mustache')
             var options = {
               page_url: htmlFile,
               page_title: (pageParams.page_title ? pageParams.page_title : 'Public info') + ' - freezr.info',
               css_files: [], // pageParams.css_files,
-              initial_query: pageParams.initial_query ? pageParams.initial_query : {},
+              // initial_query: pageParams.initial_query ? pageParams.initial_query : {},
               script_files: [], //, //[],
               app_name: theObj._app_name,
               app_display_name: ((manifest && manifest.display_name) ? manifest.display_name : theObj.app_name),
@@ -544,6 +506,7 @@ exports.generatePublicObjectPage = function (req, res) {
               freezr_server_version: req.freezr_server_version,
               other_variables: null,
               server_name: req.protocol + '://' + req.get('host'),
+              user_queried: theObj._data_owner,
 
               // extra items
               page_name: pageName,
@@ -557,7 +520,7 @@ exports.generatePublicObjectPage = function (req, res) {
               options.page_html = 'Error in processing mustached app html - ' + JSON.stringify(e) + '</br>' + htmlCard
             }
 
-            if (manifest && manifest.public_pages && manifest.public_pages[options.page_name] && manifest.public_pages[options.page_name].header_map) {
+            if (manifest && manifest.public_pages && manifest.public_pages[pageName] && manifest.public_pages[pageName].header_map) {
               options.meta_tags = createHeaderTags(manifest.public_pages[options.page_name].header_map, [theObj])
             } else {
               options.meta_tags = createHeaderTags(null, [theObj])
@@ -566,7 +529,9 @@ exports.generatePublicObjectPage = function (req, res) {
             parseAttachedFiles(
               options,
               pageParams,
-              function (finalOptions) { fileHandler.load_page_html(req, res, finalOptions) }
+              function (finalOptions) {
+                fileHandler.load_page_html(req, res, finalOptions)
+              }
             )
           }
         }
@@ -580,6 +545,38 @@ exports.generatePublicObjectPage = function (req, res) {
   }
   exports.dbp_query(req, res)
 }
+exports.generateSingleObjectPage = function (req, res) {
+  // app.get('/ppage/:object_public_id', addVersionNumber, public_handler.generatePublicPage);
+  // app.get('/*', addVersionNumber, public_handler.generatePublicPage);
+
+  fdlog('generateSingleObjectPage ', req.path)
+
+  const aPublicRecord = req.freezrPublicObject
+
+  if (aPublicRecord.isHtmlMainPage) {
+    const struct = aPublicRecord.fileStructure || {}
+    var scriptFiles = []
+    if (struct.js && struct.js.length > 0) struct.js.forEach(item => scriptFiles.push('/' + item.publicid))
+    var cssFiles = []
+    if (struct.css && struct.css.length > 0) struct.css.forEach(item => cssFiles.push('/' + item.publicid))
+    const options = {
+      page_title: struct.page_title || 'a freezr public page from ' + aPublicRecord.requestor_app,
+      full_css_files: cssFiles,
+      full_script_files: scriptFiles,
+      page_html: aPublicRecord.html_page,
+      page_url: req.path,
+      app_name: aPublicRecord.requestor_app,
+      isPublic: true
+    }
+    fileHandler.load_page_html(req, res, options)
+  } else if (helpers.endsWith(aPublicRecord.original_app_table, '.files')) {
+    const filePath = aPublicRecord.original_record_id
+    req.freezrUserFS.sendUserFile(filePath, res)
+  } else {
+    exports.generatePublicObjectPage(req, res)
+  }
+}
+
 function parseAttachedFiles (options, pageParams, callback) {
   if (pageParams.css_files) {
     if (typeof pageParams.css_files === 'string') pageParams.css_files = [pageParams.css_files]
@@ -662,7 +659,7 @@ exports.dbp_query = function (req, res) {
       -
       - q (for post only)
   */
-  fdlog('dbp_query body ', req.body, ' params ',req.params, ' query ', req.query);
+  fdlog('dbp_query body ', req.body, ' params ', req.params, ' query ', req.query)
 
   if (helpers.isEmpty(req.query)) req.query = req.body // make post and get equivalent
   if (!req.query) req.query = {}
@@ -681,7 +678,7 @@ exports.dbp_query = function (req, res) {
   // note conflict if have app_name and requestee_app and req.param
   if (req.query.app_name) permissionAttributes.requestor_app = req.query.app_name.toLowerCase()
   if (req.query.app) permissionAttributes.requestor_app = req.query.app.toLowerCase()
-  if (req.params && req.params.app_name && !req.query.allApps) permissionAttributes.requestor_app = req.params.app_name.toLowerCase()
+  if (req.params && req.params.app_name && !req.query.allApps && req.params.app_name !== 'info.freezr.public') permissionAttributes.requestor_app = req.params.app_name.toLowerCase()
   // if (req.params && req.params.requestee_app_table) permissionAttributes.requestee_app_table = req.params.requestee_app_table.toLowerCase()
   if (req.params && req.params.user_id) permissionAttributes.data_owner = req.params.user_id.toLowerCase()
   if (req.query.user_id && !permissionAttributes.data_owner) permissionAttributes.data_owner = req.query.user_id.toLowerCase()
@@ -693,6 +690,8 @@ exports.dbp_query = function (req, res) {
 
   if (req.query.maxdate) permissionAttributes._date_published = { $lt: parseInt(req.query.maxdate) }
   if (req.query.mindate) permissionAttributes._date_published = { $gt: parseInt(req.query.mindate) }
+
+  if (req.query.doNotGetDoNotLists) permissionAttributes.$or = [{ doNotList: false }, { doNotList: { $exists: false } }]
 
   if (req.query.search || req.query.q) {
     // onsole.log("req.query.search:",req.query.search," req.query.q:"req.query.q)
@@ -762,7 +761,7 @@ exports.dbp_query = function (req, res) {
           afinalRecord._permission_name = retrievedRecord.permission_name
           afinalRecord._app_table = retrievedRecord.original_app_table
           afinalRecord._date_modified = retrievedRecord._date_modified
-          afinalRecord._date_published = retrievedRecord._date_published || retrievedRecord.datePublished
+          afinalRecord._date_published = retrievedRecord._date_published || retrievedRecord._date_created
           afinalRecord.__date_published = afinalRecord._date_published ? (new Date(afinalRecord._date_published).toLocaleDateString()) : 'n/a'
           afinalRecord._date_created = retrievedRecord._date_created
           afinalRecord._id = retrievedRecord._id
@@ -807,21 +806,23 @@ exports.dbp_query = function (req, res) {
 exports.get_public_file = function (req, res) {
   // app.get('/v1/publicfiles/:requestee_app/:user_id/*', addPublicRecordsDB, addPublicUserFs, publicHandler.get_public_file);
   // Initialize variables
-  let resultingRecord
+  fdlog('get_public_file')
+
   let parts = req.originalUrl.split('/')
-  parts = parts.slice(4)
+  parts = parts.slice(3) // remove '/v1/publicfiles',
+  parts.splice(1, 1) // remvoe app name
   // let requestedFolder = parts.length === 2 ? '/' : (parts.slice(1, parts.length - 1)).join('/')
   const dataObjectId = decodeURI(parts.join('/')).split('?')[0].split('#')[0]
 
-  req.freezruserFilesDb.read_by_id(dataObjectId, (err, results) => {
-    if (err || !results) {
-      console.warn('no related records getting piublci file', dataObjectId)
+  req.freezruserFilesDb.read_by_id(dataObjectId, (err, resultingRecord) => {
+    if (err || !resultingRecord) {
+      felog('no related records getting piublci file', dataObjectId, err)
       res.sendStatus(401)
-    } else if (resultingRecord._accessible_By && resultingRecord._accessible_By.groups && resultingRecord._accessible_By.groups.indexOf('public') > -1) {
+    } else if (resultingRecord._accessible && resultingRecord._accessible._public && resultingRecord._accessible._public.granted) {
       const endPath = unescape(parts.slice(1).join('/').split('?')[0])
       req.freezrAppFS.sendUserFile(endPath, res)
     } else {
-      console.warn('not permitted to get public file', dataObjectId)
+      console.warn('not permitted to get public file' + dataObjectId + ' ' + JSON.stringify(resultingRecord._accessible))
       res.sendStatus(401)
     }
   })
@@ -877,146 +878,9 @@ var createHeaderTags = function (headerMap, results) {
   return headertext
 }
 
-// Old - unused
+// Old or unused
 // ------------------ ------------------ ------------------ ------------------ ------------------
-exports.get_data_object = function (req, res) {
-  console.log('old version - not used')
-  //    app.get('/v1/publicfiles/:requestee_app/:user_id/*', addVersionNumber, public_handler.get_data_object); // collection_name is files
-  //  (not tested:) app.get('/v1/db/getbyid/:requestee_app/:collection_name/:data_object_id', app_handler.getDataObject); // here request type must be "one"
 
-  /*
-  // Initialize variables
-  var manifest, permission_model, collection_name, requestedFolder, parts, user_id, resultingRecord, possible_permissions=[], dataObjectId;
-  var recordIsPermitted = false;
-  var flags = new Flags({'app_name':req.params.requestee_app});
-
-  var request_file = helpers.startsWith(req.path,"/v1/publicfiles") ;
-  if (request_file) {
-    parts = req.originalUrl.split('/')
-    parts = parts.slice(4)
-    requestedFolder = parts.length === 2 ? '/' : (parts.slice(1, parts.length - 1)).join('/')
-    dataObjectId = decodeURI(parts.join('/'))
-    collection_name = 'files'
-    user_id = parts[0] + ''
-  } else {
-    dataObjectId = req.params.data_object_id;
-    collection_name = req.params.collection_name;
-    user_id = req.params.user_id;
-  }
-
-  const appcollowner = {
-    app_name:req.params.requestee_app,
-    collection_name:collection_name,
-    owner:user_id
-  }
-  const ACCESSIBLES_APPCOLLOWNER = {
-    app_name:'info.freezr.admin',
-    collection_name:"public_records",
-    owner:'fradmin'
-  }
-  console.warn("To review - should appcollowner be accessed or ACCESSIBLES_APPCOLLOWNER - depends on if it's a file search? if so, separate?")
-  function appErr(message) {return helpers.app_data_error(exports.version, "get_data_object", req.params.requestee_app, message);}
-  function authErr(message) {return helpers.auth_failure("public_handler", exports.version, "get_data_object", message);}
-
-    //onsole.log("public_handler getDataObject "+dataObjectId+" from coll "+collection_name);
-
-    async.waterfall([
-        // 0. get app config
-        function (cb) {
-            fileHandler.async_manifest(req.params.user_id, req.params.requestee_app, req.freezr_environment,cb);
-        },
-
-        // 1,2,3. make sure all data exits and get the record
-        function (got_manifest, cb) {
-            manifest = got_manifest;
-            if (!dataObjectId){
-                cb(appErr("missing dataObjectId"));
-            } else if (!manifest){
-                cb(appErr("missing manifest"));
-            } else if (!collection_name){
-                cb(appErr("missing collection_name"));
-            } else {
-              db_handler.query(req.freezr_environment, appcollowner, {'_id':dataObjectId}, {}, cb)
-            }
-        },
-
-        // 4. check if record fits permission criteria
-        function (results, cb) {
-            if (!results || results.length==0) {
-                cb(appErr("no related records"))
-            } else {
-                if (results.length>1) {
-                    console.warn('MoreThanOneRecordRetrieved - SNBH')
-                    flags.add('warnings','MoreThanOneRecordRetrieved - SNBH');
-                }
-                resultingRecord = results[0];
-
-                if (resultingRecord._accessible_By && resultingRecord._accessible_By.groups && resultingRecord._accessible_By.groups.indexOf("public")>-1) {
-                    cb(null)
-                } else cb(appErr("permission not granted"))
-            }
-        },
-
-        // The rest of this is double checking that permission is still granted. (normaly if not granted, the field is remvoed as well)
-        // 5. Deal with permissions and get app permissions and if granted, open field_permissions or object_permission collection
-        // 6. check the permission - for files, could be one of many
-        function (cb) {
-            possible_permissions = (resultingRecord && resultingRecord._accessible_By && resultingRecord._accessible_By.group_perms && resultingRecord._accessible_By.group_perms.public && resultingRecord._accessible_By.group_perms.public.length>0)? resultingRecord._accessible_By.group_perms.public:null;
-
-            if (req.params.permission_name && possible_permissions.indexOf(req.params.requestee_app+"/"+req.params.permission_name)<0) {
-                cb(appErr("specific permission not granted - ther permissions may be"))
-            } else {
-                async.forEach(possible_permissions, function (perm_string, cb2) {
-                    var permission_name = perm_string.split('/')[1]
-                    var a_perm_model = (manifest && manifest.permissions && manifest.permissions[permission_name])? manifest.permissions[permission_name]: null;
-                    var permission_type = (a_perm_model && a_perm_model.type)? a_perm_model.type: null;
-                    if (!a_perm_model || !permission_type || (helpers.permitted_types.type_names.indexOf(permission_type)<0 && permission_type!="db_query")) {
-                        cb2(null);
-                    } else {
-                        db_handler.permission_by_owner_and_permissionName (req.freezr_environment, user_id, req.params.requestor_app, req.params.requestee_app_table, permission_name, function(err, results){
-                            if (!results || results.length==0 || !results[0].granted) {
-                                //onsole.log("no results")
-                            }  else  { // it is granted and (permission_type=="object_delegate")
-                                if (results[0].app_tables.indexOf(collection_name)>-1) {
-                                    recordIsPermitted = true;
-                                    permission_model = a_perm_model;
-                                }
-                            }
-                            cb2(null)
-                        })
-                    }
-                },
-                function (err) {
-                    if (err) {helpers.state_error("public_handler", exports.version, "get_data_object", err, "async err" )}
-                    cb(null)
-                });
-            }
-        }
-    ],
-    function (err) {
-        if (err) {helpers.state_error("public_handler", exports.version, "get_data_object", err, "waterfall err" )}
-        if (!recordIsPermitted) {
-            if (request_file){
-                res.sendStatus(401);
-            } else {
-                helpers.send_failure(res, err, "app_handler", exports.version, "getDataObject");
-            }
-        } else if (request_file){
-            // helpers.FREEZR_USER_FILES_DIR + '/' + req.session.logged_in_user_id + '/
-            var filePath = helpers.FREEZR_USER_FILES_DIR + '/' + parts[0] + '/files/' + req.params.requestee_app+"/"+unescape(parts.slice(1).join("/"));
-            if (flags.warnings) console.warn("flags:"+JSON.stringify(flags))
-            fileHandler.sendUserFile(res, filePath, req.freezr_environment );
-        } else {
-            var send_record = {};
-            if (permission_model.return_fields && permission_model.return_fields.length>0) {
-                permission_model.return_fields.forEach((aField) => {send_record[aField] =  resultingRecord[aField]})
-            } else {send_record = resultingRecord;}
-            send_record.__date_published = new Date(send_record._date_published).toLocaleDateString()
-            helpers.send_success(res, {'results':send_record, 'flags':flags});
-        }
-    });
-    */
-}
 // Loggers
 const LOG_ERRORS = true
 const felog = function (...args) { if (LOG_ERRORS) helpers.warning('public_handler.js', exports.version, ...args) }

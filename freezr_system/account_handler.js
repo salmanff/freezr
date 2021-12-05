@@ -557,7 +557,7 @@ exports.install_app = function (req, res) {
   // installAppFromZipFile =>    app.put('/v1/account/app_install_from_zipfile.json', accountLoggedInUserPage, addUserAppsAndPermDBs, installAppFromZipFile)
   // onsole.log("install_app file.originalname ",req.file.originalname,"app_name ",req.app_name)
 
-  fdlog('install_app ' + req.file.originalname + (req.installsource || ''))
+  fdlog('install_app ' + req.file.name + (req.installsource || ''))
 
   // from access_handler and perm_handler
   const userDS = req.freezrUserDS
@@ -952,14 +952,22 @@ exports.appMgmtActions = function (req, res) /* deleteApp updateApp */ {
         appFS.readAppFile(helpers.APP_MANIFEST_FILE_NAME, {}, cb)
       },
       function (readmanifest, cb) {
-        manifest = json.parse(readmanifest)
-        if (!manifest) flags.add('notes', 'manifest_missing')
+        if (readmanifest) {
+          try {
+            manifest = json.parse(readmanifest)
+          } catch (e) {
+            felog('error parsing manifest ', e)
+            flags.add('notes', 'manifest_read_err')
+          }
+        } else {
+          flags.add('notes', 'manifest_missing')
+        }
         if (!manifest) manifest = {}
         if (!manifest.identifier) manifest.identifier = realAppName
         if (!manifest.display_name) manifest.display_name = realAppName
         if (!manifest.version) manifest.version = 0
 
-        flags = fileHandler.checkManifest(manifest, realAppName, manifest.meta.app_version, flags)
+        flags = fileHandler.checkManifest(manifest, realAppName, manifest.version, flags)
 
         updatePermissionRecordsFromManifest(req.freezrUserPermsDB, realAppName, manifest, cb)
       },
@@ -972,8 +980,7 @@ exports.appMgmtActions = function (req, res) /* deleteApp updateApp */ {
       flags.meta.app_name = realAppName
       if (err) {
         flags.add('errors', 'err_unknown', { function: 'appMgmtActions update', text: JSON.stringify(err) })
-      }
-      if (info.isUpdate) {
+      } else if (info.isUpdate) {
         flags.add('notes', 'app_updated_msg')
         flags.meta.didwhat = 'updated'
       } else {
@@ -1066,6 +1073,8 @@ function groupPermissions (returnPermissions, appName) {
       */
       if (['share_records', 'db_query'].indexOf(aPerm.type) > -1 && aPerm.requestor_app === appName && helpers.startsWith(aPerm.table_id, appName)) {
         groupedPermissions.thisAppToThisApp.push(aPerm)
+      } else if (['upload_pages'].indexOf(aPerm.type) > -1 && aPerm.requestor_app === appName) {
+        groupedPermissions.thisAppToThisApp.push(aPerm)
       } else if (['share_records', 'read_all', 'write_all', 'db_query'].indexOf(aPerm.type) > -1 && aPerm.requestor_app !== appName && helpers.startsWith(aPerm.table_id, appName)) {
         groupedPermissions.otherAppsToThisApp.push(aPerm)
       } else if (['share_records', 'read_all', 'write_all', 'db_query'].indexOf(aPerm.type) > -1 && aPerm.requestor_app === appName && !helpers.startsWith(aPerm.table_id, appName)) {
@@ -1125,6 +1134,8 @@ exports.generatePermissionHTML = function (req, res) {
             sentence += hasBeenAccepted ? 'This app is able to ' : 'This app wants to be able to '
             if (aPerm.type === 'share_records') {
               sentence += accessWord + ' individual data records from the table ' + '<b' + (otherApp ? " style='color:purple;'>" : '>') + aPerm.table_id + '</b>,' + ' with the your contacts and the public.<br/>'
+            } else if (aPerm.type === 'upload_pages') {
+              sentence += accessWord + ' individual files with the public.<br/>'
             } else if (aPerm.type === 'read_all') {
               sentence += accessWord + ' read all the records in the table: ' + "<b style='color:purple;'>" + aPerm.table_id + '</b>,' + '.<br/>'
             } else if (aPerm.type === 'db_query') {
@@ -1255,6 +1266,7 @@ exports.changeNamedPermissions = function (req, res) {
                 const write = {
                   manifest: req.freezrRequestorManifest,
                   cards: req.freezrPublicCards,
+                  ppages: req.freezrPublicPages,
                   user_id: req.session.logged_in_user_id,
                   app_name: list.requestor_app,
                   permissions
@@ -1305,7 +1317,7 @@ const permissionObjectFromManifestParams = function (requestorApp, manifestPerm)
     felog('permissionObjectFromManifestParams', 'cannot make permission without a name ', { requestorApp, name })
     err = 'Cannot make permission without a name.'
   }
-  if (!err && (!manifestPerm.table_id || !manifestPerm.type)) {
+  if (!err && (!manifestPerm.type || (!manifestPerm.table_id && manifestPerm.type !== 'upload_pages'))) {
     felog('permissionObjectFromManifestParams', 'cannot make permission without a table ', { manifestPerm, requestorApp, name })
     err = (err ? ' And ' : name + ': ') + 'Cannot make permission without a table_id or type. '
   }
@@ -1437,7 +1449,9 @@ const objectFromList = function (objectList, param, value) {
 }
 
 const createOrUpdateUserAppList = function (userAppListDb, manifest, env, callback) {
-  // note - currently updates the app_display_name only (and marks it as NOT removed)
+  // ??? note - currently updates the app_display_name only (and marks it as NOT removed)
+
+  fdlog('createOrUpdateUserAppList  ', { manifest })
 
   let appExists = false
   let appEntity = null

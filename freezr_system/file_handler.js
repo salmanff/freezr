@@ -39,7 +39,7 @@ exports.load_data_html_and_page = function (req, res, options) {
   })
 }
 exports.load_page_html = function (req, res, opt) {
-  fdlog('load page html', opt.app_name + '... ' + opt.page_url)
+  fdlog('load page html', opt.app_name + '... ' + opt.page_url + ' isPublic ? ' + opt.isPublic)
 
   fs.readFile(
     opt.isPublic ? 'html_skeleton_public.html' : 'html_skeleton.html',
@@ -91,6 +91,15 @@ exports.load_page_html = function (req, res, opt) {
           }
         })
       }
+      if (opt.full_css_files) {
+        opt.full_css_files.forEach(function (aFilePath) {
+          if (exports.fileExt(aFilePath) === 'css') {
+            cssFiles = cssFiles + ' <link rel="stylesheet" href="' + aFilePath + '" type="text/css" />'
+          } else {
+            felog('load_page_skeleton', 'ERROR - NON CSS FILE BEING USED FOR CSS for: ' + aFilePath + ' at ' + opt.user_id + ' app:' + opt.app_name + ' page: ' + opt.page_url)
+          }
+        })
+      }
       contents = contents.replace('{{CSS_FILES}}', cssFiles)
 
       var scriptFiles = ''
@@ -98,6 +107,11 @@ exports.load_page_html = function (req, res, opt) {
         opt.script_files.forEach(function (pathToFile) {
           thePath = partUrlPathTo(userId, opt.app_name, pathToFile)
           scriptFiles = scriptFiles + '<script src="' + thePath + '" type="text/javascript"></script>'
+        })
+      }
+      if (opt.full_script_files) {
+        opt.full_script_files.forEach(function (pathToFile) {
+          scriptFiles = scriptFiles + '<script src="' + pathToFile + '" type="text/javascript"></script>'
         })
       }
       contents = contents.replace('{{SCRIPT_FILES}}', scriptFiles)
@@ -478,7 +492,7 @@ exports.checkManifest = function (manifest, appName, appVersion, flags) {
       flags.add('notes', 'manifest_inconsistent_version')
     }
     if (manifest.identifier && appName !== manifest.identifier) {
-      flags.add('notes', 'config_inconsistent_app_name', { app_name: manifest.identifier})
+      flags.add('notes', 'config_inconsistent_app_name', { app_name: manifest.identifier })
     }
 
     if (manifest.pages) {
@@ -526,8 +540,8 @@ exports.fileExt = function (fileName) {
   if (ext && ext.length > 0) ext = ext.slice(1)
   return ext
 }
-exports.sep = function() { return path.sep }
-exports.normUrl = function(aUrl) { return path.normalize(aUrl) }
+exports.sep = function () { return path.sep }
+exports.normUrl = function (aUrl) { return path.normalize(aUrl) }
 exports.removeStartAndEndSlashes = function (aUrl) {
   if (helpers.startsWith(aUrl, '/')) aUrl = aUrl.slice(1)
   if (aUrl.slice(aUrl.length - 1) === '/') aUrl = aUrl.slice(0, aUrl.length - 1)

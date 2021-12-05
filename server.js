@@ -1,5 +1,5 @@
 // freezr.info - nodejs system files - main file: server.js
-const VERSION = '0.0.200'
+const VERSION = '0.0.202'
 
 // todo: const visitLogger = require('./freezr_system/visit_logger.js')
 
@@ -7,7 +7,7 @@ const VERSION = '0.0.200'
 // const tester1 = require('./freezr_system/forked_modules/nedb-async/env/dbfs_googleDrive.js')
 
 // INITALISATION / APP / EXPRESS
-console.log('=========================  VERSION May 2021  =======================')
+console.log('=========================  VERSION Nov/Dec 2021  =======================')
 const express = require('express')
 const bodyParser = require('body-parser')
 const multer = require('multer')
@@ -111,7 +111,8 @@ const loggedInOrNotForSetUp = function (req, res, next) {
   accessHandler.loggedInOrNotForSetUp(req, res, dsManager, next)
 }
 const publicUserPage = function (req, res, next) {
-  if (!req.params.app_name) req.params.app_name = 'info.freezr.public'
+  if (!req.params.app_name) req.params.app_name = 'info.freezr.public' // todo - where is this used
+  // add req.freezrAppFS
   accessHandler.publicUserPage(req, res, dsManager, next)
 }
 const checkSetUp = function (req, res, next) {
@@ -148,9 +149,12 @@ const selfRegisterChecks = function (req, res, next) {
     req.params.app_name = 'info.freezr.admin'
     req.freezrAllowSelfReg = freezrPrefs.allowSelfReg
     req.freezrAllowAccessToSysFsDb = freezrPrefs.allowAccessToSysFsDb
+    fdlog('current initial env ', dsManager.initialEnvironment)
+    if (req.freezrAllowAccessToSysFsDb) req.freezrInitialEnvCopy = dsManager.initialEnvironment
     next()
   } else if (freezrPrefs.allowSelfReg) {
     req.freezrAllowSelfReg = true
+    // todo check if we ant this... req.freezrAllowAccessToSysFsDb = freezrPrefs.allowAccessToSysFsDb
     next()
   } else {
     res.sendStatus(401)
@@ -197,8 +201,18 @@ const addUserAppsAndPermDBs = function (req, res, next) {
 const addPublicRecordsDB = function (req, res, next) {
   permHandler.addPublicRecordsDB(req, res, dsManager, next)
 }
+const addPublicRecordAndIfFileFileFS = function (req, res, next) {
+  permHandler.addPublicRecordAndIfFileFileFS(req, res, dsManager, next)
+}
+
+const addUserFsFromTokenInfo = function (req, res, next) {
+  permHandler.addUserFsFromTokenInfo(req, res, dsManager, next)
+}
 const addPublicUserFs = function (req, res, next) {
   permHandler.addPublicUserFs(req, res, dsManager, next)
+}
+const addUserFs = function (req, res, next) {
+  permHandler.addUserFs(req, res, dsManager, next)
 }
 
 const addUserPermsAndRequesteeDB = function (req, res, next) {
@@ -218,6 +232,7 @@ const addFradminDs = function (req, res, next) {
   permHandler.addFradminDs(req, res, dsManager, next)
 }
 const addUserFilesDb = function (req, res, next) {
+  if (!req.params.user_id && req.session.logged_in_user_id) req.params.user_id = req.session.logged_in_user_id // for uploading
   permHandler.addUserFilesDb(req, res, dsManager, next)
 }
 const addValidationDBs = function (req, res, next) {
@@ -293,16 +308,20 @@ const addAppUses = function (cookieSecrets) {
   app.get('/pcard/:user_id/:app_name/:collection_name/:data_object_id', publicUserPage, addPublicRecordsDB, addPublicUserFs, publicHandler.generatePublicPage)
   app.get('/papp/:user_id/:app_name/:page', publicUserPage, addPublicRecordsDB, addPublicUserFs, publicHandler.generatePublicPage)
   app.get('/papp/:user_id/:app_name', publicUserPage, addPublicRecordsDB, addPublicUserFs, publicHandler.generatePublicPage)
-  app.get('/ppage/:user_id/:app_table/:data_object_id', publicUserPage, addPublicRecordsDB, publicHandler.generatePublicObjectPage)
-  app.get('/ppage/:object_public_id', publicUserPage, addPublicRecordsDB, addPublicUserFs, publicHandler.generatePublicObjectPage)
+  app.get('/ppage/:user_id/:app_table/:data_object_id', publicUserPage, addPublicRecordAndIfFileFileFS, publicHandler.generateSingleObjectPage)
+  // app.get('/ppage/:user_id/:partial_public_id', publicUserPage, addPublicRecordsDB, publicHandler.generatePublicObjectPage)
+  app.get('/ppage/:object_public_id', publicUserPage, addPublicRecordAndIfFileFileFS, publicHandler.generateSingleObjectPage)
   app.get('/ppage', publicUserPage, addPublicRecordsDB, publicHandler.generatePublicPage)
   app.get('/rss.xml', publicUserPage, addPublicRecordsDB, publicHandler.generatePublicPage)
-  app.get('/papp_files/:app_name/:user_id/public/static/:file', servePublicAppFile) // Note changed dec 2021 from "/apps",,, to review rodo console.log
+  app.get('/papp_files/:user_id/:app_name/public/static/:file', addPublicRecordsDB, addPublicUserFs, servePublicAppFile) // Note changed dec 2021 from "/apps",,, to review todo console.log
   app.get('/v1/pdbq', addPublicRecordsDB, publicHandler.dbp_query)
   app.get('/v1/pdbq/:app_name', addPublicRecordsDB, publicHandler.dbp_query)
   app.post('/v1/pdbq', addPublicRecordsDB, publicHandler.dbp_query)
   app.get('/v1/pobject/:user_id/:requestee_app_table/:data_object_id', addPublicRecordsDB, publicHandler.generatePublicPage)
-  app.get('/v1/publicfiles/:requestee_app/:user_id/*', addPublicRecordsDB, addUserFilesDb, addPublicUserFs, publicHandler.get_public_file)
+  app.get('/v1/publicfiles/:user_id/:app_name/*', addPublicRecordsDB, addUserFilesDb, addPublicUserFs, publicHandler.get_public_file)
+
+  // UPLOADED PUBLIC PAGES ... gets them from the personal page // publicpages
+  app.get('/papp/:user_id/:app_name/:page', publicUserPage, addPublicRecordsDB, addPublicUserFs, publicHandler.generatePublicPage)
 
   // developer utilities
   app.get('/v1/developer/manifest/:app_name', userAPIRights, getManifest, addUserDs, appHandler.getManifest)
@@ -339,7 +358,10 @@ const addAppUses = function (cookieSecrets) {
 
   app.post('/v1/admin/self_register', selfRegisterChecks, selfRegAdds, adminHandler.self_register)
   app.put('/v1/admin/user_register', adminLoggedInAPI, addFradminDs, adminHandler.user_register)
-  app.put('/v1/admin/change_main_prefs', adminLoggedInAPI, addFradminDs, adminHandler.change_main_prefs)
+  app.put('/v1/admin/change_main_prefs', adminLoggedInAPI, addFradminDs, adminHandler.change_main_prefs, function (req, res) {
+    freezrPrefs = req.freezrPrefs
+    helpers.send_success(res, { success: true, newPrefs: req.freezrPrefs })
+  })
 
   // admin pages - NOT UPDATED
   app.post('/v1/admin/dbquery/:collection_name', toReviewAndRedo, adminLoggedInAPI) // old: adminHandler.dbquery)
@@ -368,7 +390,7 @@ const addAppUses = function (cookieSecrets) {
 
   // TO UPDATE - userfiles - NOT checked for updates to dsManager
   app.post('/ceps/perms/share_records', userAPIRights, addUserPermsAndRequesteeDB, addPublicRecordsDB, appHandler.shareRecords)
-  app.post('/feps/perms/share_records', userAPIRights, addUserPermsAndRequesteeDB, addPublicRecordsDB, appHandler.shareRecords)
+  app.post('/feps/perms/share_records', userAPIRights, addUserPermsAndRequesteeDB, addPublicRecordsDB, addUserFsFromTokenInfo, appHandler.shareRecords)
   app.post('/ceps/message/:action', possibleUserAPIForMessaging, addMessageDb, appHandler.messageActions)
   // app.get('/ceps/message/:action' /* action = get */, possibleUserAPIForMessaging, addMessageDb, appHandler.messageActions)
 
@@ -380,20 +402,24 @@ const addAppUses = function (cookieSecrets) {
   app.post('/feps/write/:app_table', userAPIRights, readWriteUserData, appHandler.write_record)
   app.post('/feps/write/:app_table/:data_object_id', userAPIRights, readWriteUserData, appHandler.write_record)
   app.put('/feps/update/:app_table/:data_object_id', userAPIRights, readWriteUserData, appHandler.write_record)
+  app.put('/feps/update/:app_table/:data_object_start/*', userAPIRights, readWriteUserData, appHandler.write_record)
   app.put('/feps/update/:app_table', userAPIRights, readWriteUserData, appHandler.write_record)
   app.post('/feps/upsert/:app_table', userAPIRights, readWriteUserData, appHandler.write_record)
   app.post('/feps/restore/:app_table', userAPIRights, readWriteUserData, appHandler.restore_record)
+  app.delete('/feps/delete/:app_table/:data_object_id', userAPIRights, readWriteUserData, addUserFsFromTokenInfo, appHandler.delete_record)
+  app.delete('/feps/delete/:app_table/:data_object_start/*', userAPIRights, readWriteUserData, addUserFsFromTokenInfo, appHandler.delete_record)
 
-// TO UPDATE - userfiles - NOT checked for updates to dsManager
-  app.get('/feps/getuserfiletoken/:permission_name/:requestee_app_name/:requestee_user_id/*', toReviewAndRedo, userAPIRights, appHandler.read_record_by_id) // collection_name is files
-  app.put('/feps/upload/:app_name', toReviewAndRedo, userAPIRights, uploadFile)
-  app.get('/feps/userfiles/:requestee_app/:user_id/*', toReviewAndRedo, userAPIRights, appHandler.sendUserFile) // collection_name is files
+  app.put('/feps/upload/:app_name', userAPIRights, readWriteUserData, addUserFilesDb, addUserFs, uploadFile)
+  app.get('/feps/getuserfiletoken/:permission_name/:app_name/:user_id/*', userAPIRights, readWriteUserData, addUserFilesDb, appHandler.read_record_by_id) // collection_name is files
+  app.get('/feps/userfiles/:app_name/:user_id/*', addUserFs, appHandler.sendUserFileWithFileToken) // collection_name is files
+  app.get('/feps/fetchuserfiles/:app_name/:user_id/*', userAPIRights, addUserFs, appHandler.sendUserFileWithAppToken) // collection_name is files
   // app.get('/v1/developer/fileListUpdate/:app_name', toReviewAndRedo, userAPIRights, appHandler.updateFileList);
   // app.get('/v1/developer/fileListUpdate/:app_name/:folder_name', toReviewAndRedo, userAPIRights, appHandler.updateFileList);
 
   // permissions
   app.get('/v1/permissions/gethtml/:app_name', userAPIRights, addUserPermDBs, accountHandler.generatePermissionHTML)
   app.get('/v1/permissions/getall/:app_name', userAPIRights, addUserPermDBs, accountHandler.allRequestorAppPermissions)
+  app.put('/v1/permissions/change', accountLoggedInAPI, getTargetManifest, addUserPermsAndRequesteeDB, addPublicRecordsDB, accountHandler.changeNamedPermissions)
   app.put('/v1/permissions/change/:requestee_app_table', accountLoggedInAPI, getTargetManifest, addUserPermsAndRequesteeDB, addPublicRecordsDB, accountHandler.changeNamedPermissions)
 
   // default redirects
@@ -401,8 +427,9 @@ const addAppUses = function (cookieSecrets) {
     // fdlog('getPublicUrlFromPrefs dsManager.freezrIsSetup ' + dsManager.freezrIsSetup)
     if (!dsManager.freezrIsSetup) return '/admin/firstSetUp'
     if (!freezrPrefs || !freezrPrefs.redirect_public) return '/account/login'
-    if (!freezrPrefs.public_landing_page) return '/ppage'
-    return '/papp/' + freezrPrefs.public_landing_page
+    if (!freezrPrefs.public_landing_page && !freezrPrefs.public_landing_app) return '/ppage'
+    if (freezrPrefs.public_landing_page) return '/' + freezrPrefs.public_landing_page
+    return '/papp/' + freezrPrefs.public_landing_app
   }
   app.get('/feps*', function (req, res) {
     fdlog('feps', 'unknown feps api url ' + req.url)
@@ -416,6 +443,10 @@ const addAppUses = function (cookieSecrets) {
     fdlog('/v1/*', 'unknown api url ' + req.url)
     helpers.send_failure(res, helpers.error('invalid api url:', req.path), 'server.js', VERSION, 'server')
   })
+  app.get('/public', function (req, res) {
+    res.redirect(getPublicUrlFromPrefs())
+    res.end()
+  })
   app.get('/', function (req, res) {
     // if allows public people coming in, then move to public page
     const redirectUrl = (req.session && req.session.logged_in_user_id) ? '/account/home' : getPublicUrlFromPrefs()
@@ -423,11 +454,7 @@ const addAppUses = function (cookieSecrets) {
     res.redirect(redirectUrl)
     res.end()
   })
-  app.get('*', function (req, res) {
-    fdlog('*', 'unknown url redirect: ' + req.url)
-    res.redirect((req.session && req.session.logged_in) ? '/account/home' : getPublicUrlFromPrefs())
-    res.end()
-  })
+  app.get('*', publicUserPage, addPublicRecordAndIfFileFileFS, publicHandler.generateSingleObjectPage)
 }
 const serveAppFile = function (req, res, next) {
   fdlog((new Date()) + ' serveAppFile - url' + req.originalUrl + `for user ${req.params.user_id} and app ${req.params.app_name} - is logged in ${req.session.logged_in_user_id} - file is ${req.params.file}`)
@@ -645,6 +672,7 @@ async.waterfall([
   freezrStatus.fundamentals_okay = canUseDbAndFs(freezrStatus)
   console.log('Startup checks complete.')
   console.log({ freezrStatus })
+  //onsole.log({ freezrPrefs })
   if (err) console.log(' XXXXXXXXXXXXXXXXXXXXXXXXXXX Got err on start ups XXXXXXXXXXXXXXXXXXXXXXXXXXX ')
   if (err) helpers.warning('startup_waterfall', 'STARTUP ERR ' + JSON.stringify(err))
 

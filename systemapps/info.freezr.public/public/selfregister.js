@@ -45,7 +45,6 @@ freezr.initPageScripts = function () {
   }
   // add oauth issues here
   populateErrorMessage(freezrServerStatus, true)
-  setTimeout(function () { document.body.scrollTop = 0 }, 20)
 
   const gotAuthValidation = populateFormsFromParams()
   // see if has done oauth and if so, give error if no state
@@ -75,7 +74,7 @@ freezr.initPageScripts = function () {
   }
   window.history.pushState({ }, 'Freezr - set up', '/admin/' + (thisPage === 'firstSetUp' ? 'firstSetUp' : 'selfRegister'))
 
-  window.scrollTo({ top: 0, behavior: 'smooth' })
+  setTimeout(function () { window.scrollTo({ top: 0, behavior: 'smooth' }) }, 10)
 }
 
 const createSelector = function (resource, choice) {
@@ -107,7 +106,6 @@ const changeSelector = function (resource) {
     const tabletop = document.getElementById('table_elements_' + resource)
     tabletop.innerHTML = ''
     const lowcapres = resource.toLowerCase()
-    // if (freezrEnvironment[lowcapres + 'Params']) console.log('type is ' + freezrEnvironment[lowcapres + 'Params'].type + ' vs ' + choice + 'TokenIsOnServer? ' + freezrEnvironment[lowcapres + 'Params'].TokenIsOnServer)
     if (freezrEnvironment && freezrEnvironment[lowcapres + 'Params'] &&
       freezrEnvironment[lowcapres + 'Params'].TokenIsOnServer &&
       freezrEnvironment[lowcapres + 'Params'].type === choice) {
@@ -266,7 +264,7 @@ const checkResource = function (resource, options, callback) {
 
 function gotCheckStatus (err, data) {
   // if (err || (data && data.err) || (data && !data.checkpassed))
-  // console.log('gotCheckStatus ', { err, data })
+  // onsole.log('gotCheckStatus ', { err, data })
   if (err) {
     showError(err.message)
   } else if (data.err) {
@@ -331,6 +329,7 @@ const launch = function () {
 }
 
 const gotRegisterStatus = function (error, data) {
+  //onsole.log(error, data)
   if (error || !data) {
     document.getElementById('click_launch').style.display = 'block'
     document.getElementById('launch_spinner').style.display = 'none'
@@ -356,7 +355,7 @@ const goAuthFS = function () {
     window.localStorage.setItem('params', JSON.stringify(currentParams))
 
     oauthorUrl = oauthorUrl + '?type=' + type + '&regcode=' + currentParams.regcode + '&sender=' + encodeURIComponent(window.location.origin + window.location.pathname)
-    // Console.log('opening authenticator site as first step in oauth process: ' + oauthorUrl)
+    // onsole.log('opening authenticator site as first step in oauth process: ' + oauthorUrl)
     window.open(oauthorUrl, '_self')
   }
 }
@@ -385,8 +384,12 @@ const populateErrorMessage = function (freezrServerStatus, initial) {
 var showError = function (errorText) {
   var errorBox = document.getElementById('errorBox')
   errorBox.innerHTML = errorText
-  if (errorText) { showDiv('errorBox') } else { hideDiv('errorBox') }
-  errorBox.scrollIntoView()
+  if (errorText) {
+    showDiv('errorBox')
+    errorBox.scrollIntoView()
+  } else {
+    hideDiv('errorBox')
+  }
 }
 const hideClass = function (theClass) {
   const els = document.getElementsByClassName(theClass)

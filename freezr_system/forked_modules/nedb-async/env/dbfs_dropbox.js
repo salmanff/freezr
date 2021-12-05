@@ -298,7 +298,7 @@ DropboxFS.prototype.getFileToSend = function (path, callback) {
       if (!response || !response.result || !response.result.link) {
         return new Error('could not get link')
       } else {
-        fdlog('in dbfs_dropbox  getFileToSend - sending stream ' )
+        fdlog('in dbfs_dropbox  getFileToSend - sending stream ')
         https.get(response.result.link, stream => {
           return callback(null, stream)
         })
@@ -306,7 +306,7 @@ DropboxFS.prototype.getFileToSend = function (path, callback) {
     })
     .catch(error => {
       // helpers.warning("file_env_dropbox.js", exports.version, "sendUserFile", "Missing file:  "+path);
-      felog('in dbfs_dropbox getFileToSend error ', { path, error })
+      fdlog('in dbfs_dropbox getFileToSend error ', { path, error }) // could be due to inexistant file
       return callback(error)
     })
 }

@@ -28,11 +28,10 @@ freezr.initPageScripts = function() {
   }
 }
 
-var gotRegisterStatus = function(error, data) {
+var gotRegisterStatus = function (error, data) {
   if (data) data = freezr.utils.parse(data)
-  // console.log("gotRegisterStatus "+JSON.stringify(data));
   if (error) {
-    showError("Error. "+ message);
+    showError(error);
   } else if (data.error) {
     showError("Error. "+ data.message)
   } else if (!data) {

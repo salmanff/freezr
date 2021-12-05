@@ -66,8 +66,8 @@ freezr.initPageScripts = function() {
 			hideElments();
 		} else {
 			configReturn = freezr.utils.parse(configReturn);
-      console.log({ configReturn })
-			dl.meta.all_app_tables = configReturn.app_tables;
+
+      dl.meta.all_app_tables = configReturn.app_tables;
 			dl.meta.manifest = configReturn.manifest;
 			if (dl.meta.all_app_tables && dl.meta.all_app_tables.length>0) {
 				var coll_list = document.getElementById("collection_names");
@@ -104,8 +104,7 @@ var retrieve_data = function() {
 		count:retrieve_COUNT,
 		q: {'_date_modified':{'$lt':dl.saved_coll.last_retrieved_date}}
 	}
-  console.log({ queryOptions})
-	freezr.feps.postquery(queryOptions, gotData)
+  freezr.feps.postquery(queryOptions, gotData)
 }
 var gotData = function(error, returnJson) {
 	returnJson = freezr.utils.parse(returnJson);
@@ -353,7 +352,6 @@ var processNextRecord = function() {
 				data_object_id: (keepId? (record._id):null)
 			}
 			delete record._id
-      console.log('will upload ', { record, options })
 
 			let url= "/feps/restore/"+app_table
 	    freezerRestricted.connect.send(url, JSON.stringify({record, options }), restoreRecCallBack, "POST", 'application/json');

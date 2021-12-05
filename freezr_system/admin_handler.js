@@ -31,6 +31,7 @@ exports.DEFAULT_PREFS = {
   log_details: { each_visit: true, daily_db: true, include_sys_files: false, log_app_files: false },
   redirect_public: false,
   public_landing_page: '',
+  public_landing_app: '',
   allowSelfReg: false,
   allowAccessToSysFsDb: false,
   blockMsgsFromNonContacts: true
@@ -133,6 +134,12 @@ exports.generateAdminPage = function (req, res) {
       scriptFiles = ['oauth_serve_setup.js']
       initialQueryFunc = listAllOauths
       break
+    /*
+    case 'hack':
+      pageTitle = 'Hack (Freezr)'
+      initialQueryFunc = hackingStuff
+      break
+    */
     default:
       scriptFiles = ['./info.freezr.admin/' + req.params.sub_page + '.js']
       cssFiles = ['./public/info.freezr.public/public/freezr_style.css', './info.freezr.admin/' + req.params.sub_page + '.css']
@@ -202,6 +209,8 @@ exports.generateFirstSetUpPage = function (req, res) {
     tempEnvironment.fsParams.TokenIsOnServer = true
   }
 
+
+
   var options = {
     page_title: 'Freeezr Set Up',
     css_files: ['./public/info.freezr.public/public/firstSetUp.css', './public/info.freezr.public/public/freezr_style.css'],
@@ -223,6 +232,12 @@ exports.generate_UserSelfRegistrationPage = function (req, res) {
   fdlog('generate_UserSelfRegistrationPage: ' + req.url)
   // todo - distinguish http & https & localhost
 
+  var envParams = environmentDefaults.ENV_PARAMS
+  if (!req.freezrAllowAccessToSysFsDb) {
+    delete envParams.FS.sysDefault
+    delete envParams.DB.sysDefault
+  }
+
   var options = {
     page_title: 'Freeezr Account Set Up',
     css_files: ['./public/info.freezr.public/public/firstSetUp.css', './public/info.freezr.public/public/freezr_style.css'],
@@ -233,7 +248,7 @@ exports.generate_UserSelfRegistrationPage = function (req, res) {
       'const freezrEnvironment = {}; ' +
       'const freezrServerStatus = null; ' +
       ('const userId = "' + (req.session.logged_in_user_id || '') + '"; ') +
-      ' ENV_PARAMS = ' + JSON.stringify(environmentDefaults.ENV_PARAMS) + ';',
+      ' ENV_PARAMS = ' + JSON.stringify(envParams) + ';',
     freezr_server_version: req.freezr_server_version,
     server_name: (helpers.startsWith(req.get('host'), 'localhost') ? 'http' : 'https') + '://' + req.get('host')
   }
@@ -309,11 +324,10 @@ exports.user_register = function (req, res) {
   function (err, createReturns) {
     if (err) {
       helpers.send_failure(res, err, 'admin_handler', exports.version, 'user_register')
-    } else if (!createReturns || !createReturns.entity) {
+    } else if (!createReturns) {
       helpers.send_failure(res, new Error('error creting user'), 'admin_handler', exports.version, 'user_register')
     } else {
-      var u = new User(createReturns.entity)
-      helpers.send_success(res, { user: u.response_obj() })
+      helpers.send_success(res, { success: true, user_id: userId })
     }
   })
 }
@@ -357,10 +371,14 @@ exports.self_register = function (req, res) {
       case 'unRegisteredUser':
         setupNewUserParams(req, res)
         break
-      case 'updateFsParams':
+      case 'updateReAuthorisedFsParams':
         updateExistingFsParams(req, res)
         break
+      case 'newParams': // for user created by admin but with no credentials
+        setupNewUserParams(req, res)
+        break
       default:
+        console.log('unknown action')
         helpers.send_failure(res, new Error('unknown action'), 'admin_handler', exports.version, 'self_register')
         break
     }
@@ -369,10 +387,12 @@ exports.self_register = function (req, res) {
 
 const firstSetUp = function (req, res) {
   fdlog('firstSetUp - first time register (or resetting of parameters) for user :', req.body)
+  console.log('firstSetUp - first time register (or resetting of parameters) for user :', req.body)
+  // console.log('firstSetUp - req.freezrInitialEnvCopy :', req.freezrInitialEnvCopy)
   const uid = helpers.user_id_from_user_input(req.body.userId)
   const { userId, password } = req.body
-  const fsParams = (req.body && req.body.env && req.body.env.fsParams) ? environmentDefaults.checkAndCleanFs(req.body.env.fsParams) : null
-  const dbParams = (req.body && req.body.env && req.body.env.fsParams) ? environmentDefaults.checkAndCleanDb(req.body.env.dbParams) : null
+  const fsParams = (req.body && req.body.env && req.body.env.fsParams) ? environmentDefaults.checkAndCleanFs(req.body.env.fsParams, req.freezrInitialEnvCopy) : null
+  const dbParams = (req.body && req.body.env && req.body.env.fsParams) ? environmentDefaults.checkAndCleanDb(req.body.env.dbParams, req.freezrInitialEnvCopy) : null
 
   function regAuthFail (message, errCode) { helpers.auth_failure('admin_handler', exports.version, 'firstSetUp', message, errCode) }
 
@@ -556,11 +576,12 @@ const setupNewUserParams = function (req, res) {
   // req.freezrAllowAccessToSysFsDb = freezrPrefs.allowAccessToSysFsDb
   // req.allUsersDb = dsManager.getDB(USER_DB_OAC)
 
-  // fdlog('setupNewUserParams', 'setupParams - esetting of parameters for user :', req.body)
+  fdlog('setupNewUserParams', 'setupParams - esetting of parameters for user :', req.body)
+
   const uid = req.session.logged_in_user_id || helpers.user_id_from_user_input(req.body.userId)
   const { password, action } = req.body
-  const fsParams = environmentDefaults.checkAndCleanFs(req.body.env.fsParams)
-  const dbParams = environmentDefaults.checkAndCleanDb(req.body.env.dbParams)
+  const fsParams = environmentDefaults.checkAndCleanFs(req.body.env.fsParams, req.freezrInitialEnvCopy)
+  const dbParams = environmentDefaults.checkAndCleanDb(req.body.env.dbParams, req.freezrInitialEnvCopy)
 
   function regAuthFail (message, errCode) { helpers.auth_failure('admin_handler', exports.version, 'setupNewUserParams', message, errCode) }
 
@@ -578,24 +599,36 @@ const setupNewUserParams = function (req, res) {
         cb(helpers.missing_data('user id'))
       } else if (!helpers.user_id_is_valid(uid)) {
         cb(regAuthFail('Valid user id needed to initiate.', 'auth-invalidUserId'))
+      } else if (!fsParams || !dbParams) {
+        cb(new Error('Need fsParams and dbparams to write'))
       } else if (!req.freezrAllowAccessToSysFsDb && (['local', 'system'].includes(fsParams.type) || ['local', 'system'].includes(dbParams.type))) {
         cb(regAuthFail('Not allowed to use system resources', 'auth-Not-freezrAllowAccessToSysFsDb'))
       } else if (!req.freezrAllowSelfReg && !req.session.logged_in_user_id) {
         cb(regAuthFail('Not allowed to self-register', 'auth-Not-freezrAllowSelfReg'))
-      } else if (action === 'unRegisteredUser' && !password) {
-        cb(helpers.missing_data('password'))
-      } else if (password) {
-        bcrypt.hash(password, 10, cb)
+      } else if (action === 'unRegisteredUser') {
+        if (!password) {
+          cb(helpers.missing_data('password'))
+        } else if (req.session.logged_in_user_id) {
+          cb(regAuthFail('Cannot re-register as logged in user', 'auth-invalidUserId'))
+        } else {
+          bcrypt.hash(password, 10, cb)
+        }
+      } else if (action === 'newParams') {
+        if (!req.session.logged_in_user_id) {
+          cb(regAuthFail('Need to be logged in to set params - SNBH', 'auth-invalidUserId'))
+        } else {
+          cb(null, null)
+        }
       } else {
-        cb(null, null)
+        cb(regAuthFail('internal error - need to action unRegisteredUser or newParams - SNBH', 'auth-invalidUserId'))
       }
     },
 
     // set passwrod hash and check the FS and DB work
     function (ahash, cb) {
       hash = ahash
-      if (!hash) {
-        cb(new Error('Coiuld not get hash'))
+      if (action === 'unRegisteredUser' && !hash) {
+        cb(new Error('Could not get hash'))
       } else {
         environmentDefaults.checkFS({ fsParams, dbParams }, { userId: uid }, cb)
       }
@@ -641,8 +674,13 @@ const setupNewUserParams = function (req, res) {
         }
         // err if exists else create new user
       } else { // action === newParams
-        if (existingUsers && existingUsers.length > 0) {
-          req.freezrAllUsersDb.update(uid, { fsParams, dbParams }, { replaceAllFields: false }, cb)
+        if (existingUsers && existingUsers.length === 1) {
+          const theUser = existingUsers[0]
+          if (theUser.fsParams && theUser.dbParams) { // should be || or but in case there was a right err in one
+            cb(new Error('User Params already exist! cannot re-write'))
+          } else {
+            req.freezrAllUsersDb.update(uid, { fsParams, dbParams }, { replaceAllFields: false }, cb)
+          }
         } else {
           cb(new Error('internal error accessing database of users to update resources'))
         }
@@ -650,7 +688,7 @@ const setupNewUserParams = function (req, res) {
     }
   ], function (err, results) {
     if (err) {
-      felog('setupNewUserParams', 'registration end err', err)
+      felog('setupNewUserParams', 'registration for ' + uid + ' end err', err)
       helpers.send_failure(res, err, 'admin_handler', exports.version, 'oauth_make:item does not exist')
     } else if (action === 'newParams') {
       helpers.send_success(res, { success: true })
@@ -676,7 +714,7 @@ const updateExistingFsParams = function (req, res) {
   // fdlog('setupNewUserParams', 'setupParams - esetting of parameters for user :', req.body)
   const uid = req.session.logged_in_user_id
   const { password } = req.body
-  const fsParams = environmentDefaults.checkAndCleanFs(req.body.env.fsParams)
+  const fsParams = environmentDefaults.checkAndCleanFs(req.body.env.fsParams, req.freezrInitialEnvCopy)
 
   function regAuthFail (message, errCode) { helpers.auth_failure('admin_handler', exports.version, 'updateExistingParams', message, errCode) }
 
@@ -832,13 +870,13 @@ exports.get_or_set_prefs = function (paramsDb, prefName, prefsToSet, doSet, call
   })
 }
 
-exports.change_main_prefs = function (req, res) {
+exports.change_main_prefs = function (req, res, next) {
   fdlog('change_main_prefs :' + JSON.stringify(req.body))
   // req.freezrPrefs = freezrPrefs
   // eq.freezrFradminDS = userDS
 
   var userId = req.session.logged_in_user_id
-  var newPrefs = req.body.prefs
+  var newPrefs = {}
 
   // req.freezrPrefsTempPw = 'ok'
 
@@ -888,11 +926,11 @@ exports.change_main_prefs = function (req, res) {
     // sanitize and set the prefs
     function (cb) {
       // get  check each item and then update
-      var newPrefs = {}
       Object.keys(exports.DEFAULT_PREFS).forEach(function (key) {
         newPrefs[key] = req.body[key] ? req.body[key] : exports.DEFAULT_PREFS[key]
       })
       if (newPrefs.public_landing_page) newPrefs.public_landing_page = newPrefs.public_landing_page.trim()
+      if (newPrefs.public_landing_app) newPrefs.public_landing_app = newPrefs.public_landing_app.trim()
       exports.get_or_set_prefs(req.freezrFradminDS.getDB(PARAMS_OAC), 'main_prefs', newPrefs, true, cb)
     }
   ],
@@ -901,8 +939,76 @@ exports.change_main_prefs = function (req, res) {
       helpers.send_failure(res, err, 'admin_handler', exports.version, 'change_main_prefs')
     } else {
       req.freezrPrefs = newPrefs
-      helpers.send_success(res, { success: true, newPrefs })
+      next()
     }
+  })
+}
+
+const hackingStuff = function (req, res) {
+  let publicRecDb = null
+  let oldAccessibles = null
+  async.waterfall([
+    function (cb) {
+      req.freezrFradminDS.getorInitDb({ app_table: 'info.freezr.admin.public_records', owner: 'fradmin' }, {}, cb)
+    },
+    function (theDb, cb) {
+      publicRecDb = theDb
+      req.freezrFradminDS.getorInitDb({ app_table: 'info.freezr.admin.accessibles', owner: 'fradmin' }, {}, cb)
+    },
+    function (theDb, cb) {
+      oldAccessibles = theDb
+
+      oldAccessibles.query({ newDbUpdate3: { $exists: false } }, { count: 20 }, cb)
+    },
+
+    function (results, cb) {
+      async.forEach(results, function (item, cb2) {
+        if (item.requestor_app === 'info.freezr.vulog') item.requestor_app = 'com.salmanff.vulog'
+        if (item.requestee_app === 'info.freezr.vulog') item.requestee_app = 'com.salmanff.vulog'
+        if (item.requestee_app === 'com.salmanff.vulog' && item.permission_name === 'publish_favorites') item.permission_name = 'link_share'
+        item.original_app_table = item.requestor_app + '.' + item.collection_name
+        item.original_record_id = item.data_object_id
+        delete item.data_object_id
+        item.original_record = item.data_object
+        item._date_published = item.original_record._date_published || item.original_record._date_created
+        if (item._date_modified > 1627010003783) item._date_modified = item._date_published
+        delete item.data_object
+        delete item.shared_with_group
+        delete item.shared_with_user
+
+        if (item.requestor_app === 'com.salmanff.poster') {
+          let body = item.original_record.body
+          body = body.replace('v1/publicfiles/com.salmanff.poster/salman', 'v1/publicfiles/salman/com.salmanff.poster')
+          body = body.replace('v1/publicfiles/com.salmanff.poster/salman', 'v1/publicfiles/salman/com.salmanff.poster')
+          body = body.replace('v1/publicfiles/com.salmanff.poster/salman', 'v1/publicfiles/salman/com.salmanff.poster')
+          item.original_record.body = body
+        }
+
+        delete item.newDbUpdate
+        delete item.newDbUpdate2
+
+        const newId = item._id
+        // if (item.requestee_app === 'com.salmanff.vulog') newId = item.data_owner + '/' + item.original_app_table.replace(/\./g, '_') + '/' + item._id
+        // const oldId = item._id
+        delete item._id
+
+        publicRecDb.create(newId, item, { restoreRecord: true }, function (err, wrote) {
+          fdlog(err, wrote)
+          oldAccessibles.update(newId, { newDbUpdate3: true, newDbUpdate: null, newDbUpdate2: null }, { replaceAllFields: false, restoreRecord: true }, function (err, updated) {
+            fdlog(err, updated)
+            cb2(null)
+          })
+        })
+        // add to publicRecDb.
+        // review to make
+      }, function (err) {
+        cb(err)
+      })
+    }
+
+  ], function (err) {
+    if (err) console.warn(err)
+    helpers.send_success(res, { success: true, err })
   })
 }
 

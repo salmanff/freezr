@@ -21,7 +21,7 @@ exports.version = '0.0.200'
   process.env.FREEZR_DB = 'mongodb' // 'nedb'
   process.env.MONGO_STR = ''
   process.env.FREEZR_FS = 'dropbox'
-  process.env.FS_ACCESS_TOKEN = '-'
+  process.env.FS_TOKEN = '-'
 */
 
 const PARAMS_OAC = {
@@ -30,7 +30,7 @@ const PARAMS_OAC = {
   collection_name: 'params'
 }
 
-const path = require('path')
+// const path = require('path')
 const fs = require('fs')
 const async = require('async')
 const helpers = require('../helpers.js')
@@ -46,6 +46,12 @@ exports.ENV_PARAMS = {
       msg: 'You are using your local file system.',
       warning: 'Note that most cloud servers delete their local file system when they restart - ie periodically. Make sure you know what you are doing when you choose this option.',
       forPages: ['firstSetUp']
+    },
+    sysDefault: {
+      type: 'system',
+      label: 'System Default',
+      msg: 'The admin has offered to use the default system settings to store your files.',
+      forPages: ['firstSetUp', 'newParams']
     },
     dropbox: {
       type: 'dropbox',
@@ -89,12 +95,6 @@ exports.ENV_PARAMS = {
         { name: 'secretAccessKey', display: 'Secret Access Key:' },
         { name: 'region', display: 'Region:' }
       ]
-    },
-    sysDefault: {
-      type: 'system',
-      label: 'System Default',
-      msg: 'The admin has offered to use the default system settings to store your files.',
-      forPages: ['firstSetUp']
     }
   },
   DB: {
@@ -102,7 +102,7 @@ exports.ENV_PARAMS = {
       type: 'system',
       label: 'System Default',
       msg: 'The admin has offered to use the default system settings to store your database.',
-      forPages: ['firstSetUp']
+      forPages: ['firstSetUp', 'newParams']
     },
     nedb: {
       type: 'nedb',
@@ -234,20 +234,26 @@ exports.FS_getRefreshToken = {
   }
 }
 
-exports.checkAndCleanDb = function (dbParams) {
-  console.log('todo - TO IMPLEMENT')
+exports.checkAndCleanDb = function (dbParams, freezrInitialEnvCopy) {
+  // console.log('todo - TO IMPLEMENT checkAndCleanDb ', dbParams)
+  if (!dbParams) return null
+  if (dbParams.choice === 'sysDefault') {
+    return freezrInitialEnvCopy.dbParams
+  }
+  // console.log('todo - add VALID_DB_CHOICES check')
   return dbParams
 }
-exports.checkAndCleanFs = function (fsParams) {
+exports.checkAndCleanFs = function (fsParams, freezrInitialEnvCopy) {
   // returns null if invalid for any reason
+  fdlog('checkAndCleanDb', { fsParams, freezrInitialEnvCopy })
   if (!fsParams) return null
   if (!fsParams.choice) fsParams.choice = fsParams.type
-  const VALID_FS_CHOICES = ['system', 'local', 'dropbox', 'googleDrive', 'glitch']
+  const VALID_FS_CHOICES = ['system', 'sysDefault', 'local', 'dropbox', 'googleDrive', 'glitch']
   fdlog('checking fs type choice ', { fsParams })
   if (!VALID_FS_CHOICES.includes(fsParams.choice)) felog('checkAndCleanFs', 'error - invalid fs choice ', fsParams)
   if (!fsParams.choice || !VALID_FS_CHOICES.includes(fsParams.choice)) return null
   if (fsParseCreds[fsParams.choice]) {
-    fsParams = fsParseCreds[fsParams.choice](fsParams)
+    fsParams = fsParseCreds[fsParams.choice](fsParams, freezrInitialEnvCopy)
   } else {
     felog('checkAndCleanFs', 'WARNING for developers - it is best to implement checkAndCleanFs for fs choice ' + fsParams.choice)
   }
@@ -256,6 +262,9 @@ exports.checkAndCleanFs = function (fsParams) {
 const fsParseCreds = {
   local: function (credentials) {
     return { choice: 'local', type: 'local' }
+  },
+  sysDefault: function (credentials, freezrInitialEnvCopy) {
+    return freezrInitialEnvCopy.fsParams
   },
   system: function (credentials) {
     return { choice: 'system', type: 'system' }
@@ -343,7 +352,7 @@ exports.checkDB = function (env, options, callback) {
             })
           } else {
             testDB.create('test_write_id', { foo: 'bar' }, null, (err3, results) => {
-              felog('checkDB', 'got err in checkDB - testDb 3 ', err3)
+              if (err) felog('checkDB', 'got err in checkDB - testDb 3 ', err3)
               callback(null, { checkpassed: (!err2), resource: 'DB' })
             })
           }
@@ -465,7 +474,7 @@ exports.tryGettingEnvFromautoConfig = function (callback) {
           } else {
             oacFs.readUserFile('freezr_environment.js', null, (err, envFromAutoConfigFileSys) => {
               fdlog({ envFromAutoConfigFileSys }) // nn
-              console.log(' todo todonow - if error is not file not found, then should throw error - security')
+              // console.log(' todo todonow - if error is not file not found, then should throw error - security')
               if (err) {
                 cb(null)
               } else {
@@ -773,7 +782,7 @@ var fsParams = function () {
   if (process && process.env && process.env.FREEZR_FS && process.env.FREEZR_FS === 'dropbox') {
     return {
       type: process.env.FREEZR_FS,
-      accessToken: process.env.FS_ACCESS_TOKEN,
+      accessToken: process.env.FS_TOKEN,
       refreshToken: process.env.FS_REFRESH_TOKEN,
       clientId: process.env.FS_CLIENTID,
       redirecturi: process.env.FS_REDIR,

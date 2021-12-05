@@ -101,7 +101,8 @@ DATA_STORE_MANAGER.prototype.getOrSetUserDS = function (owner, callback) {
           self.users[owner] = new USER_DS(owner, { dbParams, fsParams })
           callback(null, self.users[owner])
         } else {
-          fdlog('ds.getOrSetUserDS', 'incomplete user ' + owner)
+          felog('ds.getOrSetUserDS', 'incomplete user ' + owner)
+          fdlog('ds.getOrSetUserDS', 'incomplete user ', { owner, fsParams, dbParams })
           callback(new Error('user incomplete'))
         }
       }
@@ -160,6 +161,7 @@ USER_DS.prototype.getorInitDb = function (OAC, options, callback) {
 USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
   if (this.owner !== OAC.owner) throw new Error('Cannot initiate an oacDB for another user ' + this.owner + ' vs ' + OAC.owner)
   if (!this.dbParams) throw new Error('Cannot initiate db or fs without fs and db params for user ' + this.owner)
+  if (!appTableName(OAC)) throw new Error('Cannot initiate db or fs without proper OAC ' + JSON.stringify(OAC))
 
   const userDs = this
   const dbParams = this.dbParams
@@ -194,7 +196,6 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
       callback(err)
     } else {
       fdlog('todo - ds.initDB - need to make sure ds has all required functions')
-
       ds.read_by_id = function (id, cb) {
         fdlog('ds.initDB - need to add checks - see "create"')
 
@@ -204,7 +205,7 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
         ds.db.read_by_id(id, cb)
       }
       ds.create = function (id, entity, options, cb) {
-        // options are restore_record: true
+        // options are restoreRecord: true
         if (!options) options = {}
         if (!entity || typeof entity !== 'object' || Array.isArray(entity)) {
           cb(new Error('Cannot create an invalid entity type' + (typeof entity)))
@@ -221,7 +222,7 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
           ds.dbLastAccessed = new Date().getTime()
           resetPersistenceTimer(userDs, (ds.dbChgCount > DB_CHANGE_COUNT_THRESHOLD ? ds : null))
 
-          if (!options.restore_record) {
+          if (!options.restoreRecord) {
             if (!options.keepReservedFields) helpers.RESERVED_FIELD_LIST.forEach((aReservedField) => delete entity[aReservedField])
             entity._date_created = new Date().getTime()
             entity._date_modified = new Date().getTime()
@@ -253,7 +254,7 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
         //  options: replaceAllFields - replaces all object rather than specific keys
         //   In replaceAllFields: _date_created taken from previous version  and add it here
         //   if old_entity is specified then it is done automatically... this assumes system generates the old_entity, not the user
-        // restore_record:
+        // restoreRecord:
         // newSystemParams: used for updating system params
 
         ds.dbChgCount++
@@ -274,7 +275,8 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
             updatesToEntity._date_modified = new Date().getTime()
             // fdlog('going to replace_record_by_id ', {entityId, updatesToEntity })
             ds.db.replace_record_by_id(entityId, updatesToEntity, (err, result) => {
-              const nModified = (result && result.result && result.result.nModified) ? result.result.nModified : null
+              let nModified = (result && result.result && result.result.nModified) ? result.result.nModified : null
+              if (!nModified && typeof (result) === 'number') nModified = result // todo fix inconsistency between mongo and nedb
               const returns = err ? null : {
                 nModified,
                 _id: options.old_entity._id,
@@ -304,7 +306,7 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
                 Object.keys(oldEntity).forEach(function (key) {
                   if (updatesToEntity[key] === undefined) updatesToEntity[key] = oldEntity[key]
                 })
-                if (!options.restore_record) {
+                if (!options.restoreRecord) {
                   helpers.RESERVED_FIELD_LIST.forEach(key => {
                     if (oldEntity[key] !== undefined) updatesToEntity[key] = oldEntity[key]
                   })
@@ -446,6 +448,7 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
 }
 USER_DS.prototype.getDB = function (OAC) {
   if (this.owner !== OAC.owner) throw new Error('getdb SNBH - user trying to get another users info' + this.owner + ' vs ' + OAC.owner)
+  if (!appTableName(OAC)) throw new Error('getdb SNBH - Not properly formed OAC' + JSON.stringify(OAC))
   if (!this.appcoll[appTableName(OAC)]) throw new Error('initate user and db before getting')
   return this.appcoll[appTableName(OAC)]
 }
@@ -598,7 +601,7 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
     } else {
       ds.fs.getFileToSend(partialPath, function (err, streamOrFile) {
         if (err) {
-          felog('sendAppFile', 'err in sendAppfile for ', { partialPath, err })
+          fdlog('sendAppFile', 'err in sendAppfile for ', { partialPath, err })
           res.status(404).send('file not found!')
           res.end()
         } else {
@@ -735,6 +738,26 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
       })
     }
   }
+  ds.removeFile = function (endpath, options, cb) {
+    options = options || {} // Currently no options
+    const pathToRead = helpers.FREEZR_USER_FILES_DIR + '/' + this.owner + '/files/' + this.appName + '/' + endpath
+    const self = this
+    if (!self.cache.userfiles) self.cache.userfiles = {}
+    if (!self.cache.userfiles[endpath]) self.cache.userfiles[endpath] = {}
+
+    const localpath = path.normalize(__dirname.replace('freezr_system', '') + pathToRead)
+    if (fs.existsSync(localpath)) {
+      fs.unlinkSync(localpath)
+    }
+
+    this.fs.unlink(pathToRead, function (err) {
+      if (err) {
+        cb(err)
+      } else {
+        cb(null, { success: true })
+      }
+    })
+  }
 
   ds.sendUserFile = function (endpath, res, options) {
     const partialPath = (helpers.FREEZR_USER_FILES_DIR + '/' + this.owner + '/files/' + this.appName + '/' + endpath)
@@ -744,22 +767,33 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
     if (!self.cache.userfiles[endpath]) self.cache.userfiles[endpath] = {}
 
     // fdlog('in ds sending user endpath ' + { endpath, partialPath})
-
     const localpath = path.normalize(__dirname.replace('freezr_system', '') + partialPath)
     if (fs.existsSync(localpath)) {
       // fdlog('sendUserFile - sending from local ' + partialPath)
       res.sendFile(localpath)
     } else {
-      this.fs.getFileToSend(partialPath, function (err, stream) {
+      this.fs.getFileToSend(partialPath, function (err, streamOrFile) {
         if (err) {
           felog('sendUserFile', 'err in sendUserFile for ', partialPath)
           res.status(404).send('file not found!')
           res.end()
-        } else {
-          stream.pipe(res)
-          localCheckExistsOrCreateUserFolderSync(localpath, true)
-          stream.pipe(fs.createWriteStream(localpath))
+        } else if (streamOrFile.pipe) { // it is a stream
+          streamOrFile.pipe(res)
+          localCheckExistsOrCreateUserFolderSync(partialPath, true)
+          streamOrFile.pipe(fs.createWriteStream(localpath))
           self.cache.userfiles[endpath] = { fsLastAccessed: new Date().getTime() }
+        } else { // it is a file
+          res.send(streamOrFile)
+          localCheckExistsOrCreateUserFolderSync(partialPath, true)
+          fs.writeFile(localpath, streamOrFile, null, function (err, name) {
+            if (err) {
+              felog('sendUserFile', ' -  error putting back in cache ' + partialPath)
+              // console.log todo - if the file is partially written, this can lead to errors - should the file be deleted locally?
+            } else {
+              // fdlog('sendAppFile -  SUCCESS putting back in cache ' + partialPath)
+              self.cache.userfiles[endpath] = { fsLastAccessed: new Date().getTime() }
+            }
+          })
         }
       })
     }
@@ -794,6 +828,7 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
   }
 
   const initUserDirectories = function (ds, owner, cb) {
+    fdlog('going to init directorries for user ' + helpers.FREEZR_USER_FILES_DIR + '/' + owner + '/apps/' + appName)
     ds.fs.mkdirp(helpers.FREEZR_USER_FILES_DIR + '/' + owner + '/apps/' + appName, function (err) {
       if (err) {
         cb(err)
@@ -831,10 +866,14 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
 }
 
 const appTableName = function (oac) {
-  if ((!oac.app_name && !oac.app_table) || !oac.owner) throw helpers.error('DATA_STORE_MANAGER  failure - need app name or table and an owner for ' + JSON.stringify(oac))
-  if (oac.app_table) return oac.app_table.replace(/\./g, '_')
-  const name = oac.app_name + (oac.collection_name ? ('_' + oac.collection_name) : '')
-  return name.replace(/\./g, '_')
+  if ((!oac.app_name && !oac.app_table) || !oac.owner) {
+    felog('DATA_STORE_MANAGER  failure - need app name or table and an owner for ' + JSON.stringify(oac))
+    return null
+  } else {
+    if (oac.app_table) return oac.app_table.replace(/\./g, '_')
+    const name = oac.app_name + (oac.collection_name ? ('_' + oac.collection_name) : '')
+    return name.replace(/\./g, '_')
+  }
 }
 
 const persistOldFilesNow = function (userDs, dbToPersist) {

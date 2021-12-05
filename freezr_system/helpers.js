@@ -108,7 +108,6 @@ exports.is_system_app = function (appName) {
     }
 
     exports.send_failure = function(res, err, system_file, version, theFunction ) {
-        // Note: SNBH = Should Not Be Here - ie unexpected error
         console.warn("* * * ERROR *** : Helpers send failure in system_file "+system_file+" function: "+theFunction+"  error"+JSON.stringify( err)+" - "+err.message);
         var code = (typeof err == 'string')? err :(err.code ? err.code : err.name);
         var message = (typeof err == 'string')? err :(err.message ? err.message : code);

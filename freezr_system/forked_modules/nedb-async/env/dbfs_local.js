@@ -23,7 +23,20 @@ localFS.writeFile = function (path, contents, options, callback) {
   if (options && options.doNotOverWrite && fs.existsSync(path)) {
     callback(new Error('File exists - doNotOverWrite option was set and could not overwrite.'))
   } else {
+    let dirs = path.split('/')
+    dirs.pop()
+    dirs = dirs.join('/')
+    mkdirp.sync(dirs)
     fs.writeFile(path, contents, options, callback)
+    /*
+    mkdirp(dirs)
+      .then(made => {
+        console.log(`made directories, starting with ${made}`)
+      })
+      .catch(err =>
+        callback(err)
+      )
+    */
   }
 }
 localFS.readFile = function(path, options, callback) {

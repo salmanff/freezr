@@ -317,7 +317,14 @@ exports.getUniqueWords = function (anObject,theFields){
   return reduceToUnique(allWords);
     }
 }
-
+exports.removeLastpathElement = function (path, depth) {
+  if (!depth) depth = 1
+  var parts = path.split('/')
+  for (let i = 0; i < depth; i++) {
+    parts.pop()
+  }
+  return parts.join('/')
+}
 exports.variables_are_similar = function (obj1, obj2) {
     //onsole.log("variables_are_similar ",JSON.stringify(obj1),JSON.stringify(obj2)," - - - - -----------------")
     if (typeof obj1 != typeof obj2) {

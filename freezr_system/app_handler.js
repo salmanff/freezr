@@ -14,7 +14,7 @@ const fileHandler = require('./file_handler.js')
 exports.generatePage = function (req, res) {
   // '/apps/:app_name' and '/apps/:app_name/:page' (and generateDataPage above)
   fdlog('generatePage NEW: ' + req.url)
-  const manifest = req.freezrRequestorManifest
+  const manifest = req.freezrRequestorManifest || {}
 
   if (!req.params.page) req.params.page = 'index'
   if (helpers.endsWith(req.params.page, '.html')) req.params.page = req.params.page.slice(0, -5)
@@ -1084,7 +1084,7 @@ exports.create_file_record = function (req, res) {
         // todo - this should be checked across all functions (console.log())
         cb(new Error('Internal error - database not found'))
       } else {
-        dataObjectId = dataObjectId + '/' + fileParams.name
+        dataObjectId = (dataObjectId ? (dataObjectId + '/') : '') + fileParams.name
         cb(null)
       }
     },
@@ -1106,9 +1106,7 @@ exports.create_file_record = function (req, res) {
 
     // write a record as wip
     function (cb) {
-      console.log('req.body.options : ', req.body.options)
       const write = (req.body.options && req.body.options.data) ? req.body.options.data : {}
-      console.log({ write })
       write._UploadStatus = 'wip'
       if (isUpdate) {
         req.freezruserFilesDb.update(dataObjectId, write, {}, cb)
@@ -1189,7 +1187,6 @@ exports.sendUserFileWithFileToken = function (req, res) {
   const newpath = decodeURI(parts.join('/'))
   const userId = req.params.user_id
   const key = FileTokenkeyFromRecord(req.params.app_name, newpath)
-  // const newpath = helpers.FREEZR_USER_FILES_DIR + parts[1] + '/files/' + parts[0] + '/' + decodeURI(parts[2])
   if (!FILE_TOKEN_CACHE[userId] || !FILE_TOKEN_CACHE[userId][key] || !FILE_TOKEN_CACHE[userId][key][req.query.fileToken] || (new Date().getTime - FILE_TOKEN_CACHE[userId][key][req.query.fileToken] > FILE_TOKEN_EXPIRY)) {
     if (!FILE_TOKEN_CACHE[userId] || !FILE_TOKEN_CACHE[userId][key]) {
       felog('NO KEY', req.url)
@@ -1413,8 +1410,7 @@ exports.shareRecords = function (req, res) {
               if (err) {
                 cb2(err)
               } else if (results.length > 0 && (results[0].original_app_table !== req.body.table_id || results[0].original_record_id !== rec._id)) {
-                console.log('req.body.publicid ' + req.body.publicid)
-                console.log({ results })
+                fdlog('req.body.publicid ' + req.body.publicid, results)
                 cb2(new Error('Another entity already has the id requested.'))
               } else {
                 req.freezrRequesteeDB.update(rec._id, updates, { newSystemParams: true }, function (err, results) {
@@ -1482,8 +1478,7 @@ exports.shareRecords = function (req, res) {
               doNotList: req.body.doNotList,
               isHtmlMainPage
             }
-            console.log('puslishing object with id ' + rec._id + ' donotlst ' + req.body.doNotList)
-            fdlog('freezrPublicRecordsDB query', { results }, 'body: ', req.body)
+            fdlog('freezrPublicRecordsDB query for id '+ rec._id, { results }, 'body: ', req.body)
             if (err) {
               cb2(err)
             } else if (results.length > 1) {
@@ -1505,6 +1500,7 @@ exports.shareRecords = function (req, res) {
                       newRecordUniquePublicId = publicid
                       req.freezrPublicRecordsDB.create(publicid, accessiblesObject, {}, cb2)
                     } else {
+                      newRecordUniquePublicId = publicid
                       accessiblesObject.html_page = contents
                       req.freezrPublicRecordsDB.update(publicid, accessiblesObject, {}, function (err, results) {
                         cb2(err)
@@ -1534,11 +1530,12 @@ exports.shareRecords = function (req, res) {
     }
   ],
   function (err, results) {
+    fdlog('end of share', { err, results }, 'publidcIds: ', req.body.publicid, 'vs ' + newRecordUniquePublicId)
     if (err) {
       felog(err, results)
       helpers.send_failure(res, err, 'app_handler', exports.version, 'shareRecords')
     } else if (req.body.publicid) { // sending back record_id
-      helpers.send_success(res, { record_id: req.body.record_id, _publicid: newRecordUniquePublicId, grant: req.body.grant, recordsChanged: (recordsToChange.length) })
+      helpers.send_success(res, { record_id: req.body.record_id, _publicid: newRecordUniquePublicId, _date_published: datePublished, grant: req.body.grant, recordsChanged: (recordsToChange.length) })
     } else { // sending back record_id
       helpers.send_success(res, { success: true, recordsChanged: (recordsToChange.length) })
     }

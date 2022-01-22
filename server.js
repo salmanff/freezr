@@ -4,7 +4,8 @@ const VERSION = '0.0.202'
 // todo: const visitLogger = require('./freezr_system/visit_logger.js')
 
 // testing that files do not have errors
-// const tester1 = require('./freezr_system/forked_modules/nedb-async/env/dbfs_googleDrive.js')
+// console.log('dirname ' + __dirname)
+// const tester1 = require(__dirname + '/node_modules/nedb-asyncfs/env/dbfs_googleDrive.js')
 
 // INITALISATION / APP / EXPRESS
 console.log('=========================  VERSION Nov/Dec 2021  =======================')
@@ -628,7 +629,7 @@ async.waterfall([
       if (err) console.warn('err in dns lookup')
       // Priorities in choosing default address: 1. default ip from environmentDefaults (if written) 2. localhost if relevant 3. address looked up.
       dsManager.initialEnvironment.ipaddress = dsManager.initialEnvironment.ipaddress ? dsManager.initialEnvironment.ipaddress : add
-      console.warn('hostname currently not working - Once working: Would be running on local ip Address: ' + dsManager.initialEnvironment.ipaddress)
+      //  console.log('hostname currently not working - Once working: Would be running on local ip Address: ' + dsManager.initialEnvironment.ipaddress)
       cb(null)
     })
   },

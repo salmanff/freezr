@@ -5,7 +5,7 @@
 
 exports.version = '0.0.200'
 
-const Datastore = require('../forked_modules/nedb-async/index.js')
+const Datastore = require('nedb-asyncfs')
 const helpers = require('../helpers.js')
 
 const ARBITRARY_FIND_COUNT_DEFAULT = 100
@@ -28,29 +28,37 @@ NEDB_FOR_FREEZR.prototype.initDB = function (callback) {
   // called after initiation at the user level. returns a db object if need be. (not all systems need it and not all return an object. Object is stored in userDS as unififedDb)
   const { dbParams, fsParams } = this.env
 
-  let customFS = null
   const self = this
-  if (fsParams.type !== 'local' && fsParams.type !== 'glitch') {
-    const CustomFS = require('../forked_modules/nedb-async/env/dbfs_' + fsParams.type + '.js')
+  var customFS = null
+  // const type =
+
+  if (fsParams.type !== 'local') {
+    const envdir = helpers.removeLastpathElement(__dirname, 2) + '/node_modules/nedb-asyncfs/env/'
+    const CustomFS = require(envdir + 'dbfs_' + fsParams.type + '.js')
     customFS = new CustomFS(fsParams, { doNotPersistOnLoad: true })
   }
+  if (fsParams.type !== 'local' && !customFS) {
+    throw new Error('Error retrieving environment for nedb-asyncfs, using storage of type ' + fsParams.type)
+  } else {
+    const filename = (dbParams.db_path ? (dbParams.db_path + '/') : '') +
+      (fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/' +
+      this.oat.owner + '/db/' + fullName(this.oat) + '.db'
 
-  const filename = (dbParams.db_path ? (dbParams.db_path + '/') : '') + 'users_freezr/' + this.oat.owner + '/db/' + fullName(this.oat) + '.db'
+    fdlog('NEDB_FOR_FREEZR ', { dbParams, fsParams, filename }, 'oat:', this.oat)
 
-  fdlog('NEDB_FOR_FREEZR ', { dbParams, fsParams, filename }, 'oat:', this.oat)
-
-  self.db = new Datastore({ filename, customFS }, { doNotPersistOnLoad: true })
-  self.db.loadDatabase(function (err) {
-    if (err) {
-      return callback(err)
-    } else {
-      if (self.db.customFS.initFS) {
-        return self.db.customFS.initFS(callback)
+    self.db = new Datastore({ filename, customFS }, { doNotPersistOnLoad: true })
+    self.db.loadDatabase(function (err) {
+      if (err) {
+        return callback(err)
       } else {
-        return callback(null)
+        if (self.db.customFS.initFS) {
+          return self.db.customFS.initFS(callback)
+        } else {
+          return callback(null)
+        }
       }
-    }
-  })
+    })
+  }
 }
 NEDB_FOR_FREEZR.prototype.read_by_id = function (id, callback) {
   // called after initiation for some systems. Drobox doesnt need This
@@ -106,7 +114,7 @@ NEDB_FOR_FREEZR.prototype.delete_record = function (idOrQuery, options = {}, cb)
 NEDB_FOR_FREEZR.prototype.getAllAppTableNames = function (appOrTableNameOrNames, callback) {
   fdlog('getAllAppTableNames nedb ', appOrTableNameOrNames)
   const userId = this.oat.owner
-  const dbPath = 'users_freezr/' + userId + '/db'
+  const dbPath = (this.env.fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/' + userId + '/db'
   var list = []
   if (typeof appOrTableNameOrNames === 'string') appOrTableNameOrNames = [appOrTableNameOrNames]
   this.db.customFS.readdir(dbPath, (err, files) => {

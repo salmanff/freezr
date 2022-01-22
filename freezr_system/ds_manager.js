@@ -14,6 +14,10 @@ exports.version = '0.0.200'
 const DB_PERSISTANCE_IDLE_TIME_THRESHOLD = 60 * 1000 // (= 1 minute)
 const DB_CHANGE_COUNT_THRESHOLD = 50
 
+const pathSep = path.sep
+const ROOT_DIR = helpers.removeLastpathElement(__dirname) + pathSep
+const ENV_FILE_DIR = path.normalize(ROOT_DIR + 'node_modules/nedb-asyncfs/env') + pathSep
+
 function DATA_STORE_MANAGER () {
   this.freezrIsSetup = false
   this.users = {} // each a USER_DS
@@ -151,7 +155,12 @@ DATA_STORE_MANAGER.prototype.getorInitDb = function (OAC, options, callback) {
 USER_DS.prototype.getorInitDb = function (OAC, options, callback) {
   if (this.owner !== OAC.owner) throw new Error('getorInitDb SNBH - user trying to get another users info' + this.owner + ' vs ' + OAC.owner)
 
-  if (this.appcoll[appTableName(OAC)]) {
+  if (this.appcoll[appTableName(OAC)] && this.appcoll[appTableName(OAC)].query) {
+    if (this.appcoll[appTableName(OAC)].query && typeof this.appcoll[appTableName(OAC)].query !== 'function') {
+      console.log('SNBH - got a db with no query for ' + appTableName(OAC), typeof this.appcoll[appTableName(OAC)].db.query)
+      console.log('SNBH - got a db with no query for ' + appTableName(OAC), this.appcoll[appTableName(OAC)].db)
+    }
+    fdlog('ds_manager returning app coll from mem for ', appTableName(OAC))
     return callback(null, this.appcoll[appTableName(OAC)])
   } else {
     fdlog('getorInitDb need to re-init db ', appTableName(OAC))
@@ -488,7 +497,7 @@ USER_DS.prototype.getorInitAppFS = function (appName, options, callback) {
     this.initAppFS(appName, options, callback)
   }
 }
-const ENV_FILE_DIR = 'freezr_system/forked_modules/nedb-async/env/'
+
 USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
   fdlog('initAppFS for app ' + appName + 'for owner ' + this.owner, options)
 
@@ -496,6 +505,9 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
   const owner = this.owner
   const isSystemApp = helpers.is_system_app(appName)
   const fsParams = this.fsParams
+  const userRootFolder = this.fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR
+
+  fdlog('initAppFS for app ' + appName + 'for owner ' + this.owner + ' on userroot ' + userRootFolder)
 
   if (!this.fsParams) throw new Error('Cannot initiate db or fs without fs and db params for user ' + this.owner)
 
@@ -512,10 +524,10 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
   const ds = this.appfiles[appName]
 
   try {
-    if (fsParams.type === 'local' || fsParams.type === 'glitch') {
-      ds.fs = require('../' + ENV_FILE_DIR + 'dbfs_local.js')
+    if (fsParams.type === 'local') {
+      ds.fs = require(ENV_FILE_DIR + 'dbfs_local.js')
     } else {
-      const CustomFS = require('../' + ENV_FILE_DIR + 'dbfs_' + fsParams.type + '.js')
+      const CustomFS = require(ENV_FILE_DIR + 'dbfs_' + fsParams.type + '.js')
       ds.fs = new CustomFS(fsParams, { doNotPersistOnLoad: true })
     }
   } catch (e) {
@@ -524,7 +536,7 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
   }
 
   ds.pathToFile = function (endpath) {
-    const pathToRead = (isSystemApp ? 'systemapps' : (helpers.FREEZR_USER_FILES_DIR + '/' + this.owner + '/apps')) +
+    const pathToRead = (isSystemApp ? 'systemapps' : (userRootFolder + '/' + this.owner + '/apps')) +
       '/' + this.appName + '/' + endpath
     return pathToRead
   }
@@ -536,7 +548,7 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
     const theCache = this.cache.appfiles
 
     if (isSystemApp) {
-      const localpath = path.normalize(__dirname.replace('freezr_system', '') + 'systemapps/' + this.appName + '/' + endpath)
+      const localpath = path.normalize(ROOT_DIR + 'systemapps/' + this.appName + '/' + endpath)
       // fdlog('going to read local system fiule ', localpath)
       fs.readFile(localpath, options, function (err, content) {
         content = content ? content.toString() : null
@@ -547,9 +559,9 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
       // fdlog('fscache reading fromc cache ' + endpath)
       cb(null, theCache[endpath].content)
     } else {
-      const pathToRead = helpers.FREEZR_USER_FILES_DIR + '/' + this.owner + '/apps/' + this.appName + '/' + endpath
+      const pathToRead = userRootFolder + '/' + this.owner + '/apps/' + this.appName + '/' + endpath
       // fdlog('ds.readAppFile and add to fscache  ' + pathToRead)
-      const localpath = path.normalize(__dirname.replace('freezr_system', '') + pathToRead)
+      const localpath = path.normalize(ROOT_DIR + pathToRead)
 
       if (fs.existsSync(localpath)) {
         // this is included because of offthreadinstalls - may be more long-term efficient to add to cache upon install
@@ -578,7 +590,7 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
   ds.sendAppFile = function (endpath, res, options) {
     fdlog('sendAppFile ', { endpath })
     const isSystemApp = helpers.is_system_app(this.appName)
-    const partialPath = isSystemApp ? ('systemapps/' + this.appName + '/' + endpath) : (helpers.FREEZR_USER_FILES_DIR + '/' + this.owner + '/apps/' + appName + '/' + endpath)
+    const partialPath = isSystemApp ? ('systemapps/' + this.appName + '/' + endpath) : (userRootFolder + '/' + this.owner + '/apps/' + appName + '/' + endpath)
 
     const self = this
     if (!self.cache.appfiles) self.cache.appfiles = {}
@@ -590,7 +602,7 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
     if (endpath.slice(-3) === '.js') res.setHeader('content-type', 'application/javascript')
     if (endpath.slice(-4) === '.css') res.setHeader('content-type', 'text/css')
 
-    const localpath = path.normalize(__dirname.replace('freezr_system', '') + partialPath)
+    const localpath = path.normalize(ROOT_DIR + partialPath)
 
     if (fs.existsSync(localpath)) {
       self.cache.appfiles[endpath] = { fsLastAccessed: new Date().getTime() }
@@ -630,7 +642,7 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
 
   ds.sendPublicAppFile = function (endpath, res, options) {
     const isSystemApp = helpers.is_system_app(this.appName)
-    const partialPath = isSystemApp ? ('systemapps/' + this.appName + '/' + endpath) : (helpers.FREEZR_USER_FILES_DIR + '/' + this.owner + '/apps/' + appName + '/' + endpath)
+    const partialPath = isSystemApp ? ('systemapps/' + this.appName + '/' + endpath) : (userRootFolder + '/' + this.owner + '/apps/' + appName + '/' + endpath)
 
     const self = this
     if (!self.cache.appfiles) self.cache.appfiles = {}
@@ -640,7 +652,7 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
     if (endpath.slice(-3) === '.js') res.setHeader('content-type', 'application/javascript')
     if (endpath.slice(-4) === '.css') res.setHeader('content-type', 'text/css')
 
-    const localpath = path.normalize(__dirname.replace('freezr_system', '') + partialPath)
+    const localpath = path.normalize(ROOT_DIR + partialPath)
     if (fs.existsSync(localpath)) {
       // fdlog('sendPublicAppFile - sending from local ' + partialPath + 'existsSync? ' + fs.existsSync(localpath))
       self.cache.appfiles[endpath] = { fsLastAccessed: new Date().getTime() }
@@ -678,7 +690,7 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
   }
   ds.writeToUserFiles = function (endpath, content, options, cb) {
     options = options || {} // options: doNotOverWrite, nocache
-    const pathToWrite = helpers.FREEZR_USER_FILES_DIR + '/' + this.owner + '/files/' + this.appName + '/' + endpath
+    const pathToWrite = userRootFolder + '/' + this.owner + '/files/' + this.appName + '/' + endpath
     // fdlog('ds.writeToUserFiles  ' + pathToWrite)
 
     const self = this
@@ -689,8 +701,8 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
       if (err) {
         cb(err)
       } else if (!options || !options.nocache) {
-        fs.writeFile(pathToWrite, content, options, function (err, name) {
-          if (err) felog('writeToUserFiles', 'Error duplicating file in local drive for ' + this.owner + ' path: ' + pathToWrite)
+        fs.writeFile(ROOT_DIR + pathToWrite, content, options, function (err, name) {
+          if (err) felog('writeToUserFiles', 'Error duplicating file in local drive for ' + self.owner + ' path: ' + ROOT_DIR + pathToWrite, err)
           if (!err) self.cache.userfiles[endpath] = { fsLastAccessed: new Date().getTime() }
           cb(null, name)
         })
@@ -701,12 +713,12 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
   }
   ds.readUserFile = function (endpath, options, cb) {
     options = options || {} // options: nocache
-    const pathToRead = helpers.FREEZR_USER_FILES_DIR + '/' + this.owner + '/files/' + this.appName + '/' + endpath
+    const pathToRead = userRootFolder + '/' + this.owner + '/files/' + this.appName + '/' + endpath
     const self = this
     if (!self.cache.userfiles) self.cache.userfiles = {}
     if (!self.cache.userfiles[endpath]) self.cache.userfiles[endpath] = {}
 
-    const localpath = path.normalize(__dirname.replace('freezr_system', '') + pathToRead)
+    const localpath = path.normalize(ROOT_DIR + pathToRead)
     if (!options.nocache && fs.existsSync(localpath)) {
       self.cache.userfiles[endpath] = { fsLastAccessed: new Date().getTime() }
       fs.readFile(localpath, options, (err, content) => {
@@ -740,12 +752,12 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
   }
   ds.removeFile = function (endpath, options, cb) {
     options = options || {} // Currently no options
-    const pathToRead = helpers.FREEZR_USER_FILES_DIR + '/' + this.owner + '/files/' + this.appName + '/' + endpath
+    const pathToRead = userRootFolder + '/' + this.owner + '/files/' + this.appName + '/' + endpath
     const self = this
     if (!self.cache.userfiles) self.cache.userfiles = {}
     if (!self.cache.userfiles[endpath]) self.cache.userfiles[endpath] = {}
 
-    const localpath = path.normalize(__dirname.replace('freezr_system', '') + pathToRead)
+    const localpath = path.normalize(ROOT_DIR + pathToRead)
     if (fs.existsSync(localpath)) {
       fs.unlinkSync(localpath)
     }
@@ -760,14 +772,14 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
   }
 
   ds.sendUserFile = function (endpath, res, options) {
-    const partialPath = (helpers.FREEZR_USER_FILES_DIR + '/' + this.owner + '/files/' + this.appName + '/' + endpath)
+    const partialPath = (userRootFolder + '/' + this.owner + '/files/' + this.appName + '/' + endpath)
 
     const self = this
     if (!self.cache.userfiles) self.cache.userfiles = {}
     if (!self.cache.userfiles[endpath]) self.cache.userfiles[endpath] = {}
 
     // fdlog('in ds sending user endpath ' + { endpath, partialPath})
-    const localpath = path.normalize(__dirname.replace('freezr_system', '') + partialPath)
+    const localpath = path.normalize(ROOT_DIR + partialPath)
     if (fs.existsSync(localpath)) {
       // fdlog('sendUserFile - sending from local ' + partialPath)
       res.sendFile(localpath)
@@ -801,12 +813,12 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
 
   if (!isSystemApp) {
     ds.removeAllAppFiles = function (options = {}, cb) {
-      const pathToDelete = helpers.FREEZR_USER_FILES_DIR + '/' + this.owner + '/apps/' + this.appName
+      const pathToDelete = userRootFolder + '/' + this.owner + '/apps/' + this.appName
       // fdlog('ds.removeAllAppFiles  ' + pathToDelete)
       this.fs.removeFolder(pathToDelete, cb)
     }
     ds.writeToAppFiles = function (endpath, content, options = {}, cb) {
-      const pathToWrite = helpers.FREEZR_USER_FILES_DIR + '/' + this.owner + '/apps/' + this.appName + '/' + endpath
+      const pathToWrite = userRootFolder + '/' + this.owner + '/apps/' + this.appName + '/' + endpath
 
       const self = this
       if (!self.cache.appfiles) self.cache.appfiles = {}
@@ -817,7 +829,7 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
         if (err) {
           cb(err)
         } else {
-          fs.writeFile(pathToWrite, content, options, function (err, name) {
+          fs.writeFile(ROOT_DIR + pathToWrite, content, options, function (err, name) {
             if (err) felog('writeToAppFiles', 'Error duplicating file in local drive for writeToAppFiles for ', this.owner, 'path ', pathToWrite, err)
             if (!err) self.cache.appfiles[endpath] = { fsLastAccessed: new Date().getTime() }
             cb(null, name)
@@ -828,16 +840,16 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
   }
 
   const initUserDirectories = function (ds, owner, cb) {
-    fdlog('going to init directorries for user ' + helpers.FREEZR_USER_FILES_DIR + '/' + owner + '/apps/' + appName)
-    ds.fs.mkdirp(helpers.FREEZR_USER_FILES_DIR + '/' + owner + '/apps/' + appName, function (err) {
+    fdlog('going to init directorries for user ' + userRootFolder + '/' + owner + '/apps/' + appName)
+    ds.fs.mkdirp(userRootFolder + '/' + owner + '/apps/' + appName, function (err) {
       if (err) {
         cb(err)
       } else {
-        ds.fs.mkdirp((helpers.FREEZR_USER_FILES_DIR + '/' + owner + '/files/' + appName), function (err) {
+        ds.fs.mkdirp((userRootFolder + '/' + owner + '/files/' + appName), function (err) {
           if (err) {
             cb(err)
           } else {
-            ds.fs.mkdirp((helpers.FREEZR_USER_FILES_DIR + '/' + owner + '/db/' + appName), function (err) {
+            ds.fs.mkdirp((userRootFolder + '/' + owner + '/db/' + appName), function (err) {
               if (err) {
                 cb(err)
               } else {
@@ -934,7 +946,6 @@ const localCheckExistsOrCreateUserFolderSync = function (aPath, removeEndFile) {
   return;
   */
   // from https://gist.github.com/danherbert-epam/3960169 modified for sync
-  var pathSep = path.sep
   var dirs = aPath.split('/')
   if (removeEndFile) dirs.pop()
   var root = ''
@@ -944,7 +955,7 @@ const localCheckExistsOrCreateUserFolderSync = function (aPath, removeEndFile) {
   function mkDir () {
     var dir = dirs.shift()
     if (dir === '') { // If directory starts with a /, the first path will be th root user folder.
-      root = path.normalize(__dirname.replace('freezr_system', '')) + pathSep
+      root = path.normalize(ROOT_DIR) // 2022 rem + pathSep
     }
     if (!fs.existsSync(root + dir)) {
       fs.mkdirSync(root + dir)

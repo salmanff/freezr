@@ -85,6 +85,23 @@ exports.ENV_PARAMS = {
         { name: 'redirecturi', display: 'redirect Uri:', optional: true }],
       oauth: true
     },
+    fdsFairOs: {
+      type: 'fdsFairOs',
+      label: 'Ethereum Swarm (Fair OS)',
+      msg: 'Use ethereum swarm as your storage, via the Fair Data Society fairos gateway. Enter your existing user name and password or leave empty to use the same user name and password above (if available)',
+      warning: '',
+      forPages: ['unRegisteredUser', 'newParams'],
+      fields: [
+        { name: 'fdsGateway', display: 'Gateway url:' },
+        { name: 'userName', display: 'fds user name:' },
+        { name: 'fdsPass', display: 'fds password:' },
+        { name: 'podname', hide: true, display: 'pod Name:', optional: true, default: 'freezrPod01' },
+        { name: 'tempLocalFolder', hide: true, display: 'local temp Folder:', optional: true, default: 'tempfolder' }
+      ],
+      oauth: false,
+      canCreateNewUser: true,
+      newUserMsg: 'Add a menominc based on the set of 12 words here, or freezr can generate it for you automatically'
+    },
     aws: {
       type: 'aws',
       label: 'AWS (Amazon)',
@@ -240,15 +257,14 @@ exports.checkAndCleanDb = function (dbParams, freezrInitialEnvCopy) {
   if (dbParams.choice === 'sysDefault') {
     return freezrInitialEnvCopy.dbParams
   }
-  // console.log('todo - add VALID_DB_CHOICES check')
   return dbParams
 }
 exports.checkAndCleanFs = function (fsParams, freezrInitialEnvCopy) {
   // returns null if invalid for any reason
-  fdlog('checkAndCleanDb', { fsParams, freezrInitialEnvCopy })
+  fdlog('checkAndCleanDb', { fsParams, freezrInitialEnvCopy }, JSON.stringify(freezrInitialEnvCopy))
   if (!fsParams) return null
   if (!fsParams.choice) fsParams.choice = fsParams.type
-  const VALID_FS_CHOICES = ['system', 'sysDefault', 'local', 'dropbox', 'googleDrive', 'glitch']
+  const VALID_FS_CHOICES = ['system', 'sysDefault', 'local', 'dropbox', 'googleDrive', 'fdsFairOs', 'glitch']
   fdlog('checking fs type choice ', { fsParams })
   if (!VALID_FS_CHOICES.includes(fsParams.choice)) felog('checkAndCleanFs', 'error - invalid fs choice ', fsParams)
   if (!fsParams.choice || !VALID_FS_CHOICES.includes(fsParams.choice)) return null
@@ -257,11 +273,22 @@ exports.checkAndCleanFs = function (fsParams, freezrInitialEnvCopy) {
   } else {
     felog('checkAndCleanFs', 'WARNING for developers - it is best to implement checkAndCleanFs for fs choice ' + fsParams.choice)
   }
+  fdlog('cleaned and checked params - now are: ', fsParams)
   return fsParams
 }
 const fsParseCreds = {
   local: function (credentials) {
-    return { choice: 'local', type: 'local' }
+    fdlog('fsParseCreds credentials', credentials) // isglitch
+    if (!credentials) {
+      console.warn('fsParseCreds  without any credentials ???????? SNBH')
+      credentials = {}
+    }
+    var final = {
+      type: 'local',
+      choice: (credentials.choice || 'local'),
+      rootFolder: (credentials.rootFolder || 'users_freezr')
+    }
+    return final
   },
   sysDefault: function (credentials, freezrInitialEnvCopy) {
     return freezrInitialEnvCopy.fsParams
@@ -310,6 +337,12 @@ const fsParseCreds = {
       newCreds = null
     }
     return newCreds
+  },
+  fdsFairOs: function (credentials) {
+    if (!credentials.podname) credentials.podname = 'freezrPod01'
+    if (!credentials.tempLocalFolder) credentials.tempLocalFolder = 'tempfolder'
+    if (helpers.startsWith(credentials.fdsGateway, 'https://')) credentials.fdsGateway = credentials.fdsGateway.substring(0, 8)
+    return credentials
   }
 }
 
@@ -367,6 +400,7 @@ exports.checkFS = function (env, options, callback) {
 
   fdlog('checkFS env ', env)
   fdlog('checkFS options ', options)
+  // onsole.log('checkFS  ', { env, options })
 
   if (!env || !env.fsParams) {
     callback(new Error('No paramters found.'))
@@ -408,8 +442,8 @@ exports.checkFS = function (env, options, callback) {
               }
               options = options || {}
               const userId = options.userId || 'test'
-              userAppFS.fs.mkdirp((helpers.FREEZR_USER_FILES_DIR + '/' + userId + '/db'), function (err) {
-                fdlog('Made directory : ', helpers.FREEZR_USER_FILES_DIR + '/' + userAppFS.owner + '/db')
+              userAppFS.fs.mkdirp(((userAppFS.fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/' + userId + '/db'), function (err) {
+                fdlog('Made directory : ', (userAppFS.fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/' + userAppFS.owner + '/db')
                 if (err) {
                   callback(err)
                 } else {
@@ -607,8 +641,7 @@ var autoDbParams = function (callback) {
 
   if (process && process.env && process.env.FREEZR_DB && process.env.FREEZR_DB.toLowerCase() === 'nedb') {
     foundDbParams = {
-      type: 'nedb',
-      db_path: (isGlitch() ? (GLITCH_USER_ROOT) : '')
+      type: 'nedb'
     }
   }
 
@@ -746,8 +779,7 @@ var autoDbParams = function (callback) {
     // 5. NEDB
     function (cb) {
       otherOptions.NEDB_LOCAL.params = { // default local
-        type: 'nedb',
-        db_path: (isGlitch() ? (GLITCH_USER_ROOT) : '')
+        type: 'nedb'
       }
       const tempParams = {
         fsParams: fsParams(),
@@ -791,8 +823,9 @@ var fsParams = function () {
     }
   } else if (isGlitch()) {
     return {
-      type: 'glitch',
-      userRoot: GLITCH_USER_ROOT
+      type: 'local',
+      choice: 'glitch',
+      rootFolder: GLITCH_USER_ROOT
     }
   } else {
     return {
@@ -804,7 +837,7 @@ var fsParams = function () {
 function isGlitch () {
   return (process && process.env && process.env.API_SERVER_EXTERNAL && process.env.API_SERVER_EXTERNAL.indexOf('glitch') > 0)
 }
-const GLITCH_USER_ROOT = '.data'
+const GLITCH_USER_ROOT = '.data/users_freezr'
 
 // Loggers
 const LOG_ERRORS = true

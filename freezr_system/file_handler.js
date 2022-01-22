@@ -370,9 +370,11 @@ exports.renameLocalFileOrFolder = function (oldPartialPath, newpartialPath, call
     callback(err)
   })
 }
-exports.partialPathToAppFile = function (userId, appFilename) {
-  return helpers.FREEZR_USER_FILES_DIR + '/' + userId + '/files/' + appFilename
-}
+
+// todo 2022-01 no longer used?
+// exports.partialPathToAppFile = function (userId, appFilename) {
+// return helpers.FREEZR_USER_FILES_DIR + '/' + userId + '/files/' + appFilename
+//}
 exports.mkdirp = mkdirp
 exports.dirFromFile = function (filePath) {
   var dir = filePath.split('/')
@@ -381,7 +383,7 @@ exports.dirFromFile = function (filePath) {
 }
 exports.removeCloudAppFolder = function (appFS, callback) {
   // console.log - think through - should this really be in ds_manager?
-  const appPath = helpers.FREEZR_USER_FILES_DIR + '/' + appFS.owner + '/apps/' + appFS.appName
+  const appPath = (appFS.fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/' + appFS.owner + '/apps/' + appFS.appName
   async.waterfall([
     function (cb) {
       appFS.fs.removeFolder(appPath, cb)
@@ -394,7 +396,7 @@ exports.removeCloudAppFolder = function (appFS, callback) {
 
 exports.extractZipAndReplaceToCloudFolder = function (zipfile, originalname, appFS, callback) {
   // console.log - think through - should this really be in ds_manager?
-  const appPath = helpers.FREEZR_USER_FILES_DIR + '/' + appFS.owner + '/apps/' + appFS.appName
+  const appPath = (appFS.fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/' + appFS.owner + '/apps/' + appFS.appName
   async.waterfall([
     function (cb) {
       appFS.fs.removeFolder(appPath, cb)
@@ -402,7 +404,7 @@ exports.extractZipAndReplaceToCloudFolder = function (zipfile, originalname, app
     function (cb) {
       appFS.fs.mkdirp(appPath, cb)
     },
-    function (cb) {
+    function (ret, cb) {
       exports.extractZipToCloudFolder(zipfile, originalname, appFS, cb)
     }],
   callback)
@@ -459,7 +461,7 @@ exports.extractZipToCloudFolder = function (zipfile, originalname, appFS, callba
     } else if (useAppFileFSCache()){
       try {
               var zip = new AdmZip(zipfile); //"zipfilesOfAppsInstalled/"+app_name);
-          var partialUrl = FREEZR_USER_FILES_DIR+path.sep+app_name;
+          var partialUrl = (add userRootFolder if need be ||) FREEZR_USER_FILES_DIR +path.sep+app_name;
                 var FSCache_app_path = systemPathTo(partialUrl);
 
               if (gotDirectoryWithAppName) {

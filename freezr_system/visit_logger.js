@@ -104,7 +104,7 @@ function write_full_log_file (req, env_params, callback) {
 	if (!last_file_name) make_new_file=true;
 	if (make_new_file) last_file_name = "full_logs_"+current_date+".json";
 
-  var the_url = helpers.FREEZR_USER_FILES_DIR + '/fradmin/files/info.freezr.admin/daily_log_files/' + (new Date().getFullYear())
+  var the_url = (env_params.fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/fradmin/files/info.freezr.admin/daily_log_files/' + (new Date().getFullYear())
 	file_handler.writeTextToUserFile (
 		file_handler.normUrl(the_url),
 		last_file_name,

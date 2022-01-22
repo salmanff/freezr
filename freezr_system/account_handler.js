@@ -372,6 +372,7 @@ exports.list_all_user_apps = function (req, res) {
     // 2. get all user apps
     function (appList, cb) {
       if (!appList || !appList.query) {
+        felog('bad retrieval of db ', { appList })
         cb(new Error('inccomplete or authentication malfucntion getting db for ' + userId))
       } else {
         appList.query({}, null, cb)
@@ -452,7 +453,7 @@ exports.get_file_from_url_to_install_app = function (req, res) {
   }
 
   const tempAppName = req.body.app_name
-  const tempFolderPath = helpers.FREEZR_USER_FILES_DIR + '/' + req.session.logged_in_user_id + '/tempapps/' + tempAppName
+  const tempFolderPath = (req.freezrUserDS.fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/' + req.session.logged_in_user_id + '/tempapps/' + tempAppName
 
   fileHandler.mkdirp(tempFolderPath, function (err) {
     if (err) {
@@ -540,7 +541,7 @@ exports.install_blank_app = function (req, res) {
         cb(null) // local files are the main files - dont delete
       } else {
         appFS.cache.appfiles = {}
-        const realAppPath = helpers.FREEZR_USER_FILES_DIR + '/' + req.session.logged_in_user_id + '/apps/' + appName
+        const realAppPath = (appFS.fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/' + req.session.logged_in_user_id + '/apps/' + appName
         fileHandler.deleteLocalFolderAndContents(realAppPath, cb)
       }
     }
@@ -564,7 +565,7 @@ exports.install_app = function (req, res) {
   let appFS // ds generated from userAppFs
 
   const tempAppName = tempAppNameFromFileName(req.file.originalname)
-  const tempFolderPath = helpers.FREEZR_USER_FILES_DIR + '/' + req.session.logged_in_user_id + '/tempapps/' + tempAppName
+  const tempFolderPath = (userDS.fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/' + req.session.logged_in_user_id + '/tempapps/' + tempAppName
 
   var manifest = null
   let realAppName
@@ -632,7 +633,7 @@ exports.install_app = function (req, res) {
     function (userAppFS, cb) {
       appFS = userAppFS
       // todo fdlog - add glitch prefix to folder
-      realAppPath = helpers.FREEZR_USER_FILES_DIR + '/' + req.session.logged_in_user_id + '/apps/' + realAppName
+      realAppPath = (appFS.fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/' + req.session.logged_in_user_id + '/apps/' + realAppName
       appFS.cache.appfiles = {}
       fileHandler.deleteLocalFolderAndContents(realAppPath, cb)
     },
@@ -714,11 +715,16 @@ exports.install_app = function (req, res) {
           app_table: appTable
         }
         req.freezrUserDS.getorInitDb(oac, {}, function (err, aDb) {
-          if (err) felog('install_app - err in initiating installed app db ', err)
-          aDb.query(null, { count: 1 }, function (err, results) {
-            if (err) felog('install_app - err in querying installed app db ', err)
-            fdlog('db fake query for init - query results ', results)
-          })
+          if (err) {
+            felog('install_app - err in initiating installed app db ', err)
+          } else if (!aDb || !aDb.query) {
+            felog('install_app - err in initiating installed app db - no db present')
+          } else {
+            aDb.query(null, { count: 1 }, function (err, results) {
+              if (err) felog('install_app - err in querying installed app db ', err)
+              fdlog('db fake query for init - query results ', results)
+            })
+          }
         })
       }
     }
@@ -878,7 +884,7 @@ exports.appMgmtActions = function (req, res) /* deleteApp updateApp */ {
         req.freezrUserPermsDB.delete_records({ requestor_app: appName }, null, cb)
       },
       function (results, cb) {
-        const folderPath = helpers.FREEZR_USER_FILES_DIR + '/' + req.session.logged_in_user_id + '/apps/' + appName
+        const folderPath = (req.freezrUserDS.fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/' + req.session.logged_in_user_id + '/apps/' + appName
         fileHandler.deleteLocalFolderAndContents(folderPath, cb)
       },
       function (cb) {
@@ -912,7 +918,7 @@ exports.appMgmtActions = function (req, res) /* deleteApp updateApp */ {
     const userDS = req.freezrUserDS
     let manifest = null
     let appFS
-    const realAppPath = helpers.FREEZR_USER_FILES_DIR + '/' + req.session.logged_in_user_id + '/apps/' + realAppName
+    const realAppPath = (userDS.fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/' + req.session.logged_in_user_id + '/apps/' + realAppName
 
     async.waterfall([
       // updateApp 1. make sure data and file names exist

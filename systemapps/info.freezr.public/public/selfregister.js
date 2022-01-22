@@ -4,6 +4,7 @@
 // thisPage is passed as 'firstSetUp' or unRegisteredUser (when self-registering) or newParams when registered but user doesnt have fs  and db params defined
 
 freezr.initPageScripts = function () {
+  if (!document.location.host.includes('localhost')) delete ENV_PARAMS.FS.local
   const fstype = (freezrEnvironment && freezrEnvironment.fsParams) ? (freezrEnvironment.fsParams.choice || freezrEnvironment.fsParams.type) : null
   const dbtype = (freezrEnvironment && freezrEnvironment.dbParams) ? (freezrEnvironment.dbParams.choice || freezrEnvironment.dbParams.type) : null
   createSelector('FS', fstype)
@@ -131,7 +132,9 @@ const changeSelector = function (resource) {
           input.setAttribute('size', '40')
           input.setAttribute('name', (choice + '_' + item.name))
           input.id = choice + '_' + item.name
+          if (item.default) input.value = item.default
           col2.appendChild(input)
+          if (item.hide) row.style.display = 'none'
           row.appendChild(col2)
           // if (item.show === 'hide') row.style = 'display: none'
           table.appendChild(row)

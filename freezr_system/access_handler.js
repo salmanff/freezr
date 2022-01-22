@@ -498,7 +498,12 @@ exports.getManifest = function (req, res, dsManager, next) {
       dsManager.getorInitDb({ app_table: 'info.freezr.account.app_list', owner: ownerId }, {}, cb)
     },
     function (freezrUserAppListDB, cb) {
-      freezrUserAppListDB.query({ app_name: appName }, {}, cb)
+      if (!freezrUserAppListDB || !freezrUserAppListDB.query) {
+        felog('getManifest err - no db at ', { freezrUserAppListDB })
+        cb(new Error('could not get freezrUserAppListDB'))
+      } else {
+        freezrUserAppListDB.query({ app_name: appName }, {}, cb)
+      }
     },
     function (list, cb) {
       if (!list || list.length === 0 || !list[0].manifest) {

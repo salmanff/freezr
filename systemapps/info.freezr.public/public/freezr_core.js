@@ -479,12 +479,10 @@ freezr.utils.refreshFileTokens = function (eltag = 'IMG', attr = 'src') {
   if (pictList.length > 0) {
     const host = window.location.href.slice(0, (window.location.href.slice(8).indexOf('/') + 8))
     const fepspath = '/feps/userfiles/'
-    let pictId
-    let appName
     for (var i = 0; i < pictList.length; i++) {
       if (freezr.utils.startsWith(pictList[i][attr], host + fepspath)) {
-        appName = pictList[i][attr].split('/')[5]
-        pictId = pictList[i][attr].slice((host.length + appName.length + fepspath.length + 1)).split('?')[0]
+        var parts = pictList[i][attr].split('/')
+        const pictId = parts.slice(7).join('/').split('?')[0]
         freezr.utils.setFilePath(pictList[i], attr, pictId) //, {'permission_name':'picts_share'}
       }
     }

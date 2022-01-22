@@ -209,8 +209,6 @@ exports.generateFirstSetUpPage = function (req, res) {
     tempEnvironment.fsParams.TokenIsOnServer = true
   }
 
-
-
   var options = {
     page_title: 'Freeezr Set Up',
     css_files: ['./public/info.freezr.public/public/firstSetUp.css', './public/info.freezr.public/public/freezr_style.css'],
@@ -334,7 +332,7 @@ exports.user_register = function (req, res) {
 
 exports.self_register = function (req, res) {
   // app.post('/v1/admin/self_register', selfRegisterChecks, selfRegAdds, adminHandler.self_register)
-  fdlog('self_register', req.body.action)
+  fdlog('self_register', req.body.action, req.freezrInitialEnvCopy)
 
   if ((req.freezrIsSetup && req.body.resource === 'FS' && req.body.params.type === 'local') ||
     (req.freezrIsSetup && req.body.resource === 'DB' && req.body.params.choice === 'mongoLocal')) {
@@ -345,6 +343,8 @@ exports.self_register = function (req, res) {
       var { fsParams, dbParams } = req.body.env
       if (fsParams && fsParams.useServerToken && fsParams.type === initialEnv.fsParams.type) {
         req.body.env.fsParams = initialEnv.fsParams
+      } else if (fsParams && fsParams.choice === 'sysDefault' && (req.body.action === firstSetUp || req.freezrAllowAccessToSysFsDb)) {
+        fsParams = initialEnv.fsParams
       }
       if (dbParams && dbParams.useServerToken && dbParams.type === initialEnv.dbParams.type) {
         req.body.env.dbParams = initialEnv.dbParams
@@ -378,7 +378,7 @@ exports.self_register = function (req, res) {
         setupNewUserParams(req, res)
         break
       default:
-        console.log('unknown action')
+        console.warn('unknown action - ' + req.body.action)
         helpers.send_failure(res, new Error('unknown action'), 'admin_handler', exports.version, 'self_register')
         break
     }
@@ -386,9 +386,7 @@ exports.self_register = function (req, res) {
 }
 
 const firstSetUp = function (req, res) {
-  fdlog('firstSetUp - first time register (or resetting of parameters) for user :', req.body)
-  console.log('firstSetUp - first time register (or resetting of parameters) for user :', req.body)
-  // console.log('firstSetUp - req.freezrInitialEnvCopy :', req.freezrInitialEnvCopy)
+  fdlog('firstSetUp - first time register (or resetting of parameters) for body:', req.body, ' req.freezrInitialEnvCopy: ', req.freezrInitialEnvCopy)
   const uid = helpers.user_id_from_user_input(req.body.userId)
   const { userId, password } = req.body
   const fsParams = (req.body && req.body.env && req.body.env.fsParams) ? environmentDefaults.checkAndCleanFs(req.body.env.fsParams, req.freezrInitialEnvCopy) : null
@@ -545,8 +543,8 @@ const firstSetUp = function (req, res) {
       cb(null)
     }
   ], function (err) {
-    felog('firstSetUp', 'registration end err?', err)
     if (err) {
+      felog('firstSetUp', 'registration end err?', err)
       helpers.send_failure(res, err, 'admin_handler', exports.version, 'oauth_make:item does not exist')
     } else {
       const freezrPrefsTempPw = helpers.randomText(20)
@@ -944,7 +942,8 @@ exports.change_main_prefs = function (req, res, next) {
   })
 }
 
-const hackingStuff = function (req, res) {
+exports.hackingStuff = function (req, res) {
+  // temporary data migration
   let publicRecDb = null
   let oldAccessibles = null
   async.waterfall([

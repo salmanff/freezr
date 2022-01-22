@@ -1,3 +1,0 @@
-{"_id":"1","a":5,"planet":"Earth"}
-{"_id":"2","a":5,"planet":"Mars"}
-{"$$indexCreated":{"fieldName":"a","unique":true}}

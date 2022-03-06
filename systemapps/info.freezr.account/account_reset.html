@@ -1,0 +1,59 @@
+<!--
+freezr Account Home
+	app_list refers to app_list.html
+	options:
+	 'home': {
+        page_title: "Accounts Home (Freezr)",
+        css_files: ['info.freezr.public/freezr_style.css', 'account_home.css'],
+        page_url: 'account_home.html',
+        app_name: "info.freezr.account",
+        script_files: ['/app_files/info.freezr.account/account_home.js']
+    },
+
+-->
+
+<div class="freezer_texture_outer">
+  <div class="freezer_texture_inner">
+		<div class="freezer_top_app_menu" id="adminFunctions">
+			<a href="/account/app_management">App Management</a>
+			&nbsp;
+			<a href="/public">Public Page</a>
+			&nbsp;
+			<a href="/account/logout">Log Out</a>
+		</div>
+
+		<div class="freezer_dialogueTitle">freezr - Account Reset</div>
+
+
+    <div class="freezer_dialogueTitle">Page Under Construction</div>
+
+		<div id="main">
+      <table>
+        <tr>
+          <td width="150px" align="right">Owner (user id):</td>
+          <td width="220px"><div id="userId" >{{owner}}</div></td>
+        </tr>
+        <tr>
+          <td width="150px" align="right">File System:</td>
+          <td width="220px"><input type="text" size="40" id="fsParamsType" name="fsParamsType" value="{{fsParamsType}}"/></td>
+        </tr>
+      </table>
+
+			<div id = "passEnterDiv">
+        <table>
+          <tr>
+              <td width="150px" align="right">Your freezr password:</td>
+              <td width="220px"><input type="password" size="40" id="password" name="password"/></td>
+            </tr>
+        </table>
+        <center class="leftspace">
+          <div id="click_recordAuthParams" class = "small_butt butt_strng">Record new parameters</div>
+        </center>
+      </div>
+
+      <div id="errorBox" class="errorBox">
+
+		  </div>
+    </div>
+  </div>
+</div>

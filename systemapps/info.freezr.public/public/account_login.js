@@ -27,12 +27,22 @@ const logIn = function (evt) {
     if (window.location.protocol === 'https:' || window.location.host.split(':')[0] === 'localhost' || confirm('Are you sure you want to send your passord through with an https - You will expose your password')) {
       const theInfo = { user_id: userId, password, login_for_app_name: null }
       freezerRestricted.connect.ask('/v1/account/login', theInfo, gotLoginStatus)
+      document.getElementById('launch_spinner').style.display = 'block'
+      document.getElementById('loginButt').style.display = 'none'
+      document.getElementById('self_register_link').style.display = 'none'
+      didNotReturnFromLogin = true
+      setTimeout(function () { if (didNotReturnFromLogin) document.getElementById('launchspintext').style.display = 'block' }, 1000)
     }
   }
 }
-
+var didNotReturnFromLogin = false
 var gotLoginStatus = function(error, data) {
   // console.log('login status ', { error, data })
+  didNotReturnFromLogin = false
+  document.getElementById('launch_spinner').style.display = 'none'
+  document.getElementById('launchspintext').style.display = 'none'
+  document.getElementById('loginButt').style.display = 'block'
+
  	if (error) {
 		showError("Error Logging in :" + error.message);
 	} else if (data.error) {

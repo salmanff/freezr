@@ -307,6 +307,7 @@ const addAppUses = function (cookieSecrets) {
   // public todo fdlog('to review')
   app.get('/pcard/:user_id/:requestor_app/:permission_name/:app_name/:collection_name/:data_object_id', publicUserPage, addPublicRecordsDB, addPublicUserFs, publicHandler.generatePublicPage)
   app.get('/pcard/:user_id/:app_name/:collection_name/:data_object_id', publicUserPage, addPublicRecordsDB, addPublicUserFs, publicHandler.generatePublicPage)
+
   app.get('/papp/:user_id/:app_name/:page', publicUserPage, addPublicRecordsDB, addPublicUserFs, publicHandler.generatePublicPage)
   app.get('/papp/:user_id/:app_name', publicUserPage, addPublicRecordsDB, addPublicUserFs, publicHandler.generatePublicPage)
   app.get('/ppage/:user_id/:app_table/:data_object_id', publicUserPage, addPublicRecordAndIfFileFileFS, publicHandler.generateSingleObjectPage)
@@ -341,7 +342,7 @@ const addAppUses = function (cookieSecrets) {
   app.post('/v1/account/applogout', userAppLogOut)
 
   app.post('/v1/account/appMgmtActions.json', accountLoggedInAPI, addUserAppsAndPermDBs, accountHandler.appMgmtActions)
-  app.put('/v1/account/removeFromFreezr.json', accountLoggedInAPI, addAllUsersDb, accountHandler.removeFromFreezr)
+  app.put('/v1/account/removeFromFreezr.json', accountLoggedInAPI, addAllUsersDb, addPublicRecordsDB, accountHandler.removeFromFreezr)
   app.put('/v1/account/changePassword.json', accountLoggedInAPI, addAllUsersDb, accountHandler.changePassword)
   app.get('/v1/account/apppassword/generate', accountLoggedInAPI, addAppTokenDB, accountHandler.app_password_generate_one_time_pass)
   app.get('/v1/account/apppassword/updateparams', accountLoggedInAPI, addAppTokenDB, accountHandler.app_password_update_params)
@@ -673,7 +674,7 @@ async.waterfall([
   freezrStatus.fundamentals_okay = canUseDbAndFs(freezrStatus)
   console.log('Startup checks complete.')
   console.log({ freezrStatus })
-  //onsole.log({ freezrPrefs })
+  // onsole.log({ freezrPrefs })
   if (err) console.log(' XXXXXXXXXXXXXXXXXXXXXXXXXXX Got err on start ups XXXXXXXXXXXXXXXXXXXXXXXXXXX ')
   if (err) helpers.warning('startup_waterfall', 'STARTUP ERR ' + JSON.stringify(err))
 

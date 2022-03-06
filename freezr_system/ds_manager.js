@@ -157,9 +157,10 @@ USER_DS.prototype.getorInitDb = function (OAC, options, callback) {
 
   if (this.appcoll[appTableName(OAC)] && this.appcoll[appTableName(OAC)].query) {
     if (this.appcoll[appTableName(OAC)].query && typeof this.appcoll[appTableName(OAC)].query !== 'function') {
-      console.log('SNBH - got a db with no query for ' + appTableName(OAC), typeof this.appcoll[appTableName(OAC)].db.query)
-      console.log('SNBH - got a db with no query for ' + appTableName(OAC), this.appcoll[appTableName(OAC)].db)
+      felog('SNBH - got a db with no query for ' + appTableName(OAC), typeof this.appcoll[appTableName(OAC)].db.query)
+      felog('SNBH - got a db with no query for ' + appTableName(OAC), this.appcoll[appTableName(OAC)].db)
     }
+    if (this.fsParams && this.fsParams.type === 'fdsFairOs') updateCookieFor(appTableName(OAC), this.appcoll, this.fsParams.type)
     fdlog('ds_manager returning app coll from mem for ', appTableName(OAC))
     return callback(null, this.appcoll[appTableName(OAC)])
   } else {
@@ -167,6 +168,7 @@ USER_DS.prototype.getorInitDb = function (OAC, options, callback) {
     this.initOacDB(OAC, options = {}, callback)
   }
 }
+
 USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
   if (this.owner !== OAC.owner) throw new Error('Cannot initiate an oacDB for another user ' + this.owner + ' vs ' + OAC.owner)
   if (!this.dbParams) throw new Error('Cannot initiate db or fs without fs and db params for user ' + this.owner)
@@ -175,6 +177,9 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
   const userDs = this
   const dbParams = this.dbParams
   const fsParams = this.fsParams
+
+  let extraCreds = null
+  if (fsParams.type === 'fdsFairOs') extraCreds = getbestExistingFDSCookie(this.appcoll, fsParams.type)
 
   if (!this.appcoll[appTableName(OAC)]) {
     this.appcoll[appTableName(OAC)] = {
@@ -197,7 +202,7 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
   // fdlog('initOacDB ' + this.owner, { dbParams, fsParams, OAC })
 
   const DB_CREATOR = require('../freezr_system/environment/dbApi_' + dbParams.type + '.js')
-  ds.db = new DB_CREATOR({ dbParams, fsParams }, OAC)
+  ds.db = new DB_CREATOR({ dbParams, fsParams, extraCreds }, OAC)
 
   ds.db.initDB(function (err) {
     if (err) {
@@ -974,6 +979,48 @@ const localCheckExistsOrCreateUserFolderSync = function (aPath, removeEndFile) {
 
 // Interface
 module.exports = DATA_STORE_MANAGER
+
+// Helper functions for fds (and potentially other cookie based auths
+const isExpired = function (cookieObj, resourceType) {
+  if (resourceType === 'fdsFairOs') {
+    const fdsAdjustment = (23 * 60 * 60 * 1000)
+    // note that fds sets cookies to expire in 24 hours even if they expire in 1 hour
+    const safetyMargin = (2 * 60000)
+    return ((cookieObj.expires - fdsAdjustment - safetyMargin) < new Date().getTime())
+  } else {
+    felog('isExpired should only be working with fdsFairOs at this point.')
+    return true
+  }
+}
+const getbestExistingFDSCookie = function (appcolls, resourceType) {
+  // only relevant for resourceType fds right now
+  // Note algorithm needs mroe checks if different apps have different fsParams types
+  let currentBest = null
+  for (const [appTable, ds] of Object.entries(appcolls)) {
+    if (ds.db && ds.db.db && ds.db.db.customFS && ds.db.db.customFS.cookie) {
+      const cookieObj = ds.db.db.customFS.cookie
+      if (!isExpired(cookieObj, resourceType) &&
+        (!currentBest || currentBest.expires < cookieObj.expires)) {
+        currentBest = ds.db.db.customFS.cookie
+      } else {
+        // todo - add bestcookie to the expired ones too???
+      }
+    } else {
+      fdlog('NO cookie for ' + appTable)
+    }
+  }
+  return currentBest
+}
+const updateCookieFor = function (appTable, appcolls, resourceType) {
+  // only relevant for resourceType fds right now
+  const thisAppColl = appcolls[appTable]
+  if (thisAppColl.db && thisAppColl.db.db && thisAppColl.db.db.customFS && thisAppColl.db.db.customFS.cookie) {
+    const currentBest = getbestExistingFDSCookie(appcolls, resourceType)
+    if (currentBest) thisAppColl.db.db.customFS.cookie = currentBest
+  } else {
+    felog('No cookie in existing object - SNBH')
+  }
+}
 
 // Loggers
 const LOG_ERRORS = true

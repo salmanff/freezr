@@ -15,4 +15,7 @@ freezr.initPageScripts = function() {
 	  }
   }, 1000);
   if (!freezrMeta.adminUser) {document.getElementById("freezer_admin_butt").style.display="none";}
+
+  const searchParams = new URLSearchParams(window.location.search)
+  if (searchParams.get('show') === 'welcome') document.getElementById('welcomeMsg'),style.display = 'block'
 }

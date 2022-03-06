@@ -302,6 +302,8 @@ exports.removeFromFreezr = function (req, res) {
         cb(helpers.auth_failure('account_handler.js', exports.version, 'removeFromFreezr', 'user not logged in'))
       } else if (!req.body.oldPassword) {
         cb(helpers.auth_failure('account_handler.js', exports.version, 'removeFromFreezr', 'Missing old password'))
+      } else if (req.session.logged_in_as_admin) {
+        cb(helpers.auth_failure('account_handler.js', exports.version, 'removeFromFreezr', 'Cannot remove admins'))
       } else {
         cb(null)
       }
@@ -323,22 +325,36 @@ exports.removeFromFreezr = function (req, res) {
       } else if (u.check_passwordSync(req.body.oldPassword)) {
         cb(null)
       } else {
+        // console.log => need to limit number of wrong passwords - set a file in the datastore
         fdlog('need to limit number of wrong passwords - set a file in the datastore ;) ')
         cb(helpers.auth_failure('account_handler.js', exports.version, 'removeFromFreezr', 'Wrong password'))
       }
     },
 
-    // 3. cremvoe the user
+    // 3. remove the user
     function (cb) {
-      if (!req.session.logged_in_as_admin && (req.freezrUserDS.fsParams.type === 'dropbox' || req.freezrUserDS.fsParams.type === 'googleDrive')) {
+      if (!req.session.logged_in_as_admin && (['fdsFairOs', 'dropbox', 'googleDrive'].indexOf(req.freezrUserDS.fsParams.type) > -1)) {
         req.allUsersDb.delete_record(userId, null, cb)
       } else {
         cb(new Error('A user cannot delete itdslef if it is admin or is using system resources.'))
       }
-    }
+    },
 
+    // remove public posts
+    function (returns, cb) {
+      req.freezrPublicRecordsDB.query({ data_owner: req.session.logged_in_user_id }, {}, cb)
+    },
+    function (publicRecords, cb) {
+      if (!publicRecords || publicRecords.length === 0) {
+        cb(null)
+      } else {
+        async.forEach(publicRecords, function (rec, cb2) {
+          req.freezrPublicRecordsDB.delete_record(rec._id, null, cb2)
+        }, cb)
+      }
+    }
   ],
-  function (err, returns) {
+  function (err) {
     if (err) {
       helpers.send_failure(res, err, 'account_handler', exports.version, 'removeFromFreezr')
     } else {
@@ -381,7 +397,18 @@ exports.list_all_user_apps = function (req, res) {
 
     function (results, cb) {
       if (results && results.length > 0) {
-        results = results.map(app => { return { app_name: app.app_name, removed: app.removed, _date_modified: app._date_modified, _id: app._id, app_display_name: app.app_display_name, offThreadWip: app.offThreadWip, offThreadParams: app.offThreadParams } })
+        results = results.map(app => {
+          return {
+            app_name: app.app_name,
+            removed: app.removed,
+            _date_modified: app._date_modified,
+            _id: app._id,
+            app_display_name:
+            app.app_display_name,
+            offThreadWip: ((app.offThreadStatus && app.offThreadStatus.offThreadWip) ? app.offThreadStatus.offThreadWip : false),
+            offThreadParams: ((app.offThreadStatus && app.offThreadStatus.offThreadParams) ? app.offThreadStatus.offThreadParams : null)
+          }
+        })
         for (var i = 0; i < results.length; i++) {
           if (results[i].app_name && results[i].app_name === results[i].app_display_name) { results[i].app_display_name = results[i].app_display_name.replace(/\./g, '. ') }
           results[i].logo = '/app_files/' + results[i].app_name + '/static/logo.png'
@@ -645,8 +672,8 @@ exports.install_app = function (req, res) {
     function (cb) {
       if (appFS.fsParams.type === 'local' || appFS.fsParams.type === 'glitch') {
         cb(null) // already copied to local above
-      } else if (req.installsource === 'get_file_from_url_to_install_app' && ['dropbox', 'googleDrive'].includes(appFS.fsParams.type)) {
-        // console.log todo - dropbox and google drive should have an offline isntall parameter that should be used instead of the includes above
+      } else if (req.installsource === 'get_file_from_url_to_install_app' && ['dropbox', 'googleDrive', 'fdsFairOs'].includes(appFS.fsParams.type)) {
+        // console.log todo - fds dropbox and google drive should have an offline isntall parameter that should be used instead of the includes above
         offThreadExtraction({
           file: req.file.buffer,
           name: req.file.originalname,
@@ -707,7 +734,12 @@ exports.install_app = function (req, res) {
     helpers.send_success(res, { err: err, flags: flags.sentencify() })
 
     // preload databases
-    if (manifest.app_tables && Object.keys(manifest.app_tables).length > 0 && manifest.app_tables.constructor === Object) {
+    if (!manifest) {
+      felog('No manifest for ' + realAppName + '- creating one - SNBH')
+      manifest = { app_tables: {} }
+      manifest.app_tables[realAppName] = {}
+    }
+    if (!err && manifest.app_tables && Object.keys(manifest.app_tables).length > 0 && manifest.app_tables.constructor === Object) {
       for (const appTable in manifest.app_tables) {
         const oac = {
           owner: req.session.logged_in_user_id,
@@ -727,6 +759,8 @@ exports.install_app = function (req, res) {
           }
         })
       }
+    } else {
+      fdlog('no pre-loading')
     }
   })
 }
@@ -776,15 +810,21 @@ const offThreadExtraction = function (params, callback) {
           felog('offThreadExtraction err in read_by_id', { params, err })
           callback(err)
         } else if (!record) {
-          params.freezrUserAppListDB.create(params.appFS.appName, { app_name: params.appFS.appName, app_display_name: params.appFS.appName, manifest: null, removed: false }, null, function (err) {
+          params.freezrUserAppListDB.create(params.appFS.appName, { app_name: params.appFS.appName, app_display_name: params.appFS.appName, manifest: null, removed: false, offThreadStatus }, null, function (err) {
             if (err) {
               callback(err)
             } else {
-              offThreadExtraction(params, callback)
+              params.init = false
+              params.tryNum = 1
+              params.filesRemaining = fileList
+              setTimeout(function () {
+                offThreadExtraction(params)
+              }, 10000)
+              callback()
             }
           })
         } else {
-          params.freezrUserAppListDB.update(params.appFS.appName, offThreadStatus, { replaceAllFields: false }, function (err, result) {
+          params.freezrUserAppListDB.update(params.appFS.appName, { offThreadStatus }, { replaceAllFields: false }, function (err, result) {
             if (err) {
               felog('offThreadExtraction err in freezrUserAppListDB', { params, err })
               callback(err)
@@ -813,14 +853,14 @@ const offThreadExtraction = function (params, callback) {
         felog('offThreadExtraction - freezrUserAppListDB.read_by_id err ', { params, err })
         params.tryNum++
         setTimeout(function () { offThreadExtraction(params) }, params.tryNum * 2000)
-      } else if (!appRecord || !appRecord.offThreadParams || !appRecord.offThreadParams.tryNum) {
+      } else if (!appRecord || !appRecord.offThreadStatus || !appRecord.offThreadStatus.offThreadParams || !appRecord.offThreadStatus.offThreadParams.tryNum) {
         params.tryNum++
         felog('offThreadExtraction - freezrUserAppListDB.read_by_id  NO APP RECORD ', { params, err })
         setTimeout(function () { offThreadExtraction(params) }, params.tryNum * 2000)
-      } else if (appRecord.offThreadParams.versionDate !== params.versionDate) {
+      } else if (appRecord.offThreadStatus.offThreadParams.versionDate !== params.versionDate) {
         felog('offThreadExtraction - vefsion date mismatch', { appRecord, params, err })
         // new installation process has begun - abort installation
-      } else if (appRecord.offThreadWip === false) {
+      } else if (appRecord.offThreadStatus.offThreadWip === false) {
         felog('offThreadExtraction - fileList was emptied SNBH')
       } else {
         params.appRecord = appRecord
@@ -833,18 +873,20 @@ const offThreadExtraction = function (params, callback) {
               offThreadParams: null,
               offThreadWip: false
             }
-            params.freezrUserAppListDB.update(params.appFS.appName, offThreadStatus, { replaceAllFields: false }, function (err, result) {
+            params.freezrUserAppListDB.update(params.appFS.appName, { offThreadStatus }, { replaceAllFields: false }, function (err, result) {
               if (err) felog('offThreadExtraction -  all done but error at end', { params })
             })
           } else {
             params.tryNum = 1
             params.filesRemaining = newFileList
             const offThreadStatus = {
-              tryNum: 1,
-              versionDate: params.versionDate,
-              filesRemaining: newFileList
+              offThreadParams: {
+                tryNum: 1,
+                versionDate: params.versionDate,
+                filesRemaining: newFileList
+              }
             }
-            params.freezrUserAppListDB.update(params.appFS.appName, offThreadStatus, { replaceAllFields: false }, function (err, result) {
+            params.freezrUserAppListDB.update(params.appFS.appName, { offThreadStatus }, { replaceAllFields: false }, function (err, result) {
               if (err) {
                 felog('offThreadWip freezrUserAppListDB - updating status interrupted ', { err, result })
                 params.tryNum++
@@ -1806,6 +1848,20 @@ var accountPagemanifest = { // manifest parameters for accounts pages
     },
     // initial_query: {'url':'/v1/account/app_list.json'},
     script_files: ['reauthorise.js']
+  },
+  reset: {
+    page_title: 'Apps (freezr)',
+    css_files: ['./public/info.freezr.public/public/freezr_style.css', './public/info.freezr.public/public/firstSetUp.css'],
+    page_url: 'account_reset.html',
+    initial_query_func: function (req, res) {
+      if (req.freezrUserDS && req.freezrUserDS.owner && req.freezrUserDS.fsParams && req.freezrUserDS.fsParams.type) {
+        req.freezrInternalCallFwd(null, { owner: req.freezrUserDS.owner, fsParamsType: req.freezrUserDS.fsParams.type })
+      } else {
+        req.freezrInternalCallFwd(null, { owner: null, error: 'no user ds found' })
+      }
+    },
+    // initial_query: {'url':'/v1/account/app_list.json'},
+    script_files: ['reset.js']
   },
   perms: {
     page_title: 'Permissions (freezr)',

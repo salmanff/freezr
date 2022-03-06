@@ -44,12 +44,12 @@
               <br/>
               <span class="small_text" id="button_goto_3_{{app_name}}">{{app_name}}</span>
               <br/>
-              {{#offThreadWip}}
-              <span class="small_text" style="color:palevioletred"> {{ offThreadParams.filesRemaining.length }} app files have not yet been copied to your freezr store.</span>
-              <br/>
-              <span class="small_text installdate">{{ offThreadParams.versionDate }}</span>
-              <br/>
-              {{/offThreadWip}}
+                {{#offThreadParams}}
+                <span class="small_text" style="color:palevioletred"> {{offThreadParams.filesRemaining.length }} app files have not yet been copied to your freezr store.</span>
+                <br/>
+                <span class="small_text installdate">{{ offThreadParams.versionDate }}</span>
+                <br/>
+              {{/offThreadParams}}
               <span class="blue" id="button_genAppPassword_{{app_name}}">Generate one-time password</span>
             </td>
 
@@ -66,7 +66,7 @@
                 <span id="button_gotoAppData_{{app_name}}" class="right button">
                   See App Data
                 </span>
-                <span class="right button dev_option" id="button_updateApp_{{app_name}}">
+                <span class="right button dev_option" style="display:none" id="button_updateApp_{{app_name}}">
                   refresh from files
                 </span>
             </td>

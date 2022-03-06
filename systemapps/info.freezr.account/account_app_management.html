@@ -26,95 +26,110 @@ freezr Account App Mangement
 
     <div id="errorBox" class="errorBox"></div>
 
-    <table class="app_container">
-      <tr>
-        <td width="90%">
-            <div class="freezer_app_page_title">Upload a New App</div>
-            <div>Choose an app zip file.</div>
-        </td>
-        <td width="50px">
-        </td>
-      </tr>
-      <tr>
-          <td>
-            <div class="button left" id="button_chooseFile">Choose a file</div>
-            <div class="choose_file_outer"> <input class="choose_file_inner" id="app_zipfile2" type='file' class="freezer_butt" name="app_zipfile2"/></div>
-          </td>
-          <td width="50%" >
-            <div id="button_uploadZipFileApp" class="left button" style="display:none"><br/>upload</div>
-        </td>
-      </tr>
-    </table>
+    <!-- Tab links -->
+<div class="tab">
+  <button class="tablinks" id ="button_tabs_featured">Featured</button>
+  <button class="tablinks" id ="button_tabs_upload" >Upload</button>
+  <button class="tablinks" id ="button_tabs_download">Download</button>
+  <button class="tablinks" id ="button_tabs_blank">Authorise</button>
+  <button class="tablinks" id ="button_tabs_dev">Dev</button>
+</div>
 
+<!-- Tab content -->
+<div id="tab_featured" class="tabcontent">
+  <h3>Featured Apps</h3>
+    <p>Here are sample apps you can download. Click to Install</p>
+    <ul>
+        <li class ="feature_app" id="button_feature_com.salmanff.notery">Notery: A note taking app</li>
+        <li class ="feature_app" id="button_feature_com.salmanff.vulog">Vulog: Companion app to the vulog browser extension</li>
+        <li class ="feature_app" id="button_feature_com.salmanff.poster">Poster: A simple blogging app</li>
+    </ul>
+    <p>One day, freezr (or CEPS) will have an app store and make this look much less stale.</p>
+</div>
 
-    <br/>
-    <div class="freezer_app_page_title">Download an app via from another web site</div>
-        <table class="app_container" id="addUrlTable">
-          <tr>
-            <td width="90%">
-              <span class="texttop">Enter URL:</span>
-              <div  id="appUrl" contentEditable="true">https://github.com/user/repo</div>
-               <div class="">
-
-               </div>
-              <span class="texttop">app Name:</span>
-              <div id="appNameFromUrl" contentEditable="true"/></div>
-            </td>
-            <td width="50px">
-              <div id="button_addAppViaUrl" class="button left">Down-load & Install</div>
-            </td>
-          </tr>
-        </table>
-    <br/>
-
-    <div class="freezer_app_page_title">Authorise an offline app (outside of this server).</div>
-        <table class="app_container" id="addBlankApp">
-          <tr>
-            <td width="90%">
-              <span class="texttop">app Name:</span>
-              <div id="appNameForBlankApp" contentEditable="true"/></div>
-            </td>
-            <td width="50px">
-              <div id="button_addBlankApp" class="button left">Add offline app</div>
-            </td>
-          </tr>
-        </table>
-    <br/>
-
-
-    <div id="button_showDevOptions">show dev options</div>
-    <br/>
-
-
-
-
-    <table class="app_container dev_option" id="addFileTable" style="display:none">
-      <tr>
-        <td width="100%">
-          <div class="freezer_app_page_title">Add an existing folder to Apps list</div>
-            <div class="small">Enter app name if folder has been added manually</div>
-          <input type="text"  id="appNameFromFolder"/>
-          <div id="button_addAppInFolder" class="button left">Add</div>
-          <div>
-        </td>
-      </tr>
-    </table>
-
-
-    <div id="app_list">
+<div id="tab_upload" class="tabcontent">
+  <h3>Upload a New App</h3>
+  <center>
+    <div class="drop-area" id="upload_area">
+      Drop files here to upload
     </div>
+  </center>
+  <br>
+  <table>
+    <tr width="90%">
+        <td>
+          <div class="button left" id="button_chooseFile">Or choose a file</div>
+          <div class="choose_file_outer"> <input class="choose_file_inner" id="app_zipfile2" type='file' class="freezer_butt" name="app_zipfile2"/></div>
+        </td>
+        <td width="50%" >
+          <div id="button_uploadZipFileApp" class="left button" style="display:none"><br/>upload</div>
+      </td>
+    </tr>
+  </table>
+
+</div>
+
+<div id="tab_download" class="tabcontent">
+  <h3>Download an app via from another web site</h3>
+  <p>Enter the url where the app zip file resides</p>
+  <table id="addUrlTable">
+    <tr>
+      <td width="90%">
+        <span class="texttop">Enter URL:</span>
+        <div  id="appUrl" contentEditable="true">https://github.com/user/repo</div>
+         <div class="">
+
+         </div>
+        <span class="texttop">app Name:</span>
+        <div id="appNameFromUrl" contentEditable="true"/></div>
+      </td>
+      <td width="50px">
+        <div id="button_addAppViaUrl" class="button left">Down-load & Install</div>
+      </td>
+    </tr>
+  </table>
+</div>
+
+<div id="tab_blank" class="tabcontent">
+  <h3>Authorise an offline app (outside of this server)</h3>
+  <p>This is used for apps that just want to communicate with freezr via CEPS.</p>
+  <table id="addBlankApp">
+    <tr>
+      <td width="90%">
+        <span class="texttop">app Name:</span>
+        <div id="appNameForBlankApp" contentEditable="true"/></div>
+      </td>
+      <td width="50px">
+        <div id="button_addBlankApp" class="button left">Add offline app</div>
+      </td>
+    </tr>
+  </table>
+</div>
+
+<div id="tab_dev" class="tabcontent">
+  <h3>Developer Options</h3>
+  <div id="button_showDevOptions">show dev options</div>
+  <br/>
+  <table class="dev_option" id="addFileTable" style="display:none">
+    <tr>
+      <td width="100%">
+        <div class="freezer_app_page_title">Add an existing folder to Apps list</div>
+          <div class="small">Enter app name if folder has been added manually</div>
+        <input type="text"  id="appNameFromFolder"/>
+        <div id="button_addAppInFolder" class="button left">Add</div>
+        <div>
+      </td>
+    </tr>
+  </table>
+</div>
+
+<br/>
+<br/>
+
+<div id="app_list">
+</div>
 
     <br/>
-
-    <div>
-      <p>Here are sample apps you can download. Click to Install</p>
-      <ul>
-          <li class ="feature_app" id="button_feature_com.salmanff.notery">Notery: A note taking app</li>
-          <li class ="feature_app" id="button_feature_com.salmanff.vulog">Vulog: Companion app to the vulog browser extension</li>
-      </ul>
-      <p>One day, freezr (or CEPS) will have an app store and make this look much less stale.</p>
-    </div>
-
 
     <div id="perms_dialogue">
       <div id="spinner" style="text-align:center"><img src="/app_files/public/info.freezr.public/public/static/ajaxloaderBig.gif"/></div>

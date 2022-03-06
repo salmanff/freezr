@@ -574,7 +574,7 @@ exports.addPublicRecordAndIfFileFileFS = function (req, res, dsManager, next) {
 
   fdlog('addPublicRecordAndIfFileFileFS for adding freezrPublicPermDB ', req.originalUrl)
   if (!helpers.startsWith(req.path, '/ppage/')) { // ie path ~ '/*'
-    req.params.object_public_id = req.path.slice(1)
+    req.params.object_public_id = decodeURI(req.path.slice(1))
   } else if (!req.params.object_public_id) { // ie path = /ppage/:user_id/:app_table/:data_object_id
     if (req.params.user_id && req.params.app_table && req.params.data_object_id) {
       req.params.object_public_id = req.params.user_id + '/' + req.params.app_table + '/' + req.params.data_object_id

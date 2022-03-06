@@ -1,22 +1,39 @@
 // account app Management
 
-var doShowDevoptions = false;
-var userHasIntiatedAcions = false;
-freezr.initPageScripts = function() {
+/* global freezr, freezerRestricted, FormData, freezrMeta  */
+var doShowDevoptions = false
+var userHasIntiatedAcions = false
+const DEFAULT_EXPIRY_DAYS = 30// days
+
+freezr.initPageScripts = function () {
   document.addEventListener('click', function (evt) {
-    if (evt.target.id && freezr.utils.startsWith(evt.target.id,"button_")) {
-      var parts = evt.target.id.split('_');
-      var args = evt.target.id.split('_');
-      args.splice(0,2).join('_');
-      //onsole.log(args)
-      if (buttons[parts[1]]) buttons[parts[1]](args, evt.target);
+    if (evt.target.id && freezr.utils.startsWith(evt.target.id, 'button_')) {
+      var parts = evt.target.id.split('_')
+      var args = evt.target.id.split('_')
+      args.splice(0, 2).join('_')
+      console.log(args)
+      if (buttons[parts[1]]) buttons[parts[1]](args, evt.target)
     }
-  });
+  })
 
-  DEFAULT_EXPIRY_DAYS = 30// days
+  buttons.tabs(['featured'])
 
-  document.getElementById("appUrl").addEventListener('keyup', function() {
-    document.getElementById("appNameFromUrl").innerText = getAppFromUrl(document.getElementById("appUrl").innerText)
+  const uploadArea = document.getElementById('upload_area')
+  uploadArea.ondragenter = handleDragEnter
+  uploadArea.ondragover = handleDragOver
+  uploadArea.ondragleave = handleDragLeave
+  uploadArea.ondrop = handleDrop
+
+  const tabcontent = document.getElementsByClassName('tabcontent')
+  for (let i = 0; i < tabcontent.length; i++) {
+    tabcontent[i].ondragenter = function (e) {
+      preventDefaults(e)
+      buttons.tabs(['upload'])
+    }
+  }
+
+  document.getElementById('appUrl').addEventListener('keyup', function () {
+    document.getElementById('appNameFromUrl').innerText = getAppFromUrl(document.getElementById('appUrl').innerText)
   })
 
   if (!freezrMeta.adminUser) {
@@ -44,13 +61,35 @@ freezr.onFreezrMenuClose = function(hasChanged) {
   if (userHasIntiatedAcions) buttons.updateAppList();
   //setTimeout(function() {freezerRestricted.menu.resetDialogueBox(true);},300);
 }
-var buttons = {
+const buttons = {
+  tabs: function (args, evt) {
+    // w3 schools
+
+    console.log({ args })
+    const tabName = args[0]
+
+    const tabcontent = document.getElementsByClassName('tabcontent')
+    for (let i = 0; i < tabcontent.length; i++) {
+      tabcontent[i].style.display = 'none'
+    }
+
+    const tablinks = document.getElementsByClassName('tablinks')
+    for (let i = 0; i < tablinks.length; i++) {
+      tablinks[i].className = tablinks[i].className.replace(' active', '')
+    }
+
+    document.getElementById('tab_' + tabName).style.display = 'block'
+    document.getElementById('button_tabs_' + tabName).className += ' active'
+    // evt.currentTarget.className += ' active'
+  },
   'showDevOptions': function(args) {
     doShowDevoptions = true;
     showDevOptions();
     history.pushState(null, null, '?dev=true');
   },
   'goto': function(args) {
+    //
+    freezerRestricted.menu.close()
     window.open("/apps/"+args[1]+'/index.html',"_self");
   },
   'installApp': function(args) {
@@ -69,7 +108,7 @@ var buttons = {
       userHasIntiatedAcions = true;
       freezerRestricted.connect.ask('/v1/account/appMgmtActions.json', {'action':'deleteApp', 'app_name':args[0]}, delete_app_callback)
   },
-  'uploadZipFileApp': function (args) {
+  'uploadZipFileApp': function (args) { // OLD STYLE UPLOAD
     userHasIntiatedAcions = true;
     var fileInput = document.getElementById('app_zipfile2');
     var file = (fileInput && fileInput.files)? fileInput.files[0]: null;
@@ -465,4 +504,87 @@ function getAppFromUrl (aUrl){
   }
   //onsole.log("fetching from ",aUrl)
   return app_name
+}
+
+
+
+// Hanlding dropped files
+//  credit to https://www.smashingmagazine.com/2018/01/drag-drop-file-uploader-vanilla-js/ and https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API/File_drag_and_drop
+const handleDragEnter = function (e) {
+  preventDefaults(e)
+  highlight(e)
+}
+const handleDragOver = function (e) {
+  preventDefaults(e)
+  highlight(e)
+}
+const handleDragLeave = function (e) {
+  preventDefaults(e)
+  unhighlight(e)
+}
+const handleDrop = function (e) {
+  preventDefaults(e)
+  unhighlight(e)
+  const items = e.dataTransfer.items
+  // let files = dt.files
+  const dropId = targetDropArea(e).id
+
+  userHasIntiatedAcions = true
+
+  const extFromFileName = function (fileName) {
+    return fileName.split('.').pop()
+  }
+
+  const file = (items && items.length > 0) ? items[0].getAsFile() : ''
+  const ext = extFromFileName(file.name)
+
+  var parts = file.name.split('.')
+  if (endsWith(parts[(parts.length - 2)], '-master')) parts[(parts.length - 2)] = parts[(parts.length - 2)].slice(0, -7)
+  if (endsWith(parts[(parts.length - 2)], '-main')) parts[(parts.length - 2)] = parts[(parts.length - 2)].slice(0, -5)
+  parts.splice(parts.length - 1, 1)
+  let appName = parts.join('.')
+  appName = appName.split(' ')[0]
+
+  if (!items || !file) {
+    showError('Please Choose a file first.')
+  } else if (items.length > 1) {
+    document.getElementById('errorBox').innerHTML = 'Please upload one zip file only.'
+  } else if (ext !== 'zip') {
+    document.getElementById('errorBox').innerHTML = 'The app file uploaded must be a zipped file. (File name represents the app name.)'
+  } else if (!valid_app_name(appName)) {
+    document.getElementById('errorBox').innerHTML = 'Invalid app name - please make sure the zip file conforms to freezr app name guidelines'
+  } else {
+    var uploadData = new FormData()
+    uploadData.append('file', file)
+    uploadData.append('app_name', appName)
+    var url = '/v1/account/app_install_from_zipfile.json'
+    freezerRestricted.menu.resetDialogueBox(true)
+    if (file.size > 500000) document.getElementById('freezer_dialogueInnerText').innerHTML = '<br/>You are uploading a large file. This might take a little while. Please be patient.<br/>' + document.getElementById('freezer_dialogueInnerText').innerHTML
+    freezerRestricted.connect.send(url, uploadData, function (error, returndata) {
+      const d = freezr.utils.parse(returndata)
+      if (error || d.err) {
+        writeErrorsToFreezrDialogue(d)
+      } else {
+        ShowAppUploadErrors(d.flags, 'uploadZipFileApp', uploadSuccess)
+      }
+    }, 'PUT', null)
+  }
+}
+const preventDefaults = function (e) {
+  e.preventDefault()
+  e.stopPropagation()
+}
+const highlight = function (e) {
+  targetDropArea(e).classList.add('highlight')
+}
+const unhighlight = function (e) {
+  targetDropArea(e).classList.remove('highlight')
+}
+const targetDropArea = function (e) {
+  var target = e.target
+  if (!target.className.includes('drop-area')) {
+    target = target.parentElement
+  }
+  if (!target.className.includes('drop-area')) console.log('akkkhhh - should iterate')
+  return target
 }

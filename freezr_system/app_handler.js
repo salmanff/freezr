@@ -210,7 +210,7 @@ exports.write_record = function (req, res) { // create update or upsert
           const errmsg = isUpsert ? 'internal err in old record' : 'Record exists - use "update" to update existing records'
           cb(helpers.auth_failure('app_handler', exports.version, 'write_record', req.freezrAttributes.requestor_app, errmsg))
         }
-      } else if (isUpdate) { // should have gotten results
+      } else if (isUpdate && !isUpsert) { // should have gotten results
         cb(appErr('record not found'))
       } else { // upsert / create - new document - should not have gotten results
         req.freezrRequesteeDB.create(dataObjectId, write, { restoreRecord: false }, cb)
@@ -218,7 +218,7 @@ exports.write_record = function (req, res) { // create update or upsert
     }
   ],
   function (err, writeConfirm) {
-    // onsole.log('write err', err, 'writeConfirm', { writeConfirm, isUpdate, isQueryBasedUpdate })
+    fdlog('write err', err, 'writeConfirm', { writeConfirm, isUpdate, isQueryBasedUpdate })
     if (err) {
       console.warn('err ', err)
       helpers.send_failure(res, err, 'app_handler', exports.version, 'write_record')
@@ -368,7 +368,7 @@ exports.db_query = function (req, res) {
   const thePerm = relevantAndGrantedPerms[0]
 
   if (relevantAndGrantedPerms.length > 1) fdlog('todo - deal with multiple permissions - forcePermName??')
-  if (!req.freezrAttributes.own_record && !permissionName) console.log("todo review - Need a persmission name to access others' apps and records? if so permissionName needs to be compulsory for perm_handler too")
+  // if (!req.freezrAttributes.own_record && !permissionName) console.log("todo review - Need a persmission name to access others' apps and records? if so permissionName needs to be compulsory for perm_handler too")
   fdlog('todo - not granted reason???', { granted }, req.params.app_table, ' req.path:', req.path, ' body:', req.body, ' query: ', req.query)
 
   if (!granted) {
@@ -774,7 +774,7 @@ exports.messageActions = function (req, res) {
             }
             fields.forEach(key => { if (!receivedParams[key]) failed = true })
             if (failed) {
-              cb()
+              cb(new Error('failed to get keys for sharing'))
             } else {
               cb(null)
             }
@@ -785,8 +785,11 @@ exports.messageActions = function (req, res) {
           },
           function (results, cb) {
             if (!results || results.length === 0) {
-              if (req.freezrBlockMsgsFromNonContacts) {
-                cb(helpers.error('contact PermissionMissing', 'contact does not exist - try re-installing app'))
+              if (req.freezrBlockMsgsFromNonContacts) { // not implementing this now
+                console.log('Need to implement req.freezrBlockMsgsFromNonContacts ')
+                senderIsAContact = false
+                cb(null)
+                // cb(helpers.error('contact PermissionMissing', 'contact does not exist - try re-installing app'))
               } else {
                 senderIsAContact = false
                 cb(null)
@@ -874,6 +877,7 @@ exports.messageActions = function (req, res) {
             felog('internal error in transmit', err)
             // todo customise error handling and whther response should be given, based on more refined preferences
             if (status > 1 || receivedParams.senderIsAContact) helpers.send_failure(res, helpers.error('internal error in transmit'), 'app_handler', exports.version, 'messageActions')
+            // ie do not respond if the sender is not a contact
           } else {
             helpers.send_success(res, { success: true })
           }
@@ -1376,7 +1380,8 @@ exports.shareRecords = function (req, res) {
               if (grantee === '_public') {
                 publicid = (req.body.publicid || ('@' + userId + '/' + req.body.table_id + '/' + rec._id))
                 accessible[grantee][fullPermName].public_id = publicid
-                accessible[grantee][fullPermName]._date_published = req.body._date_published
+                accessible[grantee][fullPermName]._date_published = datePublished
+                accessible[grantee][fullPermName]._date_modified = new Date().getTime
               }
             })
           } else { // revoke
@@ -1419,7 +1424,10 @@ exports.shareRecords = function (req, res) {
               }
             })
           } else {
-            cb2(null)
+            req.freezrRequesteeDB.update(rec._id, updates, { newSystemParams: true }, function (err, results) {
+              fdlog('sharing - updated ', { rec, updates })
+              cb2(err)
+            })
           }
         }, cb)
       }
@@ -1464,6 +1472,7 @@ exports.shareRecords = function (req, res) {
           } else {
             originalRecord = rec
           }
+
           req.freezrPublicRecordsDB.query({ data_owner: userId, original_record_id: rec._id, original_app_table: req.body.table_id }, {}, function (err, results) {
             const accessiblesObject = {
               data_owner: userId,

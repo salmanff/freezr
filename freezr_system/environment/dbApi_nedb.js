@@ -26,7 +26,7 @@ function NEDB_FOR_FREEZR (environment, ownerAppTable) {
 
 NEDB_FOR_FREEZR.prototype.initDB = function (callback) {
   // called after initiation at the user level. returns a db object if need be. (not all systems need it and not all return an object. Object is stored in userDS as unififedDb)
-  const { dbParams, fsParams } = this.env
+  const { dbParams, fsParams, extraCreds } = this.env
 
   const self = this
   var customFS = null
@@ -35,7 +35,7 @@ NEDB_FOR_FREEZR.prototype.initDB = function (callback) {
   if (fsParams.type !== 'local') {
     const envdir = helpers.removeLastpathElement(__dirname, 2) + '/node_modules/nedb-asyncfs/env/'
     const CustomFS = require(envdir + 'dbfs_' + fsParams.type + '.js')
-    customFS = new CustomFS(fsParams, { doNotPersistOnLoad: true })
+    customFS = new CustomFS(fsParams, { doNotPersistOnLoad: true, extraCreds })
   }
   if (fsParams.type !== 'local' && !customFS) {
     throw new Error('Error retrieving environment for nedb-asyncfs, using storage of type ' + fsParams.type)
@@ -117,7 +117,7 @@ NEDB_FOR_FREEZR.prototype.getAllAppTableNames = function (appOrTableNameOrNames,
   const dbPath = (this.env.fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/' + userId + '/db'
   var list = []
   if (typeof appOrTableNameOrNames === 'string') appOrTableNameOrNames = [appOrTableNameOrNames]
-  this.db.customFS.readdir(dbPath, (err, files) => {
+  this.db.customFS.readdir(dbPath, null, (err, files) => {
     // fdlog('read fs ', { files, err })
     if (!err) {
       files.forEach(file => {

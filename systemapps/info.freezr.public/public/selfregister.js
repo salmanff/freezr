@@ -129,7 +129,7 @@ const changeSelector = function (resource) {
           col2.setAttribute('width', '220px')
           const input = document.createElement('input')
           input.setAttribute('type', (item.type || 'text'))
-          input.setAttribute('size', '40')
+          input.className = "inputbox"
           input.setAttribute('name', (choice + '_' + item.name))
           input.id = choice + '_' + item.name
           if (item.default) input.value = item.default
@@ -325,18 +325,20 @@ const launch = function () {
     showError('')
     var theInfo = { action: thisPage, userId: ids.userId, password: ids.password, env: { fsParams, dbParams } }
     // freezerRestricted.menu.resetDialogueBox(true);
-    document.getElementById('click_launch').style.display = 'none'
+    const sects = ['exp_warn_1', 'exp_warn_2', 'main_form_sections']
+    sects.forEach(sect => { document.getElementById(sect).style.display = 'none' })
     document.getElementById('launch_spinner').style.display = 'block'
+    window.scrollTo({ top: 0, behavior: 'smooth' })
     freezerRestricted.connect.send('/v1/admin/self_register', JSON.stringify(theInfo), gotRegisterStatus, 'POST', 'application/json')
   }
 }
 
 const gotRegisterStatus = function (error, data) {
-  //onsole.log(error, data)
+  // onsole.log(error, data)
   if (error || !data) {
-    document.getElementById('click_launch').style.display = 'block'
+    document.getElementById('main_form_sections').style.display = 'block'
     document.getElementById('launch_spinner').style.display = 'none'
-    showError(error ? ('Error: ' + error.message) : 'No data was sent ferom server - refresh to see status')
+    showError(error ? ('Error: ' + error.message) : 'No data was sent from server.')
   } else {
     window.location = (thisPage === 'firstSetUp' ? '/admin/prefs?firstSetUp=true' : '/account/home?show=welcome&source=' + thisPage)
   }
@@ -384,7 +386,7 @@ const populateErrorMessage = function (freezrServerStatus, initial) {
   showError(inner)
 }
 // Generics
-var showError = function (errorText) {
+const showError = function (errorText) {
   var errorBox = document.getElementById('errorBox')
   errorBox.innerHTML = errorText
   if (errorText) {

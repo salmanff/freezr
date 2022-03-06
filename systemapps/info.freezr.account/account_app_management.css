@@ -100,7 +100,6 @@ body{
 #button_showDevOptions {
 	width:100%;
 	max-width: 600px;
-	text-align: right;
 	cursor:pointer;
 	font-size: 12px;
 	color: blue;
@@ -143,4 +142,59 @@ body{
 #perm_warning {
 	color:red;
 	font-weight: bold;
+}
+
+/* tabs w3schools */
+.tab {
+  overflow: hidden;
+  border: 1px solid #ccc;
+  background-color: #f1f1f1;
+}
+
+/* Style the buttons that are used to open the tab content */
+.tab button {
+  background-color: inherit;
+  float: left;
+  border: none;
+  outline: none;
+  cursor: pointer;
+  padding: 14px 16px;
+  transition: 0.3s;
+}
+
+/* Change background color of buttons on hover */
+.tab button:hover {
+  background-color: #ddd;
+}
+
+/* Create an active/current tablink class */
+.tab button.active {
+  background-color: #ccc;
+}
+
+/* Style the tab content */
+.tabcontent {
+  display: none;
+  padding: 6px 12px;
+  border: 1px solid #ccc;
+  border-top: none;
+  min-height: 200px;
+}
+
+/* Uploading */
+.drop-area {
+  border: 2px dashed #ccc;
+  border-radius: 20px;
+  width: 400px;
+  margin-left: 40px;
+  padding: 20px;
+  background-color: #eee;  font-weight: bold;
+  text-align: center;
+}
+.highlight {
+  border-color: purple;
+  background-color: darkgrey;
+}
+#upload_area {
+  text-align: center;
 }

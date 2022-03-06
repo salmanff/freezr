@@ -34,6 +34,8 @@ freezr.initPageScripts = function () {
 
     if (!oldPassword) {
       showError('Please enter your current password')
+    } else if (freezrMeta.adminuser) {
+      showError('Sorry - cannot remove admin users')
     } else {
       const theInfo = {
         user_id: freezrMeta.userId,

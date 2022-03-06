@@ -44,16 +44,22 @@ options:
         <dt class="changeNormal">Enter a default public url:</dt>
         <dd class="changeNormal"><input size="30" id="defaultLandingUrl" name="defaultLandingUrl" value="{{ public_landing_page }}"/></dd>
 
-        <dt>&nbsp; &nbsp; &nbsp; Specific app public page (optional):</dt>
+        <span style="display:none" >
+          <dt >&nbsp; &nbsp; &nbsp; Specific app public page for you (optional):</dt>
+          <span style="display:none" id="oldChoice">{{ public_landing_app }}</span>
+          <dd>
+            <select id="defaultPublicAppId" style="display:none"> <option value=" ">Default Page</option> </select>
+          <br>
+          </dd>
+        </span>
 
-        <span style="display:none" id="oldChoice">{{ public_landing_app }}</span>
-        <dd>
-          <select id="defaultPublicAppId"> <option value=" ">Default Page</option> </select>
-
-        <br>
-
-        <dt class="changeNormal">Re-enter Password:</dt>
-        <dd class="changeNormal"><input type="password" size="30" id="password" name="password"/></dd>
+        <div>
+          <br>
+          <dt class="changeNormal">re-enter admin User Name</dt>
+          <dd class="changeNormal"><input type="text" size="30" id="user_id_dummy" name="user_id_dummy"/></dd>
+          <dt class="changeNormal">Re-enter Password:</dt>
+          <dd class="changeNormal"><input type="password" size="30" id="password" name="password"/></dd>
+        </div>
 
         <br>
 

@@ -87,20 +87,18 @@ exports.ENV_PARAMS = {
     },
     fdsFairOs: {
       type: 'fdsFairOs',
-      label: 'Ethereum Swarm (Fair OS)',
-      msg: 'Use ethereum swarm as your storage, via the Fair Data Society fairos gateway. Enter your existing user name and password or leave empty to use the same user name and password above (if available)',
+      label: 'Fairdrive (Ethereum Swarm)',
+      msg: 'Use ethereum swarm as your storage, via the Fair Data Society fairdrive gateway. Enter your credentials or create an account <a href="https://app.fairdrive.fairdatasociety.org/register">here</a>.<br><br>',
       warning: '',
       forPages: ['unRegisteredUser', 'newParams'],
       fields: [
         { name: 'fdsGateway', display: 'Gateway url:' },
-        { name: 'userName', display: 'fds user name:' },
-        { name: 'fdsPass', display: 'fds password:' },
+        { name: 'userName', display: 'Fairdrive username:' },
+        { name: 'fdsPass', display: 'Fairdrive password:', type: 'password' },
         { name: 'podname', hide: true, display: 'pod Name:', optional: true, default: 'freezrPod01' },
         { name: 'tempLocalFolder', hide: true, display: 'local temp Folder:', optional: true, default: 'tempfolder' }
       ],
-      oauth: false,
-      canCreateNewUser: true,
-      newUserMsg: 'Add a menominc based on the set of 12 words here, or freezr can generate it for you automatically'
+      oauth: false
     },
     aws: {
       type: 'aws',

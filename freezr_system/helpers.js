@@ -5,7 +5,8 @@ exports.version = '0.0.122'
 const async = require('async')
 const flags_obj = require("./flags_obj.js")
 
-exports.RESERVED_FIELD_LIST = ["_id", "_date_created", "_date_modified","_accessible","_publicid","_date_published","_date_accessibility_mod"];
+exports.RESERVED_FIELD_LIST = ["_id", "_date_created", "_date_modified","_accessible","_publicid","_date_accessibility_mod"];
+// ,"_date_published" removed as need to trust apps to set it
 
 exports.log = function (...messages) {
   console.log(new Date(), ...messages)
@@ -108,7 +109,7 @@ exports.is_system_app = function (appName) {
     }
 
     exports.send_failure = function(res, err, system_file, version, theFunction ) {
-        console.warn("* * * ERROR *** : Helpers send failure in system_file "+system_file+" function: "+theFunction+"  error"+JSON.stringify( err)+" - "+err.message);
+        console.warn("* * * ERROR *** : Helpers send failure in system_file "+system_file+" function: "+theFunction+"  error"+JSON.stringify( err));
         var code = (typeof err == 'string')? err :(err.code ? err.code : err.name);
         var message = (typeof err == 'string')? err :(err.message ? err.message : code);
         res.writeHead(200, { "Content-Type" : "application/json" });

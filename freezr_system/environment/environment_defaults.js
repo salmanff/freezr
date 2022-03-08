@@ -51,7 +51,7 @@ exports.ENV_PARAMS = {
       type: 'system',
       label: 'System Default',
       msg: 'The admin has offered to use the default system settings to store your files.',
-      forPages: ['firstSetUp', 'newParams']
+      forPages: ['firstSetUp', 'newParams'] // , 'unRegisteredUser' todo - add back and fix
     },
     dropbox: {
       type: 'dropbox',
@@ -289,7 +289,7 @@ const fsParseCreds = {
     return final
   },
   sysDefault: function (credentials, freezrInitialEnvCopy) {
-    return freezrInitialEnvCopy.fsParams
+    return freezrInitialEnvCopy ? freezrInitialEnvCopy.fsParams : { choice: 'system', type: 'system' }
   },
   system: function (credentials) {
     return { choice: 'system', type: 'system' }

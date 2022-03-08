@@ -24,7 +24,7 @@
     "morgan": "1.x",
     "multer": "^1.4.4",
     "mustache": "^2.3.0",
-    "nedb-asyncfs": "2.0.x",
+    "nedb-asyncfs": "2.0.3",
     "request": "^2.88.0",
     "uuid": "^8.2.0"
   },

@@ -604,6 +604,7 @@ const setupNewUserParams = function (req, res) {
       } else if (!req.freezrAllowSelfReg && !req.session.logged_in_user_id) {
         cb(regAuthFail('Not allowed to self-register', 'auth-Not-freezrAllowSelfReg'))
       } else if (action === 'unRegisteredUser') {
+        // to do
         if (!password) {
           cb(helpers.missing_data('password'))
         } else if (req.session.logged_in_user_id) {

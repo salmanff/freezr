@@ -155,7 +155,7 @@ const selfRegisterChecks = function (req, res, next) {
     next()
   } else if (freezrPrefs.allowSelfReg) {
     req.freezrAllowSelfReg = true
-    // todo check if we ant this... req.freezrAllowAccessToSysFsDb = freezrPrefs.allowAccessToSysFsDb
+    req.freezrAllowAccessToSysFsDb = freezrPrefs.allowAccessToSysFsDb
     next()
   } else {
     res.sendStatus(401)

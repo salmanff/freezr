@@ -167,6 +167,17 @@ MONGO_FOR_FREEZR.prototype.getAllAppTableNames = function (appOrTableNameOrNames
     callback(err, collectionNames)
   })
 }
+MONGO_FOR_FREEZR.prototype.stats = function (callback) {
+  // fdlog('nedb for freezr - stats ')
+  this.db.stats(function(err, stats) {
+    if (err) {
+      callback(err)
+    } else {
+      callback(null, { size: stats.storageSize, originalStats: stats })
+    }
+  })
+  // callback(null, { result: 'no data available' })
+}
 
 MONGO_FOR_FREEZR.prototype.persistCachedDatabase = function (cb) {
   cb(null)

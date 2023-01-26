@@ -14,32 +14,106 @@ contacts: {
 		<div class="freezer_top_app_menu" id="adminFunctions">
       <a href="/account/home">Home</a>
 			&nbsp;
-      <a href="/account/app_management">App Management</a>
-			&nbsp;
 		</div>
 
-		<div class="freezer_dialogueTitle">Contacts</div>
+		<div class="freezer_dialogueTitle">Contacts and Groups</div>
 
     <div id="warnings"></div>
 
-    <div class="contacts_butt" id = "button_add">Create a new contact</div>
-    <div id ="add_new_details">
-        <div><div class="field_for_add">Nickname</div><div id="new_nickname" class="field_to_add" contentEditable="true"></div>  </div>
-        <div><div class="field_for_add">User name</div><div id="new_username" class="field_to_add" contentEditable="true"></div>  </div>
-        <div><div class="field_for_add">Server url</div><div id="new_serverurl" class="field_to_add" contentEditable="true"></div>  </div>
-        <div class="contacts_butt" id="button_saveNew">Save Contact</div>
-        <div style="min-height:50px" >
-          <img id="loader" src="/app_files/public/info.freezr.public/public/static/ajaxloaderBig.gif"/>
-        </div>
-        </div>
+    <div>
+      <div class="addNewButt" id = "button_addnew_contact">Create a new contact</div>
+      <div class="addNewButt" id = "button_addnew_group">Create a new group</div>
+      <div class="addNewButt" id = "button_addnew_url">Other options</div>
+    </div>
 
-		<div id="contacts_table">
-      <div class="gridlist grid-header">
+      <div id="new_contact_area" class="newDetailsDiv">
+        <div id="addContactTitle" class="freezer_dialogueTitle subSection">Add a new Contact</div>
+        <div><div class="field_for_add">Nickname</div><div id="new_nickname" class="field_to_add" contentEditable="true"></div>  </div>
+        <div><div class="field_for_add revDisappearing"></div><div class="smallText">The name you see on your list</div></div>
+        <div><div class="field_for_add">User name</div><div id="new_username" class="field_to_add" contentEditable="true"></div>  </div>
+        <div>
+          <div class="field_for_add revDisappearing"></div><div class="smallText">Leave blank if same as nickname</div>
+        </div>
+        <div>
+          <div class="field_for_add">Server url</div><div id="new_serverurl" class="field_to_add" contentEditable="true"></div>
+        </div>
+        <div>
+          <div class="field_for_add revDisappearing"></div><div class="smallText">Leave blank if contact is on this server</div>
+        </div>
+        <div id="new__id" class="field_to_add" contentEditable="true" style="display:none"></div>
+        <center>
+          <div class="addNewButt" id="button_contactSave">Save Contact</div>
+        </center>
+      </div>
+      <div id ="new_group_area" class="newDetailsDiv">
+        <div class="freezer_dialogueTitle subSection">Add a new Group</div>
+        <div><div class="field_for_add">Name</div><div id="new_name_group" class="field_to_add" contentEditable="true"></div>  </div>
+        <center>
+          <div class="addNewButt" id="button_groupSave">Save Group</div>
+        </center>
+      </div>
+      <div id ="new_url_area" class="newDetailsDiv">
+        <div class="freezer_dialogueTitle subSection">Add a new Contact or private feed from a url</div>
+        <p>Paste a url given to you by another person or feed... or to give your contact to someone else, copy this: <span id="urlContact"></span> (<span id="button_copyUrl">click to copy url</span> so you can send it to a friend.)</p>
+        <div><div class="field_for_add">Paste url</div><div id="new_nickname_url" class="field_to_add" contentEditable="true"></div>  </div>
+        <center>
+          <div class="addNewButt" id="button_urlSave">Check Url</div>
+        </center>
+
+        <div id="privateFeedTitle" class="freezer_dialogueTitle subSection">Create a private feed of links</div>
+        <p>A private feed allows any one with a code to access all the links with that specific code.
+           Others may also post to your feed if you allow them to.
+           If you have acccess to another person's feed, enter the feed url (and the code and edit rights will be discarded). Otherwise leave the feed url blank.
+        </p>
+        <div><div class="field_for_add">Feed name</div><div id="new_name_privatefeeds" class="field_to_add" contentEditable="true"></div>  </div>
+        <div><div class="field_for_add">Feed url</div><div id="new_url_privatefeeds" class="field_to_add" contentEditable="true"></div>  </div>
+        <div>
+            <div class="field_for_add revDisappearing"></div><div class="smallText">Optional - Only used if feed is on another server</div>
+        </div>
+        <div><div class="field_for_add">Feed code</div><div id="new_code_privatefeeds" class="field_to_add" contentEditable="true"></div>  </div>
+        <div class="field_for_add"> </div><div class="addNewButt" id="button_regenerateCodeForPrivateFeed">Generate new code</div>
+        <div><div class="field_for_add">Edit Rights</div><select id="new_group_privatefeeds" class="field_to_add"></select>  </div>
+        <div><div class="field_for_add revDisappearing"></div><div class="smallText">Optional - Used to allow your contacts to post to this feed</div></div>
+        <div id="new__id_privatefeeds" class="field_to_add" style="display:none"></div>
+        <center>
+          <div class="addNewButt" id="button_privateUrlSave">Save Private Feed</div>
+          <div class="addNewButt" id="button_privateFeedDelete">Delete Feed</div>
+        </center>
+        <div id="button_visitFeedUrl">Click here to visit the feed.</div>
+      </div>
+      <div >
+        <img id="loader" src="/app_files/public/info.freezr.public/public/static/ajaxloaderBig.gif"/>
+      </div>
+
+    <br/>
+    <div id="group_table" class="mainSection">
+      <div class="freezer_dialogueTitle">Your Groups</div>
+      <div id="groupGridDetails">
+
+      </div>
+
+    </div>
+    <div id="privateFeeds_table" class="mainSection">
+      <div class="freezer_dialogueTitle">Your Private Feeds</div>
+      <div id="privateFeedsGridDetails">
+
+      </div>
+
+    </div>
+
+		<div id="contacts_table" class="mainSection">
+      <div id="titleForContacts" class="freezer_dialogueTitle">Your Contacts</div>
+      <div class="addNewButt" id="button_exitEditMode">Exit Edit Mode</div>
+      <!-- <div id="contactGrid" >
+        <label id="groupChooserLabel" style="display:none">Choose</label>
         <label>Nick<div style="display: inline-block;"> </div>name</label>
         <label>User id (on server)</label>
         <label>Server url</label>
         <label>Actions</label>
-		  </div>
+		  </div> -->
+      <div id="contactGridDetails">
+
+      </div>
 		</div>
 
   </div>

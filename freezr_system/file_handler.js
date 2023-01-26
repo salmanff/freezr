@@ -4,6 +4,7 @@
   - later do:
       - clean up ugliness
       - redo other variables so it is an object not a string
+      - replaced fs,exist swith fsexistssysnc in localCheckExistsOrCreateUserFolder (without checking p to recheck)
 */
 exports.version = '0.0.200'
 
@@ -29,7 +30,7 @@ exports.load_data_html_and_page = function (req, res, options) {
     }
     if (options.queryresults) {
       // fdlog('file_handle queryresults:' + JSON.stringify(options.queryresults))
-      var Mustache = require('mustache')
+      const Mustache = require('mustache')
       options.page_html = Mustache.render(htmlContent, options.queryresults)
       exports.load_page_html(req, res, options)
     } else {
@@ -70,7 +71,7 @@ exports.load_page_html = function (req, res, opt) {
       contents = contents.replace('{{SERVER_NAME}}', opt.server_name)
       contents = contents.replace('{{FREEZR_CORE_CSS}}', FREEZR_CORE_CSS)
       contents = contents.replace('{{FREEZR_CORE_JS}}', FREEZR_CORE_JS)
-      var nonce = helpers.randomText(10)
+      const nonce = helpers.randomText(10)
       contents = contents.replace('{{FREEEZR-SCRIPT-NONCE}}', nonce)
       contents = contents.replace('{{FREEEZR-SCRIPT-NONCE}}', nonce) // 2nd instance
       contents = contents.replace('{{META_TAGS}}', opt.meta_tags ? opt.meta_tags : '')
@@ -102,16 +103,27 @@ exports.load_page_html = function (req, res, opt) {
       }
       contents = contents.replace('{{CSS_FILES}}', cssFiles)
 
-      var scriptFiles = ''
+      let scriptFiles = ''
       if (opt.script_files) {
         opt.script_files.forEach(function (pathToFile) {
           thePath = partUrlPathTo(userId, opt.app_name, pathToFile)
           scriptFiles = scriptFiles + '<script src="' + thePath + '" type="text/javascript"></script>'
         })
       }
-      if (opt.full_script_files) {
+      if (opt.modules) {
+        opt.modules.forEach(function (pathToFile) {
+          thePath = partUrlPathTo(userId, opt.app_name, pathToFile)
+          scriptFiles = scriptFiles + '<script src="' + thePath + '" type="module"></script>'
+        })
+      }
+      if (opt.full_path_scripts) {
         opt.full_script_files.forEach(function (pathToFile) {
           scriptFiles = scriptFiles + '<script src="' + pathToFile + '" type="text/javascript"></script>'
+        })
+      }
+      if (opt.full_path_modules) {
+        opt.full_path_modules.forEach(function (pathToFile) {
+          scriptFiles = scriptFiles + '<script src="' + pathToFile + '" type="module"></script>'
         })
       }
       contents = contents.replace('{{SCRIPT_FILES}}', scriptFiles)
@@ -150,7 +162,7 @@ exports.load_page_xml = function (req, res, opt) {
 /* NEW NEW 2020 / 2021 */
 exports.appFileListFromZip = function (zipfile) {
   fdlog('appFileListFromZip ')
-  var AdmZip = require('./forked_modules/adm-zip/adm-zip.js')
+  const AdmZip = require('./forked_modules/adm-zip/adm-zip.js')
 
   try {
     const zip = new AdmZip(zipfile)
@@ -371,10 +383,6 @@ exports.renameLocalFileOrFolder = function (oldPartialPath, newpartialPath, call
   })
 }
 
-// todo 2022-01 no longer used?
-// exports.partialPathToAppFile = function (userId, appFilename) {
-// return helpers.FREEZR_USER_FILES_DIR + '/' + userId + '/files/' + appFilename
-//}
 exports.mkdirp = mkdirp
 exports.dirFromFile = function (filePath) {
   var dir = filePath.split('/')
@@ -588,27 +596,25 @@ const localCheckExistsOrCreateUserFolder = function (aPath, callback) {
       root = systemPath() + pathSep
     }
 
-    fs.exists(root + dir, function (exists) {
-      if (!exists) {
-        fs.mkdir(root + dir, function (err) {
-          root += dir + pathSep
-          if (err) {
-            callback(err)
-          } else if (dirs.length > 0) {
-            mkDir()
-          } else if (callback) {
-            callback()
-          }
-        })
-      } else {
+    if (fs.existsSync(root + dir)) {
+      root += dir + pathSep
+      if (dirs.length > 0) {
+        mkDir()
+      } else if (callback) {
+        callback()
+      }
+    } else {
+      fs.mkdir(root + dir, function (err) {
         root += dir + pathSep
-        if (dirs.length > 0) {
+        if (err) {
+          callback(err)
+        } else if (dirs.length > 0) {
           mkDir()
         } else if (callback) {
           callback()
         }
-      }
-    })
+      })
+    }
   }
 }
 

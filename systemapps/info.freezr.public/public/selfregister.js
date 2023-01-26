@@ -1,15 +1,30 @@
 // freezr  firstSetUp
 
-/* global thisPage, userId, freezr, freezrServerStatus, freezrEnvironment, freezerRestricted , ENV_PARAMS */
+/* global thisPage, userId, freezr, freezrServerStatus, freezrEnvironment, freezerRestricted , ENV_PARAMS, freezrSelfRegOptions */
 // thisPage is passed as 'firstSetUp' or unRegisteredUser (when self-registering) or newParams when registered but user doesnt have fs  and db params defined
 
 freezr.initPageScripts = function () {
   if (!document.location.host.includes('localhost')) delete ENV_PARAMS.FS.local
-  const fstype = (freezrEnvironment && freezrEnvironment.fsParams) ? (freezrEnvironment.fsParams.choice || freezrEnvironment.fsParams.type) : null
-  const dbtype = (freezrEnvironment && freezrEnvironment.dbParams) ? (freezrEnvironment.dbParams.choice || freezrEnvironment.dbParams.type) : null
-  createSelector('FS', fstype)
-  createSelector('DB', dbtype)
-  hideDivs(['click_goAuthFS', 'click_showOauthOptions', 'oauth_elements_FS'])
+  // onsole.log(isSimpleRegPage(), { thisPage })
+
+  if (!isSimpleRegPage()) {
+    const fstype = (freezrEnvironment && freezrEnvironment.fsParams) ? (freezrEnvironment.fsParams.choice || freezrEnvironment.fsParams.type) : null
+    const dbtype = (freezrEnvironment && freezrEnvironment.dbParams) ? (freezrEnvironment.dbParams.choice || freezrEnvironment.dbParams.type) : null
+    createSelector('FS', fstype)
+    createSelector('DB', dbtype)
+    hideDivs(['click_goAuthFS', 'click_showOauthOptions', 'oauth_elements_FS'])
+    hideClass('freezr_hiders')
+    showClass(thisPage)
+  } else {
+    document.getElementById('freezerMenuButt').style.display = 'none'
+    if (!freezrSelfRegOptions.allow || !freezrSelfRegOptions.allowAccessToSysFsDb) window.location = '/admin/selfregister'
+    document.getElementById('storageCapacity').innerHTML = '(' + freezrSelfRegOptions.defaultMBStorageLimit + 'MBs)'
+    if (simplePageAutoInstallApp()) {
+      document.getElementById('appInatllMessage').innerHTML = 'Launching freezr will register you as a user. You can then accept to install ' + simplePageAutoInstallApp()
+    }
+  }
+
+  hideDiv('errorBox')
 
   document.addEventListener('click', function (evt) {
     const args = evt.target.id.split('_')
@@ -34,10 +49,6 @@ freezr.initPageScripts = function () {
       }
     }
   })
-
-  hideClass('freezr_hiders')
-  showClass(thisPage)
-  hideDiv('errorBox')
 
   if (thisPage === 'firstSetUp') {
     document.getElementById('password2').addEventListener('keypress', function (e) { if (e.keyCode === 13) launch() })
@@ -73,9 +84,19 @@ freezr.initPageScripts = function () {
     })
     */
   }
-  window.history.pushState({ }, 'Freezr - set up', '/admin/' + (thisPage === 'firstSetUp' ? 'firstSetUp' : 'selfRegister'))
+  if (!isSimpleRegPage()) window.history.pushState({ }, 'Freezr - set up', '/admin/' + (thisPage === 'firstSetUp' ? 'firstSetUp' : 'selfRegister'))
 
   setTimeout(function () { window.scrollTo({ top: 0, behavior: 'smooth' }) }, 10)
+}
+
+const isSimpleRegPage = function () {
+  return (window.location.pathname.toLocaleLowerCase() === '/admin/simpleselfregister')
+}
+const simplePageAutoInstallApp = function () {
+  if (!isSimpleRegPage()) return null
+  const searchParams = new URLSearchParams(window.location.search)
+  if (!searchParams.get('autoInstallUrl')) return null
+  return searchParams.get('autoInstallApp')
 }
 
 const createSelector = function (resource, choice) {
@@ -129,7 +150,7 @@ const changeSelector = function (resource) {
           col2.setAttribute('width', '220px')
           const input = document.createElement('input')
           input.setAttribute('type', (item.type || 'text'))
-          input.className = "inputbox"
+          input.className = 'inputbox'
           input.setAttribute('name', (choice + '_' + item.name))
           input.id = choice + '_' + item.name
           if (item.default) input.value = item.default
@@ -245,14 +266,13 @@ const checkResource = function (resource, options, callback) {
   showError('checking ' + (resource === 'DB' ? 'database' : 'file system') + ' . . .')
   if (!callback) callback = gotCheckStatus
   const [err, choice, params] = getFormData(resource)
+  // onsole.log({ resource, options, callback, err, choice, params })
   if (err) {
     showError(err)
-  } else if (choice === 'sysDefault') {
-    showError('Cannot test system defaults')
   } else if (thisPage !== 'firstSetUp' && resource === 'DB' && choice === 'nedb' && document.getElementById('selector_FS').value === 'local') {
     showError('Cannot check nedb with local file system (except when setting up the system)')
   } else {
-    var toSend = { resource, env: {}, action: 'checkresource' }
+    const toSend = { resource, env: {}, action: 'checkresource' }
     toSend.env[(resource === 'FS' ? 'fsParams' : 'dbParams')] = params
     if (resource === 'DB' && params.type === 'nedb') {
       const [, , fsParams] = getFormData('FS')
@@ -280,11 +300,12 @@ function gotCheckStatus (err, data) {
 }
 
 const getAllFormsData = function () {
-  const [fsErr, , fsParams] = getFormData('FS')
-  const [dbErr, , dbParams] = getFormData('DB')
-  var ids = {}
+  const [fsErr, , fsParams] = isSimpleRegPage() ? [null, null, { type: 'system', choice: 'sysDefault' }] : getFormData('FS')
+  const [dbErr, , dbParams] = isSimpleRegPage() ? [null, null, { type: 'system', choice: 'sysDefault' }] : getFormData('DB')
+
+  const ids = {}
   if (['firstSetUp', 'unRegisteredUser'].includes(thisPage)) {
-    const ID_LIST = ['userId', 'password', 'password2']
+    const ID_LIST = ['userId', 'password', 'password2', 'email']
     ID_LIST.forEach(item => {
       ids[item] = document.getElementById(item).value
     })
@@ -297,19 +318,6 @@ const getAllFormsData = function () {
 const launch = function () {
   showError('Checking paramdeters to launch freezr. . . . ')
   const { fsErr, fsParams, dbErr, dbParams, ids } = getAllFormsData()
-  /*
-  const [fsErr, , fsParams] = getFormData('FS')
-  const [dbErr, , dbParams] = getFormData('DB')
-  var ids = {}
-  if (['firstSetUp', 'unRegisteredUser'].includes(thisPage)) {
-    const ID_LIST = ['userId', 'password', 'password2']
-    ID_LIST.forEach(item => {
-      ids[item] = document.getElementById(item).value
-    })
-  } else {
-    ids.userId = userId
-  }
-  */
 
   if (fsErr) {
     showError(fsErr)
@@ -321,24 +329,37 @@ const launch = function () {
     showError("user id's cannot have '/' or '_' or spaces in them")
   } else if (['firstSetUp', 'unRegisteredUser'].includes(thisPage) && (!ids.password2 || ids.password !== ids.password2)) {
     showError('Passwords have to match')
+  } else if (['firstSetUp', 'unRegisteredUser'].includes(thisPage) && ids.email && !isValidEmail(ids.email)) {
+    showError('email is not valid')
   } else {
     showError('')
-    var theInfo = { action: thisPage, userId: ids.userId, password: ids.password, env: { fsParams, dbParams } }
+    const theInfo = { action: thisPage, userId: ids.userId, password: ids.password, email: ids.email, env: { fsParams, dbParams } }
     // freezerRestricted.menu.resetDialogueBox(true);
     const sects = ['exp_warn_1', 'exp_warn_2', 'main_form_sections']
-    sects.forEach(sect => { document.getElementById(sect).style.display = 'none' })
+    sects.forEach(sect => { if (document.getElementById(sect)) document.getElementById(sect).style.display = 'none' })
     document.getElementById('launch_spinner').style.display = 'block'
     window.scrollTo({ top: 0, behavior: 'smooth' })
     freezerRestricted.connect.send('/v1/admin/self_register', JSON.stringify(theInfo), gotRegisterStatus, 'POST', 'application/json')
   }
 }
-
+const isValidEmail = function (aText) {
+  return aText && aText.indexOf('@') > 1 && aText.indexOf('@') < aText.indexOf('.') && aText.indexOf('.') < aText.length - 1
+}
 const gotRegisterStatus = function (error, data) {
-  // onsole.log(error, data)
+  console.log('gotRegisterStatus ', { error, data })
   if (error || !data) {
     document.getElementById('main_form_sections').style.display = 'block'
     document.getElementById('launch_spinner').style.display = 'none'
-    showError(error ? ('Error: ' + error.message) : 'No data was sent from server.')
+    if (error && error.message === 'user already exists') {
+      showError('user id is already taken. Try another id')
+    } else {
+      showError(error ? ('Error: ' + error.message) : 'No data was sent from server.')
+    }
+  } else if (simplePageAutoInstallApp()) {
+    const autoInstallApp = simplePageAutoInstallApp()
+    const searchParams = new URLSearchParams(window.location.search)
+    const autoInstallUrl = searchParams.get('autoInstallUrl')
+    window.location = '/account/app/autoinstall?autoInstallApp=' + autoInstallApp + '&autoInstallUrl=' + autoInstallUrl + '&message=Congratulations - your account has been created. '
   } else {
     window.location = (thisPage === 'firstSetUp' ? '/admin/prefs?firstSetUp=true' : '/account/home?show=welcome&source=' + thisPage)
   }
@@ -368,7 +389,7 @@ const goAuthFS = function () {
 const populateErrorMessage = function (freezrServerStatus, initial) {
   // onsole.log("freezrServerStatus",freezrServerStatus)
   if (!freezrServerStatus) freezrServerStatus = { fundamentals_okay: true }
-  var inner = ''
+  let inner = ''
   if (!freezrServerStatus.fundamentals_okay) {
     inner = '<b>There was a serious issue with your freezr server environement.<br/>'
     if (!freezrServerStatus.can_write_to_user_folder) {
@@ -387,7 +408,7 @@ const populateErrorMessage = function (freezrServerStatus, initial) {
 }
 // Generics
 const showError = function (errorText) {
-  var errorBox = document.getElementById('errorBox')
+  const errorBox = document.getElementById('errorBox')
   errorBox.innerHTML = errorText
   if (errorText) {
     showDiv('errorBox')
@@ -398,13 +419,13 @@ const showError = function (errorText) {
 }
 const hideClass = function (theClass) {
   const els = document.getElementsByClassName(theClass)
-  for (var i = 0; i < els.length; i++) {
+  for (let i = 0; i < els.length; i++) {
     els[i].style.display = 'none'
   }
 }
 const showClass = function (theClass) {
   const els = document.getElementsByClassName(theClass)
-  for (var i = 0; i < els.length; i++) {
+  for (let i = 0; i < els.length; i++) {
     els[i].style.display = 'block'
   }
 }
@@ -418,14 +439,14 @@ const hideDiv = function (divId) {
 }
 const hideDivs = function (theDivs) {
   if (theDivs && theDivs.length > 0) {
-    for (var i = 0; i < theDivs.length; i++) {
+    for (let i = 0; i < theDivs.length; i++) {
       hideDiv(theDivs[i])
     }
   }
 }
 const showDivs = function (theDivs) {
   if (theDivs && theDivs.length > 0) {
-    for (var i = 0; i < theDivs.length; i++) {
+    for (let i = 0; i < theDivs.length; i++) {
       showDiv(theDivs[i])
     }
   }

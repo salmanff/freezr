@@ -23,6 +23,7 @@ exports.version = '0.0.200'
   process.env.FREEZR_FS = 'dropbox'
   process.env.FS_TOKEN = '-'
 */
+/* global process */
 
 const PARAMS_OAC = {
   owner: 'fradmin',
@@ -49,9 +50,9 @@ exports.ENV_PARAMS = {
     },
     sysDefault: {
       type: 'system',
-      label: 'System Default',
+      label: 'Host Server Storage',
       msg: 'The admin has offered to use the default system settings to store your files.',
-      forPages: ['firstSetUp', 'newParams'] // , 'unRegisteredUser' todo - add back and fix
+      forPages: ['firstSetUp', 'newParams', 'unRegisteredUser']
     },
     dropbox: {
       type: 'dropbox',
@@ -115,9 +116,9 @@ exports.ENV_PARAMS = {
   DB: {
     sysDefault: {
       type: 'system',
-      label: 'System Default',
+      label: 'Host Database System',
       msg: 'The admin has offered to use the default system settings to store your database.',
-      forPages: ['firstSetUp', 'newParams']
+      forPages: ['firstSetUp', 'newParams', 'unRegisteredUser']
     },
     nedb: {
       type: 'nedb',
@@ -250,11 +251,9 @@ exports.FS_getRefreshToken = {
 }
 
 exports.checkAndCleanDb = function (dbParams, freezrInitialEnvCopy) {
-  // console.log('todo - TO IMPLEMENT checkAndCleanDb ', dbParams)
+  console.log('todo - TO IMPLEMENT checkAndCleanDb ', dbParams)
   if (!dbParams) return null
-  if (dbParams.choice === 'sysDefault') {
-    return freezrInitialEnvCopy.dbParams
-  }
+  if (fsParams.choice === 'sysDefault') return { type: 'system', choice: 'sysDefault' }
   return dbParams
 }
 exports.checkAndCleanFs = function (fsParams, freezrInitialEnvCopy) {
@@ -262,6 +261,7 @@ exports.checkAndCleanFs = function (fsParams, freezrInitialEnvCopy) {
   fdlog('checkAndCleanDb', { fsParams, freezrInitialEnvCopy }, JSON.stringify(freezrInitialEnvCopy))
   if (!fsParams) return null
   if (!fsParams.choice) fsParams.choice = fsParams.type
+  if (fsParams.choice === 'sysDefault') return { type: 'system', choice: 'sysDefault' }
   const VALID_FS_CHOICES = ['system', 'sysDefault', 'local', 'dropbox', 'googleDrive', 'fdsFairOs', 'glitch']
   fdlog('checking fs type choice ', { fsParams })
   if (!VALID_FS_CHOICES.includes(fsParams.choice)) felog('checkAndCleanFs', 'error - invalid fs choice ', fsParams)
@@ -281,7 +281,7 @@ const fsParseCreds = {
       console.warn('fsParseCreds  without any credentials ???????? SNBH')
       credentials = {}
     }
-    var final = {
+    const final = {
       type: 'local',
       choice: (credentials.choice || 'local'),
       rootFolder: (credentials.rootFolder || 'users_freezr')
@@ -295,7 +295,7 @@ const fsParseCreds = {
     return { choice: 'system', type: 'system' }
   },
   dropbox: function (credentials) {
-    var newCreds = {
+    let newCreds = {
       choice: 'dropbox',
       type: 'dropbox',
       clientId: credentials.clientId,
@@ -314,7 +314,7 @@ const fsParseCreds = {
     return newCreds
   },
   googleDrive: function (credentials) {
-    var newCreds = {
+    let newCreds = {
       choice: 'googleDrive',
       type: 'googleDrive',
       accessToken: credentials.accessToken,
@@ -418,12 +418,12 @@ exports.checkFS = function (env, options, callback) {
     tempTestManager.setSystemUserDS('test', env)
     tempTestManager.getOrInitUserAppFS('test', 'info.freezr.admin', options, (err, userAppFS) => {
       if (err) {
-        var toSend = { checkpassed: false, resource: 'FS' }
+        const toSend = { checkpassed: false, resource: 'FS' }
         if (options && options.getRefreshToken && userAppFS && userAppFS.credentials) toSend.refreshToken = userAppFS.credentials.refreshToken
         callback(err, toSend)
       } else {
         // fdlog('userAppFS tested userAppFS.credentials', userAppFS.credentials)
-        var returns = { checkpassed: false, resource: 'FS' }
+        const returns = { checkpassed: false, resource: 'FS' }
         if (options && options.getRefreshToken && userAppFS.credentials) returns.refreshToken = userAppFS.credentials.refreshToken
         const TEST_TEXT = 'Testing write via dsManager on server !!'
         userAppFS.writeToUserFiles('test_write.txt', TEST_TEXT, { doNotOverWrite: false, nocache: true }, function (err, ret) {
@@ -479,9 +479,9 @@ const checkDbAndGetEnvIfExists = function (tempParams, callback) {
 
 // STARTUP
 exports.tryGettingEnvFromautoConfig = function (callback) {
-  var r = { autoConfig: null, envOnFile: null, params: {}, environments_match: null }
+  const r = { autoConfig: null, envOnFile: null, params: {}, environments_match: null }
 
-  var tempDsManager = new DS_MANAGER()
+  const tempDsManager = new DS_MANAGER()
 
   async.waterfall([
     function (cb) {
@@ -490,7 +490,7 @@ exports.tryGettingEnvFromautoConfig = function (callback) {
       if (!r.envOnFile) {
         getAutoConfigParams(cb)
       } else {
-        cb(null, null)
+        cb(null, r.envOnFile)
       }
     },
     // 1 if envOnFile doesnt exist, use autogonfigs to create a temporary ds_manager and read the file on the fs
@@ -506,7 +506,7 @@ exports.tryGettingEnvFromautoConfig = function (callback) {
           } else {
             oacFs.readUserFile('freezr_environment.js', null, (err, envFromAutoConfigFileSys) => {
               fdlog({ envFromAutoConfigFileSys }) // nn
-              // console.log(' todo todonow - if error is not file not found, then should throw error - security')
+              // console.log(' todo  - if error is not file not found, then should throw error - security')
               if (err) {
                 cb(null)
               } else {
@@ -535,6 +535,7 @@ exports.tryGettingEnvFromautoConfig = function (callback) {
 
     // Get params from the db
     function (cb) {
+      // onsole.log('r.envOnFile ', r.envOnFile)
       const fsParams = (r.envOnFile && r.envOnFile.fsParams) ? r.envOnFile.fsParams : r.autoConfig.fsParams
       const dbParams = (r.envOnFile && r.envOnFile.dbParams) ? r.envOnFile.dbParams : r.autoConfig.dbParams
       fdlog('using autoconfig dbparmams is', dbParams)
@@ -546,8 +547,7 @@ exports.tryGettingEnvFromautoConfig = function (callback) {
       fradminDb.read_by_id('freezr_environment', cb)
     },
     function (envOnDb, cb) {
-      fdlog('r.envOnFile ', r.envOnFile)
-      fdlog('envOnDb ', envOnDb)
+      // onsole.log('envOnDb ', envOnDb)
       if (r.envOnFile && r.envOnFile.freezrIsSetup) { // if there was an env on file, use that
         if (!envOnDb) {
           felog('tryGettingEnvFromautoConfig', '2 - WARNING -  freezr_environment is NOT stored on DB')
@@ -573,7 +573,7 @@ exports.tryGettingEnvFromautoConfig = function (callback) {
   })
 }
 const getAutoConfigParams = function (callback) {
-  var autoConfig = {
+  const autoConfig = {
     ipaddress: autoIpAddress(),
     port: autoPort(),
     dbParams: null, // {oneDb , addAuth}
@@ -585,14 +585,14 @@ const getAutoConfigParams = function (callback) {
     callback(err, autoConfig)
   })
 }
-var autoIpAddress = function () {
+const autoIpAddress = function () {
   if (process && process.env && process.env.DATABASE_SERVICE_NAME && process.env.OPENSHIFT_NODEJS_IP) {
     return process.env.OPENSHIFT_NODEJS_IP // openshift v3
-  } /* add other platforms here */ else {
+  } else { /* add other platforms here */
     return null
   }
 }
-var autoPort = function () {
+const autoPort = function () {
   if (process && process.env && process.env.DATABASE_SERVICE_NAME) {
     return 8080 // openshift v3
   } else if (process && process.env && process.env.PORT) { // aws
@@ -602,7 +602,7 @@ var autoPort = function () {
     return 3000
   }
 }
-var autoDbParams = function (callback) {
+const autoDbParams = function (callback) {
   let foundDbParams = {}
   let haveWorkingDb = false
   let otherOptions = {
@@ -686,7 +686,7 @@ var autoDbParams = function (callback) {
         process.env.DATABASE_SERVICE_NAME &&
         process.env.MONGODB_USER &&
         process.env.MONGODB_PASSWORD) {
-        var mongoServiceName = process.env.DATABASE_SERVICE_NAME.toUpperCase()
+        const mongoServiceName = process.env.DATABASE_SERVICE_NAME.toUpperCase()
         otherOptions.MONGO_OPENSHIFT.vars_exist = true
         otherOptions.MONGO_OPENSHIFT.params = {
           type: 'mongodb',
@@ -808,7 +808,7 @@ var autoDbParams = function (callback) {
     callback(null, { main: foundDbParams, other: otherOptions })
   })
 }
-var fsParams = function () {
+const fsParams = function () {
   if (process && process.env && process.env.FREEZR_FS && process.env.FREEZR_FS === 'dropbox') {
     return {
       type: process.env.FREEZR_FS,

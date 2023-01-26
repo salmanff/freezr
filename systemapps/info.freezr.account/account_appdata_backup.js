@@ -2,7 +2,7 @@
 freezr accounts accpunt_appdata_backup.js
 
 
-This functionality page is incomplete.... Major clean up needed...
+This will be delted - it is an old version
 
 To add upload options:
 	- backup all app_tables seuentially

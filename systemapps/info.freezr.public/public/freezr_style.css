@@ -3,6 +3,7 @@
 
 .errorBox {
     color: #800;
+	font-size: 16px;
 }
 
 .clickable {
@@ -60,8 +61,9 @@ a {
 	margin:5px;
 	background-color: #E2E2E2;
 	border-radius:2px;
-	font-weight: normal;
+	font-weight: bold;
 	cursor: pointer;
+	max-height: 20px;
 }
 
 .freezer_list{
@@ -78,4 +80,8 @@ a {
 }
 .freezer_spacer {
 	margin-top:10px;
+}
+.freezer_largeCheckBox {
+	width: 20px;
+	height: 20px;
 }

@@ -9,8 +9,7 @@ delete window.exports
 delete window.module
 
 // all apps..
-var exports = { structure: null}
-
+const exports = { structure: null }
 
 /*
   In all freezr apps, freezrMeta needs to be defined before freezr_core.
@@ -58,5 +57,5 @@ FREEZR_META.prototype.set = function (props) {
   }
 }
 
-var freezrMeta = new FREEZR_META()
-freezrMeta.initialize() // eslint hack
+const freezrMeta = new FREEZR_META()
+freezrMeta.initialize(exports) // eslint hack

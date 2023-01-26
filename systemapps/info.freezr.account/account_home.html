@@ -13,48 +13,159 @@ freezr Account Home
 -->
 
 <div class="freezer_texture_outer">
-  <div class="freezer_texture_inner">
+    <div class="freezer_texture_inner">
 		<div class="freezer_top_app_menu" id="adminFunctions">
-			<a href="/account/app_management">App Management</a>
-			&nbsp;
-			<a href="/public">Public Page</a>
-			&nbsp;
-			<a id="freezer_admin_butt" href="/admin/home">Admin</a>
-			&nbsp;
-			<a href="/account/settings">Account Settings</a>
-			&nbsp;
-			<a href="/account/contacts">Contacts</a>
-			&nbsp;
-			<a href="/account/logout">Log Out</a>
+            <a href="/public">Public Page</a>
+            &nbsp;
+            <a id="freezer_admin_butt" href="/admin/home">Admin</a>
+            &nbsp;
+            <a href="/account/settings">Account Settings</a>
+            &nbsp;
+            <a href="/account/contacts">Contacts</a>
+            &nbsp;
+            <a href="/account/logout">Log Out</a>
 		</div>
 
 		<div class="freezer_dialogueTitle">freezr home</div>
 		<div class="freezer_dialogueTitle" id = "welcomeMsg" style="display:none">
-      <br>
-      Welcome to your freezr home page!
-      <br>
-      <br>
+            <br>
+            Welcome to your freezr home page!
+            <br>
+            <br>
+        </div>
+
+
+        <div id="app_list">
+            <h2> {{#user_apps.length }}You have {{ user_apps.length }} installed apps. <span style="font-size: 12px; font-weight: normal"> <a href="#installDialogueBox">(Install new)</a></span> {{/user_apps.length }}{{^user_apps}}You have No Installed Apps yet.{{/user_apps}}
+            </h2>
+            
+        <div class="fBoxGrid">
+            {{#user_apps}}
+            <div class="freezrBox" {{#offThreadWip}} style="border-color:palevioletred" {{/offThreadWip}}>
+                <div class="fBoxImgOuter">
+                <a class="fBoxA" href="/apps/{{app_name}}">
+                    <img src="{{logo}}" width="80px" class="fBoxImg" id="goto_2_{{app_name}}">
+                </a>
+                </div>
+
+                <div class="fBoxText" id="goto_4_{{app_name}}">
+                <a class="fBoxA" href="/apps/{{app_name}}">
+                    {{app_display_name}}
+                </a>
+                </div>
+
+                <a class="fBoxButt" data-appName="{{app_name}}" data-action="settings" id="settings_1_{{app_name}}" href="/account/app/settings/{{app_name}}">Settings</a>
+            </div>
+            {{/user_apps}}
+        </div>
+
+        <br>
+        <br>
+
+        <h2>Install New Apps</h2>
+
+        <div id="errorBox" class="errorBox"></div>
+
+        <div id="installDialogueBox">
+            <!-- Tab links -->
+            <div class="tab">
+                <button class="tablinks" id ="button_tabs_featured">Featured</button>
+                <button class="tablinks" id ="button_tabs_upload" >Upload</button>
+                <button class="tablinks" id ="button_tabs_download">Download</button>
+                <button class="tablinks" id ="button_tabs_blank">Authorise</button>
+                <button class="tablinks" style="display:none" id ="button_tabs_dev">Dev</button>
+            </div>
+    
+            <!-- Tab content -->
+            <div id="tab_featured" class="tabcontent">
+                <h3>Featured Apps</h3>
+                <p>Here are sample apps you can download.</p>
+                <p>Press to Install:</p>
+                <ul>
+                    <li class ="feature_app" id="button_feature_com.salmanff.notery">Notery: A note taking app</li>
+                    <li class ="feature_app" id="button_feature_com.salmanff.vulog">Vulog: Companion app to the vulog browser extension</li>
+                    <li class ="feature_app" id="button_feature_com.salmanff.poster">Poster: A simple blogging app</li>
+                </ul>
+                <p><i>One day, freezr (or CEPS) will have an app store and make this look much less stale.</i></p>
+            </div>
+    
+            <div id="tab_upload" class="tabcontent">
+                <h3>Upload a New App</h3>
+                <center>
+                    <div class="drop-area" id="upload_area">
+                        Drop files here to upload
+                    </div>
+                </center>
+                <br>
+                <div style= "display:grid; grid-template-columns: 1fr 2fr; cursor: pointer">
+                    <div>
+                        <div class="freezrButt" id="button_chooseFile">.. or choose a file</div>
+                        <div class="choose_file_outer"> <input class="choose_file_inner" id="app_zipfile2" type='file' style="display:none" name="app_zipfile2"/></div>
+                    </div>
+                    <div class="fBoxGrid">
+                        <div id="button_uploadZipFileApp" class="freezrButt" style="display:none">Upload</div>
+                    </div>
+                </div>
+    
+            </div>
+    
+            <div id="tab_download" class="tabcontent">
+                <div id="tabDownloadInner">
+                    <h3>Download an app via from another web site</h3>
+                    <p>Enter the url where the app zip file resides</p>
+                    <div id="addUrlTable">
+                        <span class="texttop">Enter URL:</span>
+                        <div id="appUrl" class="input" contenteditable="true">https://github.com/user/repo</div>
+                        <br>
+                        <span class="texttop">app Name:</span>
+                        <div id="appNameFromUrl" class="input" contentEditable="true"></div>
+                        <br>
+                        <div class="fBoxGrid">
+                            <div id="button_addAppViaUrl" class="freezrButt">Download & Install</div>
+                        </div>
+                    </div>
+                </div>
+                <div id="installingAppViaUrl" style="display:none">
+                    <h2>Installing <span id="installingAppViaUrlAppName"></span></h2>
+                    <center>
+                        <img src="/app_files/public/info.freezr.public/public/static/ajaxloaderBig.gif" alt=""/>
+                    </center>
+                </div>
+            </div>
+    
+            <div id="tab_blank" class="tabcontent">
+                <h3>Authorise an offline app (outside of this server)</h3>
+                <p>This is used for apps that just want to store your data on your freezr via CEPS (without installing an app on your server).</p>
+                <div id="addBlankApp">
+                    <span class="texttop">app Name:</span>
+                    <div id="appNameForBlankApp" class="input" contenteditable="true"></div>
+                    <br>
+                    <div class="fBoxGrid">
+                        <div id="button_addBlankApp" class="freezrButt">Add offline app</div>
+                    </div>
+                </tr>
+                </div>
+            </div>
+    
+            <div id="tab_dev" style="display:none" class="tabcontent">
+                <h3>Developer Options</h3>
+                <div>Add an existing folder to Apps list. Enter app name here if the app folder already exists.</div>
+                <div class="input"  id="appNameFromFolder" contenteditable="true"></div>
+                <div class="fBoxGrid">
+                    <div id="button_addAppInFolder" class="freezrButt">Add</div>
+                </div>
+            </div>
+    
+            <br/>
+            <br/>
+            <br/>
+            <br/>
+            <br/>
+            <br/>  
+    
+        </div>
+    
+
+        </div>
     </div>
-
-		<div id="app_list">
-			<div class="page_title"> {{#user_apps.length }}You have {{ user_apps.length }} installed apps {{/user_apps.length }}{{^user_apps}}You have No Installed Apps. You can install apps from the <a href="/account/app_management">App Management page here</a>.{{/user_apps}}
-			      </div>
-
-			<div class="list_holder">
-
-			      {{#user_apps}}
-			          <div class="app_container" {{#offThreadWip}} style="border-color:palevioletred" {{/offThreadWip}}>
-			            <div class="app_inner" width="80px">
-			              <img src="{{logo}}" width="80px" class="logo_img" id="goto_2_{{app_name}}">
-			            </div>
-
-			            <div class="app_name" id="goto_4_{{app_name}}">
-			                {{app_display_name}}
-			            </div>
-			          </div>
-			      {{/user_apps}}
-			</div>
-		</div>
-
-  </div>
 </div>

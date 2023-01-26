@@ -34,12 +34,13 @@ exports.DEFAULT_PREFS = {
   public_landing_app: '',
   allowSelfReg: false,
   allowAccessToSysFsDb: false,
-  blockMsgsFromNonContacts: true
+  selfRegDefaultMBStorageLimit: null,
+  blockMsgsFromNonContacts: false
 }
 const helpers = require('./helpers.js')
 const bcrypt = require('bcryptjs')
 const crypto = require('crypto')
-const userObjFile = require('./user_obj.js') // eslint-disable-line
+// const userObjFile = require('./user_obj.js') // eslint-disable-line
 const async = require('async')
 const Encoder = require('util').TextEncoder
 
@@ -50,10 +51,10 @@ exports.generatePublicAdminPage = function (req, res) {
   fdlog('public adminPage: ' + req.url)
   // todo - distinguish http & https [?]
 
-  var scriptFiles = null
-  var cssFiles = null
-  var pageTitle = null
-  var otherVariables = ''
+  let scriptFiles = null
+  let cssFiles = null
+  let pageTitle = null
+  let otherVariables = ''
   switch (req.params.sub_page) {
     case 'oauth_start_oauth': // public
       scriptFiles = ['./public/info.freezr.public/public/oauth_start_oauth.js']
@@ -77,7 +78,7 @@ exports.generatePublicAdminPage = function (req, res) {
       break
   }
 
-  var options = {
+  const options = {
     page_title: pageTitle || ('Admin ' + req.params.sub_page.replace('_', ' ') + ' (Freezr)'),
     css_files: cssFiles,
     page_url: 'public/' + req.params.sub_page + '.html',
@@ -99,11 +100,11 @@ exports.generateAdminPage = function (req, res) {
   fdlog('adminPage: ' + req.url + ' sub page: ' + req.params.sub_page)
   // todo - distinguish http & https [?]
 
-  var scriptFiles = null
-  var cssFiles = null
-  var pageTitle = null
-  var initialQuery = null
-  var initialQueryFunc = null
+  let scriptFiles = null
+  let cssFiles = null
+  let pageTitle = null
+  let initialQuery = null
+  let initialQueryFunc = null
   if (!req.params.sub_page) req.params.sub_page = 'home'
   // Note adminLoggedInAPI rechecks user credentials as admin, so should not use intiial queries on adminLoggedInUserPage
   switch (req.params.sub_page) {
@@ -114,6 +115,7 @@ exports.generateAdminPage = function (req, res) {
     case 'list_users':
       pageTitle = 'freezr.info - User list'
       cssFiles = './public/info.freezr.public/public/freezr_style.css'
+      scriptFiles = ['list_users.js']
       initialQuery = { url: '/v1/admin/user_list.json' }
       initialQueryFunc = listAllUsers
       break
@@ -146,7 +148,7 @@ exports.generateAdminPage = function (req, res) {
       break
   }
 
-  var options = {
+  const options = {
     page_title: pageTitle || ('Admin ' + req.params.sub_page.replace('_', ' ') + ' (Freezr)'),
     css_files: cssFiles,
     page_url: req.params.sub_page + '.html',
@@ -193,7 +195,7 @@ exports.generateFirstSetUpPage = function (req, res) {
 
   req.params.sub_page = 'firstSetUp'
 
-  var tempEnvironment = req.freezrInitialEnvCopy
+  const tempEnvironment = req.freezrInitialEnvCopy
   if (tempEnvironment.dbParams && tempEnvironment.dbParams.pass) {
     tempEnvironment.dbParams.pass = null
     tempEnvironment.dbParams.has_password = true
@@ -209,16 +211,16 @@ exports.generateFirstSetUpPage = function (req, res) {
     tempEnvironment.fsParams.TokenIsOnServer = true
   }
 
-  var options = {
+  const options = {
     page_title: 'Freeezr Set Up',
     css_files: ['./public/info.freezr.public/public/firstSetUp.css', './public/info.freezr.public/public/freezr_style.css'],
     page_url: 'public/selfregister.html',
     script_files: ['./public/info.freezr.public/public/selfregister.js'],
     app_name: 'info.freezr.public',
     other_variables: ' var freezrServerStatus = ' + JSON.stringify(req.freezrStatus) + ';' +
-      ' var thisPage = "firstSetUp";' +
-      ' var freezrEnvironment = ' + JSON.stringify(tempEnvironment) + ';' +
-      ' ENV_PARAMS = ' + JSON.stringify(environmentDefaults.ENV_PARAMS) + ';',
+      ' const thisPage = "firstSetUp";' +
+      ' const freezrEnvironment = ' + JSON.stringify(tempEnvironment) + ';' +
+      ' const ENV_PARAMS = ' + JSON.stringify(environmentDefaults.ENV_PARAMS) + ';',
     freezr_server_version: req.freezr_server_version,
     server_name: (helpers.startsWith(req.get('host'), 'localhost') ? 'http' : 'https') + '://' + req.get('host')
   }
@@ -227,26 +229,34 @@ exports.generateFirstSetUpPage = function (req, res) {
   fileHandler.load_data_html_and_page(req, res, options)
 }
 exports.generate_UserSelfRegistrationPage = function (req, res) {
+  // app.get('/admin/selfregister', loggedInOrNotForSetUp, publicUserPage, adminHandler.generate_UserSelfRegistrationPage)
+  // app.get('/admin/SimpleSelfregister', loggedInOrNotForSetUp, publicUserPage, adminHandler.generate_UserSelfRegistrationPage)
+
   fdlog('generate_UserSelfRegistrationPage: ' + req.url)
   // todo - distinguish http & https & localhost
 
-  var envParams = environmentDefaults.ENV_PARAMS
+  const isSimplePage = req.path.toLowerCase() === '/admin/simpleselfregister'
+
+  // onsole.log('selfreg ', req.url, { isSimplePage }, req.path)
+
+  const envParams = environmentDefaults.ENV_PARAMS
   if (!req.freezrAllowAccessToSysFsDb) {
     delete envParams.FS.sysDefault
     delete envParams.DB.sysDefault
   }
 
-  var options = {
+  const options = {
     page_title: 'Freeezr Account Set Up',
     css_files: ['./public/info.freezr.public/public/firstSetUp.css', './public/info.freezr.public/public/freezr_style.css'],
-    page_url: 'public/selfregister.html',
+    page_url: (isSimplePage ? 'public/simpleselfregister.html' : 'public/selfregister.html'),
     script_files: ['./public/info.freezr.public/public/selfregister.js'],
     app_name: 'info.freezr.public',
     other_variables: 'const thisPage = "' + req.freezrSetUpStatus + '"; ' +
       'const freezrEnvironment = {}; ' +
       'const freezrServerStatus = null; ' +
       ('const userId = "' + (req.session.logged_in_user_id || '') + '"; ') +
-      ' ENV_PARAMS = ' + JSON.stringify(envParams) + ';',
+      ' ENV_PARAMS = ' + JSON.stringify(envParams) + ';' +
+      ' const freezrSelfRegOptions = ' + JSON.stringify(req.freezrSelfRegOptions) + ';',
     freezr_server_version: req.freezr_server_version,
     server_name: (helpers.startsWith(req.get('host'), 'localhost') ? 'http' : 'https') + '://' + req.get('host')
   }
@@ -256,6 +266,7 @@ exports.generate_UserSelfRegistrationPage = function (req, res) {
 }
 
 exports.user_register = function (req, res) {
+  // performed by admin
   // onsole.log('Registering '+req.body.user_id);
 
   const allUsersDb = req.freezrFradminDS.getDB(USER_DB_OAC)
@@ -270,7 +281,7 @@ exports.user_register = function (req, res) {
     full_name: req.body.full_name,
     deleted: false,
     isAdmin: (req.body.isAdmin),
-    creator: req.session.logged_in_user_id, // because registerType === 'normal'
+    _created_by_user: req.session.logged_in_user_id, // because registerType === 'normal'
     dbParams: (req.body.useSysFsDb ? { type: 'system' } : null),
     fsParams: (req.body.useSysFsDb ? { type: 'system' } : null),
     slParams: (req.body.useSysFsDb ? { type: 'system' } : null)
@@ -333,6 +344,7 @@ exports.user_register = function (req, res) {
 exports.self_register = function (req, res) {
   // app.post('/v1/admin/self_register', selfRegisterChecks, selfRegAdds, adminHandler.self_register)
   fdlog('self_register', req.body.action, req.freezrInitialEnvCopy)
+  const options = {} // for checkresource
 
   if ((req.freezrIsSetup && req.body.resource === 'FS' && req.body.params.type === 'local') ||
     (req.freezrIsSetup && req.body.resource === 'DB' && req.body.params.choice === 'mongoLocal')) {
@@ -340,7 +352,7 @@ exports.self_register = function (req, res) {
   } else {
     const initialEnv = req.freezrInitialEnvCopy // Only gets passed if it is the firstSetUp
     if (initialEnv && req.body && req.body.env) {
-      var { fsParams, dbParams } = req.body.env
+      let { fsParams, dbParams } = req.body.env
       if (fsParams && fsParams.useServerToken && fsParams.type === initialEnv.fsParams.type) {
         req.body.env.fsParams = initialEnv.fsParams
       } else if (fsParams && fsParams.choice === 'sysDefault' && (req.body.action === firstSetUp || req.freezrAllowAccessToSysFsDb)) {
@@ -354,7 +366,6 @@ exports.self_register = function (req, res) {
     switch (req.body.action) {
       case 'checkresource':
         // checkFS and checkDB
-        var options = {}
         if (req.body.getRefreshToken) options.getRefreshToken = true
         if (!req.freezrIsSetup) options.okToCheckOnLocal = true
         environmentDefaults['check' + req.body.resource](req.body.env, options, (err, testResults) => {
@@ -446,6 +457,7 @@ const firstSetUp = function (req, res) {
     // set up db and fs and see if freezr_environment exists in either
     function (cb) {
       req.freezrDsManager.setSystemUserDS('fradmin', { fsParams, dbParams })
+      req.freezrDsManager.setSystemUserDS('public', { fsParams, dbParams })
       req.freezrDsManager.initOacDB(USER_DB_OAC, null, cb)
     },
     function (usersDb, cb) {
@@ -499,7 +511,7 @@ const firstSetUp = function (req, res) {
         isAdmin: true,
         fsParams: { type: 'system' },
         dbParams: { type: 'system' },
-        creator: '_self_'
+        _created_by_user: '_self_'
       }
       allUsersDb.create(userId, userInfo, null, cb)
     },
@@ -574,12 +586,12 @@ const setupNewUserParams = function (req, res) {
   // req.freezrAllowAccessToSysFsDb = freezrPrefs.allowAccessToSysFsDb
   // req.allUsersDb = dsManager.getDB(USER_DB_OAC)
 
-  fdlog('setupNewUserParams', 'setupParams - esetting of parameters for user :', req.body)
-
   const uid = req.session.logged_in_user_id || helpers.user_id_from_user_input(req.body.userId)
-  const { password, action } = req.body
+  const { password, action, email } = req.body
   const fsParams = environmentDefaults.checkAndCleanFs(req.body.env.fsParams, req.freezrInitialEnvCopy)
   const dbParams = environmentDefaults.checkAndCleanDb(req.body.env.dbParams, req.freezrInitialEnvCopy)
+
+  fdlog('setupNewUserParams', 'setupParams - esetting of parameters for user :', req.body, { fsParams, dbParams })
 
   function regAuthFail (message, errCode) { helpers.auth_failure('admin_handler', exports.version, 'setupNewUserParams', message, errCode) }
 
@@ -587,7 +599,7 @@ const setupNewUserParams = function (req, res) {
   // let appToken
   let userObj
   let hash
-
+  const userLimits = {}
   fdlog('todo - deal with passwords etc already in environment - eg if dropbox password is in the heroku env')
 
   async.waterfall([
@@ -601,7 +613,7 @@ const setupNewUserParams = function (req, res) {
         cb(new Error('Need fsParams and dbparams to write'))
       } else if (!req.freezrAllowAccessToSysFsDb && (['local', 'system'].includes(fsParams.type) || ['local', 'system'].includes(dbParams.type))) {
         cb(regAuthFail('Not allowed to use system resources', 'auth-Not-freezrAllowAccessToSysFsDb'))
-      } else if (!req.freezrAllowSelfReg && !req.session.logged_in_user_id) {
+      } else if (!req.freezrSelfRegOptions.allow && !req.session.logged_in_user_id) {
         cb(regAuthFail('Not allowed to self-register', 'auth-Not-freezrAllowSelfReg'))
       } else if (action === 'unRegisteredUser') {
         // to do
@@ -628,6 +640,13 @@ const setupNewUserParams = function (req, res) {
       hash = ahash
       if (action === 'unRegisteredUser' && !hash) {
         cb(new Error('Could not get hash'))
+      } else if (fsParams.type === 'system') {
+        if (req.freezrSelfRegOptions.allow) {
+          userLimits.storage = req.freezrSelfRegOptions.defaultMBStorageLimit
+          cb(null, true)
+        } else {
+          cb(new Error('Server does not allow self-registeredd users to use its file system.'), false)
+        }
       } else {
         environmentDefaults.checkFS({ fsParams, dbParams }, { userId: uid }, cb)
       }
@@ -635,6 +654,13 @@ const setupNewUserParams = function (req, res) {
     function (fsPassed, cb) {
       if (!fsPassed) {
         cb(new Error('File system parameters did NOT pass checkup'))
+      } else if (dbParams.type === 'system') {
+        if (req.freezrSelfRegOptions.allow) {
+          userLimits.storage = req.freezrSelfRegOptions.defaultMBStorageLimit
+          cb(null, true)
+        } else {
+          cb(new Error('Server does not allow self-registeredd users to use its file system.'), false)
+        }
       } else {
         setTimeout(function () {
           environmentDefaults.checkDB({ fsParams, dbParams }, { okToCheckOnLocal: true }, cb)
@@ -661,13 +687,14 @@ const setupNewUserParams = function (req, res) {
           const userInfo = {
             user_id: uid,
             password: hash,
-            email_address: null,
+            email,
             full_name: null,
             deleted: false,
             isAdmin: false,
             fsParams,
             dbParams,
-            creator: '_self_'
+            _created_by_user: '_self_',
+            limits: userLimits
           }
           req.freezrAllUsersDb.create(uid, userInfo, null, cb)
         }
@@ -754,7 +781,7 @@ const updateExistingFsParams = function (req, res) {
       req.freezrAllUsersDb.query({ user_id: uid }, null, cb)
     },
     function (results, cb) {
-      var u = new User(results[0])
+      const u = new User(results[0])
       // fdlog('got user ', u)
       if (!results || results.length === 0 || results.length > 1) {
         cb(helpers.auth_failure('admin_handler.js', exports.version, 'updateExistingParams', 'funky error'))
@@ -771,13 +798,13 @@ const updateExistingFsParams = function (req, res) {
       helpers.send_failure(res, err, 'admin_handler', exports.version, 'oauth_make:item does not exist')
     } else {
       req.freezrUserDS.fsParams = fsParams
-      var tables = []
+      const tables = []
       for (const table in req.freezrUserDS.appcoll) { tables.push(table) }
       async.forEach(tables, function (table, cb) {
         req.freezrUserDS.initOacDB({ app_table: table, owner: req.freezrUserDS.owner }, null, cb)
       },
       function (err) {
-        var ret = err ? { error: err } : { success: true }
+        const ret = err ? { error: err } : { success: true }
         helpers.send_success(res, ret)
       })
     }
@@ -787,7 +814,7 @@ const updateExistingFsParams = function (req, res) {
 const listAllUsers = function (req, res) {
   // fdlog('todo - scale and paginate for many users')
 
-  var allUsersDb = req.freezrFradminDS.getDB(USER_DB_OAC)
+  const allUsersDb = req.freezrFradminDS.getDB(USER_DB_OAC)
   allUsersDb.query({}, null, (err, results) => {
     if (err) {
       if (req.freezrInternalCallFwd) {
@@ -796,12 +823,13 @@ const listAllUsers = function (req, res) {
         helpers.send_internal_err_failure(res, 'admin_handler', exports.version, 'listAllUsers', 'failure to get all user list - ' + err)
       }
     } else {
-      var out = []
+      const out = []
       if (results) {
-        for (var i = 0; i < results.length; i++) {
+        for (let i = 0; i < results.length; i++) {
           out.push(new User(results[i]).response_obj())
         }
       }
+      // onsole.log('out: ', JSON.stringify(out))
       if (req.freezrInternalCallFwd) {
         req.freezrInternalCallFwd(null, { users: out })
       } else {
@@ -817,7 +845,7 @@ const getMainPrefsToShow = function (req, res) {
     collection_name: 'params',
     owner: 'fradmin'
   }
-  var paramsDb = req.freezrFradminDS.getDB(PARAMS_APC)
+  const paramsDb = req.freezrFradminDS.getDB(PARAMS_APC)
   paramsDb.read_by_id('main_prefs', (err, theprefs) => {
     if (err) {
       felog('getMainPrefsToShow', 'err reading main_prefs', err)
@@ -869,13 +897,44 @@ exports.get_or_set_prefs = function (paramsDb, prefName, prefsToSet, doSet, call
   })
 }
 
+const VERSION_NUMS = 'versionNums'
+exports.check_server_version_and_implement_updates = function (dsManager, currentversion, callback) {
+  const paramsDb = dsManager.getDB(PARAMS_OAC)
+  paramsDb.read_by_id(VERSION_NUMS, (err, results) => {
+    if (err) {
+      console.warn('error reading previous version num')
+      callback(err)
+    } else if (!results) {
+      paramsDb.create(VERSION_NUMS, { serverVersion: currentversion }, null, callback)
+    } else {
+      if (helpers.newVersionNumberIsHigher(results.serverVersion, currentversion)) {
+        const serverUpdates = require('./serverUpdates.js')
+        serverUpdates.doUpdates(dsManager, results.serverVersion, currentversion, (err) => {
+          if (err) {
+            callback(err)
+          } else {
+            paramsDb.update(VERSION_NUMS, { serverVersion: currentversion }, { replaceAllFields: false, multi: false }, function (err, stuff) {
+              callback(err)
+            })
+          }
+        })
+        //
+        // callback(null)
+      } else {
+        // onsole.log('new version is not higher')
+        callback(null)
+      }
+    }
+  })
+}
+
 exports.change_main_prefs = function (req, res, next) {
   fdlog('change_main_prefs :' + JSON.stringify(req.body))
   // req.freezrPrefs = freezrPrefs
   // eq.freezrFradminDS = userDS
 
-  var userId = req.session.logged_in_user_id
-  var newPrefs = {}
+  const userId = req.session.logged_in_user_id
+  const newPrefs = {}
 
   // req.freezrPrefsTempPw = 'ok'
 
@@ -913,7 +972,7 @@ exports.change_main_prefs = function (req, res, next) {
       } else if (!userInfo) {
         cb(helpers.missing_data('user info'))
       } else {
-        var u = new User(userInfo)
+        const u = new User(userInfo)
         if (u.check_passwordSync(req.body.password)) {
           cb(null)
         } else {
@@ -949,7 +1008,7 @@ exports.hackingStuff = function (req, res) {
   let oldAccessibles = null
   async.waterfall([
     function (cb) {
-      req.freezrFradminDS.getorInitDb({ app_table: 'info.freezr.admin.public_records', owner: 'fradmin' }, {}, cb)
+      req.freezrFradminDS.getorInitDb({ app_table: 'info.freezr.public.public_records', owner: 'public' }, {}, cb)
     },
     function (theDb, cb) {
       publicRecDb = theDb
@@ -1014,7 +1073,7 @@ exports.hackingStuff = function (req, res) {
 
 // o-auth
 const MAX_TIME = 30000
-var cleanIntervaler = null
+let cleanIntervaler = null
 const listAllOauths = function (req, res) {
   fdlog('admin listAllOauths')
   const oauthenticatorsOac = {
@@ -1044,8 +1103,8 @@ const listAllOauths = function (req, res) {
 }
 exports.oauth_perm_make = function (req, res) {
   fdlog('New or updated oauth for type: ' + req.body.type + ' name: ' + req.body.name)
-  var update = null
-  var isUpdate = Boolean(req.body._id)
+  let update = null
+  const isUpdate = Boolean(req.body._id)
 
   async.waterfall([
     function (cb) {
@@ -1065,7 +1124,7 @@ exports.oauth_perm_make = function (req, res) {
           results = results[0]
         }
       }
-      var params = {
+      const params = {
         type: req.body.type,
         name: req.body.name,
         key: req.body.key,
@@ -1170,7 +1229,7 @@ exports.oauth_do = function (req, res) {
     fdlog('oauth_do validate_state', 'looking for state ', req.query.state)
     if (req.query.accessToken === 'null') req.query.accessToken = null
     if (req.query.code === 'null') req.query.code = null
-    var stateParams = req.authStatesStore[req.query.state]
+    const stateParams = req.authStatesStore[req.query.state]
     // if (!stateParams && req.query.state === 'n9JJSOq29MRh2ZOm0rwftLCnS00o1jMQbDQsqN6T') stateParams = { source: 'dropbox', name: 'testNedb', date_created: new Date().getTime() - 3000 }
     fdlog('oauth_do validate_state', 'req.session.oauth_state', req.session.oauth_state, 'req.query.state', req.query.state)
     async.waterfall([
@@ -1258,11 +1317,11 @@ exports.oauth_do = function (req, res) {
     helpers.send_failure(res, helpers.error('no dowhat sent to auth'), 'admin_handler', exports.version, 'oauth_do:Invalid dowhat')
   }
 }
-var clearStatesTimeOut = function () {
+const clearStatesTimeOut = function () {
   cleanUnusedStates()
   clearTimeout(cleanIntervaler)
 }
-var cleanUnusedStates = function () {
+const cleanUnusedStates = function () {
   fdlog(null, 'Clean out old states - todo')
 }
 

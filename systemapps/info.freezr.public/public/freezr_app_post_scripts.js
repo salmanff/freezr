@@ -147,7 +147,7 @@ freezerRestricted.menu.add_standAloneApp_login_dialogue = function (divToInsertI
             freezr.app.offlineCredentialsExpired = false
             freezr.app.loginCallback ? freezr.app.loginCallback(null, freezrMeta) : console.warn('Warning: Set freezr.app.loginCallback to handle log in response: ' + JSON.stringify(resp))
           } else {
-            messageDiv.innerHTML = 'developper error  2 - loggedin_app_name ' + resp.login_for_app_name + ' is not correct.'
+            messageDiv.innerHTML = 'developper error  2 - inputs are not correct'
           }
         })
       }

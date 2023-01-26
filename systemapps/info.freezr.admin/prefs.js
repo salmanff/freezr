@@ -21,15 +21,15 @@ freezr.initPageScripts = function () {
   freezr.utils.getAllAppList(function (error, allApps) {
     if (error) console.log(error) // need to handle
     if (allApps) allApps = freezr.utils.parse(allApps)
-    //onsole.log(allApps.user_apps)
-    oldChoice = document.getElementById('oldChoice').innerHTML;
-    if (allApps.user_apps && allApps.user_apps.length>0) {
+    // onsole.log(allApps.user_apps)
+    const oldChoice = document.getElementById('oldChoice').innerHTML
+    if (allApps.user_apps && allApps.user_apps.length > 0) {
       allApps.user_apps.forEach(anAppObj => {
-        let anOption = document.createElement("option");
-        anOption.value = anAppObj.app_name;
+        const anOption = document.createElement('option')
+        anOption.value = anAppObj.app_name
         anOption.innerHTML = anAppObj.app_display_name || anAppObj.app_name
-        document.getElementById("defaultPublicAppId").appendChild(anOption);
-        if (oldChoice == anAppObj.app_name) document.getElementById("defaultPublicAppId").value=oldChoice
+        document.getElementById('defaultPublicAppId').appendChild(anOption)
+        if (oldChoice === anAppObj.app_name) document.getElementById('defaultPublicAppId').value = oldChoice
       })
     }
   })
@@ -42,45 +42,49 @@ freezr.initPageScripts = function () {
     } else {
       const theInfo = {
         allowSelfReg: document.getElementById('allowSelfRegId').checked,
+        selfRegDefaultMBStorageLimit: (document.getElementById('selfRegDefaultMBStorageLimit').value ? parseInt(document.getElementById('selfRegDefaultMBStorageLimit').value) : null),
         allowAccessToSysFsDb: document.getElementById('allowAccessToSysFsDbId').checked,
         log_visits: document.getElementById('logVisitsId').checked,
         redirect_public: document.getElementById('redirectPublicId').checked,
         public_landing_app: document.getElementById('defaultPublicAppId').value,
         public_landing_page: document.getElementById('defaultLandingUrl').value,
-        password: password
+        password
       }
-
-      freezerRestricted.connect.write('/v1/admin/change_main_prefs', theInfo, gotChangeStatus, 'jsonString')
+      if (isNaN(theInfo.selfRegDefaultMBStorageLimit)) {
+        showError('storage limit needs to be a number or left blank')
+      } else {
+        freezerRestricted.connect.write('/v1/admin/change_main_prefs', theInfo, gotChangeStatus, 'jsonString')
+      }
     }
   }
 }
 
-var gotChangeStatus = function(error, data) {
-  if (data) data = freezr.utils.parse(data);
+const gotChangeStatus = function (error, data) {
+  if (data) data = freezr.utils.parse(data)
   if (error) {
-    showError("Error. "+error.message);
+    showError('Error. ' + error.message)
   } else if (!data) {
-    showError("Could not connect to server");
+    showError('ould not connect to server')
   } else {
     showError('Preferences Saved')
   }
 }
 
-var showError = function(errorText) {
-  var errorBox=document.getElementById("errorBox");
-  errorBox.innerHTML= errorText;
-  window.scrollTo(0,0);
+const showError = function (errorText) {
+  const errorBox = document.getElementById('errorBox')
+  errorBox.innerHTML = errorText
+  window.scrollTo(0, 0)
 }
 
 const hideClass = function (theClass) {
   const els = document.getElementsByClassName(theClass)
-  for (var i = 0; i < els.length; i++) {
+  for (let i = 0; i < els.length; i++) {
     els[i].style.display = 'none'
   }
 }
 const showClass = function (theClass) {
   const els = document.getElementsByClassName(theClass)
-  for (var i = 0; i < els.length; i++) {
+  for (let i = 0; i < els.length; i++) {
     els[i].style.display = 'block'
   }
 }

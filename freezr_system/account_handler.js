@@ -24,17 +24,16 @@ exports.generate_login_page = function (req, res) {
     res.redirect('/account/home')
   } else {
     // fdlog todo - need to sanitize text
-    var options = {
+    const options = {
       page_title: (req.params.app_name ? 'Freezr App Login for ' + req.params.app_name : ' Login (Freezr)'),
       css_files: './public/info.freezr.public/public/freezr_style.css',
       initial_query: null,
       server_name: req.protocol + '://' + req.get('host'),
       freezr_server_version: req.freezr_server_version,
       app_name: (req.params.app_name ? req.params.app_name : 'info.freezr.account'),
-      other_variables: 'var login_for_app_name = ' + (req.params.app_name ? ("'" + req.params.app_name + "';") : 'null') + ';' +
-        ' var loginAction = ' + (req.params.loginaction ? ("'" + req.params.loginaction + "';") : 'null') + ';' +
+      other_variables:
         ' var freezrServerStatus = ' + JSON.stringify(req.freezrStatus) + ';' +
-        ' freezrAllowSelfReg = ' + req.freezrAllowSelfReg + ';'
+        ' freezrAllowSelfReg = ' + req.freezrSelfRegOptions.allow + ';'
     }
 
     if (!req.session) req.session = {}
@@ -70,14 +69,14 @@ exports.generateAccountPage = function (req, res) {
     req.params.page = req.params.page.toLowerCase()
   }
 
-  if (accountPagemanifest[req.params.page]) {
-    var options = accountPagemanifest[req.params.page]
+  const options = accountPageManifest(req.params)
+  if (options) {
     fdlog('have app ', { options })
     options.app_name = 'info.freezr.account'
     options.user_id = req.session.logged_in_user_id
     options.user_is_admin = req.session.logged_in_as_admin
     options.server_name = req.protocol + '://' + req.get('host')
-    options.other_variables = req.params.other_variables // only from generateSystemDataPage
+    options.other_variables = options.other_variables || req.params.other_variables // only from generateSystemDataPage
 
     // onsole.log(options)
     if (!req.freezrTokenInfo || !req.freezrTokenInfo.app_token || !req.session.logged_in_user_id) {
@@ -147,7 +146,7 @@ exports.app_password_generate_one_time_pass = function (req, res) {
       app_name: appName,
       app_password: helpers.generateOneTimeAppPassword(userId, appName, req.session.device_code),
       app_token: helpers.generateAppToken(userId, appName, req.session.device_code), // create token instead
-      expiry: expiry,
+      expiry,
       one_device: oneDevice,
       user_device: null,
       date_used: null // to be replaced by date
@@ -206,7 +205,7 @@ exports.app_password_update_params = function (req, res) {
             err = helpers.error('password_used', 'Cannot change parameters after password has been used')
             helpers.send_failure(res, err, 'account_handler', exports.version, 'app_password_update_params')
           } else {
-            var changes = {}
+            const changes = {}
             if (expiry) changes.expiry = expiry
             if (oneDevice || oneDevice === false) changes.one_device = params.oneDevice
             req.freezrAppTokenDB.update((record._id + ''), changes, { replaceAllFields: false }, function (err, results) {
@@ -226,7 +225,7 @@ exports.changePassword = function (req, res) {
   // req.freezrUserDS
   // onsole.log("Changing password  "+JSON.stringify(req.body));
 
-  var userId = req.body.user_id
+  const userId = req.body.user_id
   let u = null
   async.waterfall([
     // 1. basic checks
@@ -286,12 +285,74 @@ exports.changePassword = function (req, res) {
     }
   })
 }
+exports.setPrefs = function (req, res) {
+  // app.put('/v1/account/data/setPrefs.json', accountLoggedInAPI, addAllUsersDb, accountHandler.setPrefs)
+  // todo later -> merge this endpoint with changePassword and others
+
+  fdlog('setprefs, ', req.body)
+
+  const userId = req.session.logged_in_user_id
+  const userPrefs = {}
+  let u = null
+  async.waterfall([
+    // 1. basic checks
+    function (cb) {
+      if (!userId) {
+        cb(helpers.auth_failure('account_handler.js', exports.version, 'setPrefs', 'user not logged in'))
+      } else {
+        cb(null)
+      }
+    },
+
+    // 2. get user
+    function (cb) {
+      req.allUsersDb.query({ user_id: userId }, null, cb)
+    },
+
+    // 3. check the password
+    function (results, cb) {
+      require('./user_obj.js')
+      u = new User(results[0])
+      if (!results || results.length === 0) {
+        cb(helpers.auth_failure('account_handler.js', exports.version, 'setPrefs', 'funky error'))
+      } else if (results.length > 1) {
+        cb(helpers.auth_failure('account_handler.js', exports.version, 'setPrefs', 'getting too many users'))
+      } else {
+        cb(null)
+      }
+    },
+
+    // 3. change prefs for the user.
+    function (cb) {
+      userPrefs.blockMsgsToNonContacts = Boolean(req.body.blockMsgsToNonContacts)
+      userPrefs.blockMsgsFromNonContacts = Boolean(req.body.blockMsgsFromNonContacts)
+      req.allUsersDb.update(
+        { user_id: userId },
+        { userPrefs },
+        { replaceAllFields: false },
+        cb)
+    }
+
+  ],
+  function (err, returns) {
+    fdlog('userPrefs ', { err, returns })
+    if (err) {
+      helpers.send_failure(res, err, 'account_handler', exports.version, 'setPrefs')
+    } else if (!returns || !returns.nModified || returns.nModified === 0) {
+      helpers.send_failure(res, helpers.error('change error - was not able to change setPrefs: ' + JSON.stringify(returns)), 'account_handler', exports.version, 'setPrefs')
+    } else {
+      req.freezrUserDS.userPrefs = userPrefs
+      if (returns.nModified !== 1) felog('setPrefs', 'error in changing user records - to investigate why more than 1 modified ', returns)
+      helpers.send_success(res, { user: u.response_obj() })
+    }
+  })
+}
 exports.removeFromFreezr = function (req, res) {
   // app.put('/v1/account/changePassword.json', accountLoggedInAPI, addAllUsersDb, accountHandler.changePassword)
   // req.freezrUserDS
   // onsole.log("Changing password  "+JSON.stringify(req.body));
 
-  var userId = req.body.user_id
+  const userId = req.body.user_id
   let u = null
   async.waterfall([
     // 1. basic checks
@@ -325,7 +386,7 @@ exports.removeFromFreezr = function (req, res) {
       } else if (u.check_passwordSync(req.body.oldPassword)) {
         cb(null)
       } else {
-        // console.log => need to limit number of wrong passwords - set a file in the datastore
+        // console.log => todo need to limit number of wrong passwords - set a file in the datastore
         fdlog('need to limit number of wrong passwords - set a file in the datastore ;) ')
         cb(helpers.auth_failure('account_handler.js', exports.version, 'removeFromFreezr', 'Wrong password'))
       }
@@ -362,9 +423,27 @@ exports.removeFromFreezr = function (req, res) {
     }
   })
 }
+
+// Data retreival
+exports.get_account_data = function (req, res) {
+  // app.get('/v1/account/data/:action', accountLoggedInAPI, accountHandler.get_account_data) // app_list.json, app_resource_use.json
+  switch (req.params.action) {
+    case 'app_list.json':
+      exports.list_all_user_apps(req, res)
+      break
+    case 'app_resource_use.json':
+      exports.get_app_resources(req.query?.app_name, req, res)
+      break
+    case 'user_prefs.json':
+      helpers.send_success(res, req.freezrUserDS.userPrefs)
+      break
+    default:
+      helpers.send_failure(res, new Error('invalid page'), 'account_handler', exports.version, req.params.action)
+      break
+  }
+}
 exports.list_all_user_apps = function (req, res) {
-  // app.get('/v1/account/app_list.json', accountLoggedInAPI, accountHandler.list_all_user_apps)
-  // accountLoggedInAPI ->
+  // from get_account_data => app.get('/v1/account/data/:action', accountLoggedInAPI, accountHandler.get_account_data) // app_list.json, app_resource_use.json
 
   fdlog('account_handler list_all_user_apps')
 
@@ -376,8 +455,8 @@ exports.list_all_user_apps = function (req, res) {
     collection_name: 'app_list'
   }
 
-  var removedApps = []
-  var userApps = []
+  const removedApps = []
+  const userApps = []
 
   async.waterfall([
     // 1. get db
@@ -409,7 +488,7 @@ exports.list_all_user_apps = function (req, res) {
             offThreadParams: ((app.offThreadStatus && app.offThreadStatus.offThreadParams) ? app.offThreadStatus.offThreadParams : null)
           }
         })
-        for (var i = 0; i < results.length; i++) {
+        for (let i = 0; i < results.length; i++) {
           if (results[i].app_name && results[i].app_name === results[i].app_display_name) { results[i].app_display_name = results[i].app_display_name.replace(/\./g, '. ') }
           results[i].logo = '/app_files/' + results[i].app_name + '/static/logo.png'
           if (results[i].removed) {
@@ -437,6 +516,22 @@ exports.list_all_user_apps = function (req, res) {
       } else {
         helpers.send_success(res, { removed_apps: removedApps, user_apps: userApps })
       }
+    }
+  })
+}
+exports.get_app_resources = function (app, req, res) {
+  // from get_account_data => app.get('/v1/account/data/:action', accountLoggedInAPI, accountHandler.get_account_data) // app_list.json, app_resource_use.json
+
+  fdlog('account_handler get_app_resources')
+  const userDS = req.freezrUserDS
+
+  userDS.getStorageUse(null, function (err, sizeJson) {
+    if (req.freezrInternalCallFwd) {
+      req.freezrInternalCallFwd(err, sizeJson)
+    } else if (err) {
+      helpers.send_failure(res, err, 'account_handler', exports.version, 'get_app_resources')
+    } else {
+      helpers.send_success(res, sizeJson)
     }
   })
 }
@@ -484,7 +579,7 @@ exports.get_file_from_url_to_install_app = function (req, res) {
 
   fileHandler.mkdirp(tempFolderPath, function (err) {
     if (err) {
-      helpers.send_success(res, { success: false, err: err, flags: null, text: '' })
+      helpers.send_success(res, { success: false, err, flags: null, text: '' })
     } else {
       const zipFilePath = tempFolderPath + '/' + tempAppName + '.zip'
       download(req.body.app_url, zipFilePath, function (err) {
@@ -496,7 +591,7 @@ exports.get_file_from_url_to_install_app = function (req, res) {
           fs.readFile(fileHandler.fullLocalPathTo(zipFilePath), null, function (err, content) {
             if (err) {
               felog('account_handler get_file_from_url_to_install_app ', err)
-              helpers.send_success(res, { success: false, err: err, flags: null, text: '' })
+              helpers.send_success(res, { success: false, err, flags: null, text: '' })
             } else {
               req.file.buffer = content
               req.installsource = 'get_file_from_url_to_install_app'
@@ -509,14 +604,14 @@ exports.get_file_from_url_to_install_app = function (req, res) {
           // exports.install_app(req, res)
           // fdlog? todonow  delete tempfile... determine name ... put file under user / files
         } else { // err or missing app name
-          var flags = new Flags({})
+          const flags = new Flags({})
           flags.meta.app_name = req.body.app_name
           if (!err) err = { code: 'Missing App name', message: 'app name is required to create an app.' }
           if (!err.code) err.code = 'err_unknown'
           if (!err.message) err.message = 'Could not connect to the requested URL'
           flags.add('errors', err.code, { function: 'install_app', text: err.message })
 
-          helpers.send_success(res, { success: false, err: err, flags: null, text: '' })
+          helpers.send_success(res, { success: false, err, flags: null, text: '' })
         }
       })
     }
@@ -533,7 +628,7 @@ exports.install_blank_app = function (req, res) {
     display_name: appName,
     version: 0
   }
-  var flags = new Flags({ app_name: appName, didwhat: 'installed' })
+  const flags = new Flags({ app_name: appName, didwhat: 'installed' })
 
   async.waterfall([
   // 1. make sure data and file names exist and appName is valid
@@ -559,7 +654,7 @@ exports.install_blank_app = function (req, res) {
       }
     },
     // get appfs to delete local app files for cloud storage
-    function (cb) {
+    function (info, cb) {
       req.freezrUserDS.getorInitAppFS(appName, {}, cb)
     },
     // delete previous version of cache (or real folder if local)
@@ -575,10 +670,11 @@ exports.install_blank_app = function (req, res) {
   ],
   function (err) {
     if (err) {
+      console.warn('install_blank_app', { err })
       if (!err.code) err.code = 'err_unknown'
       flags.add('errors', err.code, { function: 'install_blank_app', text: err.message })
     }
-    helpers.send_success(res, { err: err, flags: flags.sentencify() })
+    helpers.send_success(res, { err, flags: flags.sentencify() })
   })
 }
 exports.install_app = function (req, res) {
@@ -594,10 +690,10 @@ exports.install_app = function (req, res) {
   const tempAppName = tempAppNameFromFileName(req.file.originalname)
   const tempFolderPath = (userDS.fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/' + req.session.logged_in_user_id + '/tempapps/' + tempAppName
 
-  var manifest = null
+  let manifest = null
   let realAppName
   let realAppPath
-  var flags = new Flags({})
+  let flags = new Flags({})
 
   async.waterfall([
   // 1. make sure data and file names exist and tempAppName is correct
@@ -731,7 +827,7 @@ exports.install_app = function (req, res) {
       flags.add('errors', err.code, { function: 'install_app', text: err.message })
     }
     // onsole.log(flags.sentencify())
-    helpers.send_success(res, { err: err, flags: flags.sentencify() })
+    helpers.send_success(res, { err, flags: flags.sentencify() })
 
     // preload databases
     if (!manifest) {
@@ -905,8 +1001,8 @@ exports.appMgmtActions = function (req, res) /* deleteApp updateApp */ {
   //   app.post('/v1/account/appMgmtActions.json', accountLoggedInAPI, addUserAppsAndPermDBs, accountHandler.appMgmtActions)
   // onsole.log("At app mgmt actions "+JSON.stringify(req.body));
 
-  var action = (req.body && req.body.action) ? req.body.action : null
-  var appName = (req.body && req.body.app_name) ? req.body.app_name : null
+  const action = (req.body && req.body.action) ? req.body.action : null
+  const appName = (req.body && req.body.app_name) ? req.body.app_name : null
 
   if (action === 'removeAppFromHomePage') {
     req.freezrUserAppListDB.update(appName, { removed: true }, { replaceAllFields: false }, function (err, result) {
@@ -933,19 +1029,17 @@ exports.appMgmtActions = function (req, res) /* deleteApp updateApp */ {
         req.freezrUserDS.getorInitAppFS(appName, {}, cb)
       },
       function (appFS, cb) {
-        appFS.removeAllAppFiles(null, cb)
-      },
-      function (cb) {
-        fdlog('need to remove tables when remove app too?')
-        // 2020 todo - when deleting app, get user to also approve deleting the app_tables
-        //  send app_table names to know what to delete
-        //  create a new perm flow to get the userds and delete all relevant tables
-        //  also then remove all table_id related to the above tables in permissions
-        // also need to check if tables are being used  y other apps
-        cb(null)
+        appFS.removeAllAppFiles(null, function (err) {
+          if (helpers.startsWith(err.message, 'ENOENT: no such file or directory')) {
+            cb(null)
+          } else {
+            cb(err)
+          }
+        })
       }
     ], function (err) {
       if (err) {
+        console.warn('error deletign app ', { err })
         helpers.send_internal_err_failure(res, 'account_handler', exports.version, 'appMgmtActions - deleteApp', 'Internal error trying to delete app. ')
       } else {
         // onsole.log("success in deleting app")
@@ -955,7 +1049,7 @@ exports.appMgmtActions = function (req, res) /* deleteApp updateApp */ {
   } else if (action === 'updateApp') {
     fdlog('going to updateApp ', appName)
 
-    var flags = new Flags({ app_name: appName })
+    let flags = new Flags({ app_name: appName })
     const realAppName = appName
     const userDS = req.freezrUserDS
     let manifest = null
@@ -997,27 +1091,28 @@ exports.appMgmtActions = function (req, res) /* deleteApp updateApp */ {
       function (cb) {
         appFS.cache.appfiles = {}
 
-        appFS.readAppFile(helpers.APP_MANIFEST_FILE_NAME, {}, cb)
-      },
-      function (readmanifest, cb) {
-        if (readmanifest) {
-          try {
-            manifest = json.parse(readmanifest)
-          } catch (e) {
-            felog('error parsing manifest ', e)
-            flags.add('notes', 'manifest_read_err')
+        appFS.readAppFile(helpers.APP_MANIFEST_FILE_NAME, {}, function (err, readManifest) {
+          if (err) { // assume missing manifest
+            flags.add('notes', 'manifest_missing')
+          } else {
+            if (readManifest) {
+              try {
+                manifest = json.parse(readManifest)
+              } catch (e) {
+                felog('error parsing manifest ', e)
+                flags.add('notes', 'manifest_read_err')
+              }
+            } else {
+              flags.add('notes', 'manifest_missing')
+            }
           }
-        } else {
-          flags.add('notes', 'manifest_missing')
-        }
-        if (!manifest) manifest = {}
-        if (!manifest.identifier) manifest.identifier = realAppName
-        if (!manifest.display_name) manifest.display_name = realAppName
-        if (!manifest.version) manifest.version = 0
-
-        flags = fileHandler.checkManifest(manifest, realAppName, manifest.version, flags)
-
-        updatePermissionRecordsFromManifest(req.freezrUserPermsDB, realAppName, manifest, cb)
+          if (!manifest) manifest = {}
+          if (!manifest.identifier) manifest.identifier = realAppName
+          if (!manifest.display_name) manifest.display_name = realAppName
+          if (!manifest.version) manifest.version = 0
+          flags = fileHandler.checkManifest(manifest, realAppName, manifest.version, flags)
+          updatePermissionRecordsFromManifest(req.freezrUserPermsDB, realAppName, manifest, cb)
+        })
       },
 
       function (cb) {
@@ -1025,6 +1120,7 @@ exports.appMgmtActions = function (req, res) /* deleteApp updateApp */ {
       }
     ],
     function (err, info) {
+      // onsole.log({ err, info })
       flags.meta.app_name = realAppName
       if (err) {
         flags.add('errors', 'err_unknown', { function: 'appMgmtActions update', text: JSON.stringify(err) })
@@ -1077,7 +1173,7 @@ exports.allRequestorAppPermissions = function (req, res) {
       if (err) {
         helpers.send_failure(res, err, 'account_handler', exports.version, 'requestorApp')
       } else if ((req.query && req.query.groupall) || req.freezrIntermediateCallFwd || req.freezrInternalCallFwd) {
-        var ret = {}
+        const ret = {}
         ret[requestorApp] = groupPermissions(returnPerms, requestorApp)
         ret[requestorApp].app_name = '' // todo get app name and display name [later: why blank?]
         ret[requestorApp].app_display_name = requestorApp
@@ -1100,8 +1196,7 @@ exports.allRequestorAppPermissions = function (req, res) {
   }
 }
 function groupPermissions (returnPermissions, appName) {
-  var groupedPermissions = {
-    outside_scripts: [],
+  const groupedPermissions = {
     thisAppToThisApp: [],
     thisAppToOtherApps: [],
     otherAppsToThisApp: [],
@@ -1112,20 +1207,15 @@ function groupPermissions (returnPermissions, appName) {
     return groupedPermissions
   } else {
     let aPerm
-    for (var i = 0; i < returnPermissions.length; i++) {
+    for (let i = 0; i < returnPermissions.length; i++) {
       aPerm = returnPermissions[i]
-      /*
-      if (aPerm.type === 'outside_scripts') {
-        groupedPermissions.outside_scripts.push(aPerm)
-      } else
-      */
-      if (['share_records', 'db_query'].indexOf(aPerm.type) > -1 && aPerm.requestor_app === appName && helpers.startsWith(aPerm.table_id, appName)) {
+      if (['share_records', 'message_records', 'db_query'].indexOf(aPerm.type) > -1 && aPerm.requestor_app === appName && helpers.startsWith(aPerm.table_id, appName)) {
         groupedPermissions.thisAppToThisApp.push(aPerm)
       } else if (['upload_pages'].indexOf(aPerm.type) > -1 && aPerm.requestor_app === appName) {
         groupedPermissions.thisAppToThisApp.push(aPerm)
-      } else if (['share_records', 'read_all', 'write_all', 'db_query'].indexOf(aPerm.type) > -1 && aPerm.requestor_app !== appName && helpers.startsWith(aPerm.table_id, appName)) {
+      } else if (['share_records', 'read_all', 'message_records', 'write_own', 'write_all', 'db_query'].indexOf(aPerm.type) > -1 && aPerm.requestor_app !== appName && helpers.startsWith(aPerm.table_id, appName)) {
         groupedPermissions.otherAppsToThisApp.push(aPerm)
-      } else if (['share_records', 'read_all', 'write_all', 'db_query'].indexOf(aPerm.type) > -1 && aPerm.requestor_app === appName && !helpers.startsWith(aPerm.table_id, appName)) {
+      } else if (['share_records', 'read_all', 'write_all', 'message_records', 'write_own', 'db_query'].indexOf(aPerm.type) > -1 && aPerm.requestor_app === appName && !helpers.startsWith(aPerm.table_id, appName)) {
         groupedPermissions.thisAppToOtherApps.push(aPerm)
       } else {
         groupedPermissions.unknowns.push(aPerm)
@@ -1150,7 +1240,7 @@ exports.generatePermissionHTML = function (req, res) {
   req.freezrIntermediateCallFwd = function (err, results) {
     if (err) felog('generatePermissionHTML', 'err in generatePermissionHTML - freezrIntermediateCallFwd ', err)
     fdlog('freezrIntermediateCallFwd results ', JSON.stringify(results))
-    var Mustache = require('mustache')
+    const Mustache = require('mustache')
     // todo add option to wrap pcard in html header
     fileHandler.getLocalSystemAppFileContent('systemapps/info.freezr.account/account_permobject.html', function (err, htmlForPermGroup) {
       let htmlContent = ''
@@ -1167,7 +1257,6 @@ exports.generatePermissionHTML = function (req, res) {
           htmlContent += '<div id="freezer_InnerLoginInfo"></div>'
 
           const IntroText = {
-            outside_scripts: 'This app is asking for permission to be able to access programming scripts from the web. This can be VERY DANGEROUS. DO NOT ACCEPT THIS unless you totally trust the app provider and the source of the script. <br/> <b> PROCEED WITH CAUTION.</b> ',
             thisAppToThisApp: 'This app is asking for permission to share data from this app:',
             thisAppToOtherApps: 'This app is asking for permissions to access data from other apps:',
             otherAppsToThisApp: 'Other apps are asking for permission to see your data from this app:',
@@ -1182,10 +1271,16 @@ exports.generatePermissionHTML = function (req, res) {
             sentence += hasBeenAccepted ? 'This app is able to ' : 'This app wants to be able to '
             if (aPerm.type === 'share_records') {
               sentence += accessWord + ' individual data records from the table ' + '<b' + (otherApp ? " style='color:purple;'>" : '>') + aPerm.table_id + '</b>,' + ' with the your contacts and the public.<br/>'
-            } else if (aPerm.type === 'upload_pages') {
-              sentence += accessWord + ' individual files with the public.<br/>'
+            } else if (aPerm.type === 'message_records') {
+              sentence += accessWord + ' send messages to other servers, containing any text or records<br/>'
             } else if (aPerm.type === 'read_all') {
               sentence += accessWord + ' read all the records in the table: ' + "<b style='color:purple;'>" + aPerm.table_id + '</b>,' + '.<br/>'
+            } else if (aPerm.type === 'write_all') {
+              sentence += accessWord + ' read and write all the records in the table: ' + "<b style='color:purple;'>" + aPerm.table_id + '</b>,' + '.<br/>'
+            } else if (aPerm.type === 'write_own') {
+              sentence += accessWord + ' read all the records, and write / edit new records in the table: ' + "<b style='color:purple;'>" + aPerm.table_id + '</b>,' + '.<br/>'
+            } else if (aPerm.type === 'upload_pages') {
+              sentence += accessWord + ' individual files with the public.<br/>'
             } else if (aPerm.type === 'db_query') {
               sentence += accessWord + 'query the table: ' + "<b style='color:purple;'>" + aPerm.table_id + '</b>,' + '.<br/>'
             }
@@ -1198,7 +1293,7 @@ exports.generatePermissionHTML = function (req, res) {
           let permCount = 0
           Object.keys(appObj).forEach(function (permType, i) {
             if (permType !== 'app_name' && permType !== 'app_display_name') {
-              var toRender = {
+              const toRender = {
                 perm_grouping_intro: IntroText[permType],
                 perm_list: appObj[permType],
                 perm_type: permType
@@ -1228,8 +1323,8 @@ exports.changeNamedPermissions = function (req, res) {
   // app.put('/v1/permissions/change/:requestee_app_table', accountLoggedInAPI, addUserPermsAndRequesteeDB, addPublicRecordsDB, accountHandler.changeNamedPermissions)
 
   fdlog('changePermissions ' + JSON.stringify(req.body))
-  if (req.body.changeList && req.body.changeList.length === 1 && req.body.changeList[0].name && req.body.changeList[0].action && req.body.changeList[0].table_id && req.body.changeList[0].requestor_app) {
-    const list = req.body.changeList[0]
+  if (req.body.change && req.body.change.name && req.body.change.action && req.body.change.table_id && req.body.change.requestor_app) {
+    const list = req.body.change
 
     const permQuery = { name: list.name, table_id: list.table_id, requestor_app: list.requestor_app }
     req.freezrUserPermsDB.query(permQuery, {}, function (err, results) {
@@ -1261,7 +1356,7 @@ exports.changeNamedPermissions = function (req, res) {
             // Get all records with grantee permissions and remove the permission
             async.forEach(oldGrantees, function (grantee, cb2) {
               // console.log('THIS NEEDS TO BE UPDATED!!!??? 2021')
-              var thequery = {}
+              const thequery = {}
               thequery['_accessible.' + grantee + '.' + fullPermName + '.granted'] = true
               req.freezrRequesteeDB.query(thequery, {}, function (err, recs) {
                 if (err) felog('changeNamedPermissions', 'ERR in freezrRequesteeDB query ', thequery, ' err: ', err)
@@ -1271,7 +1366,7 @@ exports.changeNamedPermissions = function (req, res) {
                   const publicid = (accessible[grantee] && accessible[grantee][fullPermName] && accessible[grantee][fullPermName].publicid) ? accessible[grantee][fullPermName].publicid : null
                   if (accessible[grantee] && accessible[grantee][fullPermName]) delete accessible[grantee][fullPermName]
                   if (helpers.isEmpty(accessible[grantee])) delete accessible[grantee]
-                  req.freezrRequesteeDB.update(rec._id, { accessible: accessible }, { replaceAllFields: false }, function (err) {
+                  req.freezrRequesteeDB.update(rec._id, { accessible }, { replaceAllFields: false }, function (err) {
                     if (err) felog('changeNamedPermissions', 'ERR in freezrRequesteeDB update ', rec._id, 'err: ', err)
                     if (grantee !== '_public') {
                       cb3(err)
@@ -1292,7 +1387,7 @@ exports.changeNamedPermissions = function (req, res) {
                     felog('changeNamedPermissions', 'freezrUserPermsDB ERR in update permId ', permId, ' err: ', err)
                     helpers.send_failure(res, helpers.invalid_data('Could not affect chenge throughout freezr.', 'account_handler'), 'account_handler', exports.version, 'changeNamedPermissions')
                   } else {
-                    helpers.send_success(res, { success: true, name: permQuery.name, buttonId: req.body.changeList[0].buttonId, action: list.action, flags: null })
+                    helpers.send_success(res, { success: true, name: permQuery.name, action: list.action, flags: null })
                   }
                 })
               }
@@ -1302,11 +1397,11 @@ exports.changeNamedPermissions = function (req, res) {
             req.freezrPublicManifestsDb.query({ user_id: req.session.logged_in_user_id, app_name: list.requestor_app }, null, (err, results) => {
               if (err) {
                 felog('changeNamedPermissions', 'error setting freezrPublicPermDB - also flag below needs to be set correctly')
-                helpers.send_success(res, { success: true, name: permQuery.name, buttonId: req.body.changeList[0].buttonId, action: list.action, flags: ['freezrPublicPermDB - error reading record'] })
+                helpers.send_success(res, { success: true, name: permQuery.name, action: list.action, flags: ['freezrPublicPermDB - error reading record'] })
               } else {
                 fdlog('todo - need to get each card as well')
-                var permissions = [list.name]
-                var recId = null
+                let permissions = [list.name]
+                let recId = null
                 if (results && results[0]) {
                   recId = results[0]._id
                   permissions = helpers.addToListAsUnique(results[0].permissions, list.name)
@@ -1321,7 +1416,7 @@ exports.changeNamedPermissions = function (req, res) {
                 }
                 const sendResult = function (err, result) {
                   const flags = err ? ['freezrPublicPermDB - error setting record'] : null
-                  helpers.send_success(res, { success: true, name: permQuery.name, buttonId: req.body.changeList[0].buttonId, action: list.action, flags })
+                  helpers.send_success(res, { success: true, name: permQuery.name, action: list.action, flags })
                 }
                 if (results && results[0]) {
                   req.freezrPublicManifestsDb.update(recId, write, { replaceAllFields: true }, sendResult)
@@ -1419,9 +1514,9 @@ const updatePermissionRecordsFromManifest = function (freezrUserPermsDB, appName
     callback(null)
   } else {
     // make a list of the schemas to re-iterate later and add blank permissions
-    var cleanedManifestPermList = []
-    var allPermissionNames = []
-    var errs = []
+    const cleanedManifestPermList = []
+    const allPermissionNames = []
+    const errs = []
 
     if (manifestPerms && manifestPerms.length > 0) {
       manifestPerms.forEach((statedPerm, i) => {
@@ -1548,7 +1643,7 @@ const permissionsAreSame = function (p1, p2) {
   return objectsaresame(p1, p2, ['granted', 'status', 'grantees', 'previousGrantees'])
 }
 const objectsaresame = function (obj1, obj2, givenIgnorekeys = []) {
-  var ignorekeys = [...givenIgnorekeys]
+  const ignorekeys = [...givenIgnorekeys]
   if (typeof obj1 !== typeof obj2) {
     return false
   }
@@ -1581,7 +1676,7 @@ exports.CEPSValidator = function (req, res) {
 
   if (req.params.action === 'set') {
     /*
-    { data_owner_host : {host url},
+    { data_owner_host : {host url}, // blank if same
       data_owner_user : {username},
       table_id : {table-identifier},
       requestor_user :{username of requestor on her/his own pds},
@@ -1590,38 +1685,45 @@ exports.CEPSValidator = function (req, res) {
       record_id : {_id of record being shared} // (optional)
     }
     */
-    if (req.body.app_id !== req.freezrTokenInfo.app_name) {
+    if (!req.freezrTokenInfo) {
+      helpers.send_failure(res, helpers.error('data mismatch'), 'account_handler', exports.version, 'CEPSValidator set')
+    } else if (req.body.app_id !== req.freezrTokenInfo.app_name) {
       felog('CEPSValidator mismatch - body ', req.body, ' vs token ', req.freezrTokenInfo)
       helpers.send_failure(res, helpers.error('data mismatch'), 'account_handler', exports.version, 'CEPSValidator set')
     } else if (req.freezrTokenInfo.requestor_id !== req.freezrTokenInfo.owner_id) {
-      felog('auth failure ', req.body, ' vs token ', req.freezrTokenInfo)
-      helpers.send_failure(res, helpers.error('incomplete request'), 'account_handler', exports.version, 'CEPSValidator set')
-    } else if (!req.body.data_owner_host || !req.body.data_owner_user) {
-      felog('incomplete request ', req.body, ' vs token ', req.freezrTokenInfo)
+      felog('auth failure ', req.freezrTokenInfo.requestor_id, ' vs token ', req.freezrTokenInfo)
+      helpers.send_failure(res, helpers.error('incomplete request 1 '), 'account_handler', exports.version, 'CEPSValidator set')
+    } else if (!req.body.data_owner_user) {
+      felog('incomplete request 2 ', req.body, ' vs token ', req.freezrTokenInfo)
       helpers.send_failure(res, helpers.error('incomplete request'), 'account_handler', exports.version, 'CEPSValidator set')
     } else {
+      // if (!req.body.data_owner_host) req.body.data_owner_host = req.body.requestor_host // default
       const validationtoken = helpers.randomText(30)
       const EXPIRATION_MINUTES = 5
       const expiration = new Date().getTime() + EXPIRATION_MINUTES * 60 * 1000
+      const requesterHost = (helpers.startsWith(req.get('host'), 'localhost') ? 'http' : 'https') + '://' + req.headers.host
+      const dataOwnerHost = req.body.data_owner_host
 
       const newValidator = {
         validation_token: validationtoken,
-        expiration: expiration,
+        expiration,
         requestor_user: req.freezrTokenInfo.requestor_id,
-        data_owner_host: req.body.data_owner_host,
+        data_owner_host: dataOwnerHost,
         data_owner_user: req.body.data_owner_user,
         permission: req.body.permission,
         table_id: req.body.table_id,
         app_id: req.freezrTokenInfo.app_name,
         record_id: req.body.record_id // {_id of record being shared} // (optional)
       }
+      if (dataOwnerHost) newValidator.requestor_host = requesterHost // new 2022-12 for same host requests
+      // todo - also check contqcts and user -> BlockMsgsToNonContacts
       req.freezrValidationTokenDB.create(null, newValidator, null, function (err, returns) {
         fdlog('freezrValidationTokenDB.create ', { err, returns })
         if (err) {
           felog('error in freezrValidationTokenDB ', err)
           helpers.send_failure(res, helpers.error('incomplete request'), 'account_handler', exports.version, 'CEPSValidator set')
         } else {
-          helpers.send_success(res, { validation_token: validationtoken, expiration: expiration })
+          helpers.send_success(res, { validation_token: validationtoken, requestor_host: requesterHost, expiration })
         }
       })
     }
@@ -1636,13 +1738,14 @@ exports.CEPSValidator = function (req, res) {
     requestor_user : {Same as above},
     requestor_host: {Same as above,
     */
-    const requestor = req.query.requestor_user + '@' + req.query.requestor_host.replace(/\./g, '_')
+    // if (!req.query.data_owner_host) req.query.data_owner_host = req.query.requestor_host // default
+    const requestor = req.query.requestor_user + (req.query.requestor_host ? ('@' + req.query.requestor_host.replace(/\./g, '_')) : '')
     const appToken = helpers.generateAppToken(requestor, req.query.app_id, null)
     const accessTokenExpiry = (new Date().getTime() + EXPIRY_DEFAULT)
     async.waterfall([
       // 1. basic checks
       function (cb) {
-        if (!req.query.validation_token || !req.query.data_owner_user || !req.query.table_id || !req.query.permission || !req.query.requestor_user || !req.query.requestor_host) {
+        if (!req.query.validation_token || !req.query.data_owner_user || !req.query.table_id || !req.query.permission || !req.query.requestor_user) { // || !req.query.requestor_host  new 2022-11
           felog('incomplete request ', req.body)
           cb(helpers.error('incomplete request'))
         } else {
@@ -1652,67 +1755,92 @@ exports.CEPSValidator = function (req, res) {
 
       // 2. make sure contact exists (todo - can also make sure that the person has turned on sharing. Need to create a flag in the userDS)
       function (cb) {
+        // onsole.log('querying contacts of user ', req.query.requestor_user, ' - ... ', req.logged_in_user_id, { requestor }, 'req.query.data_owner_user: ', req.query.data_owner_user, '  req.query.data_owner_host: ', req.query.data_owner_host)
         req.freezrCepsContacts.query({ username: req.query.requestor_user, serverurl: req.query.requestor_host }, null, cb)
       },
       function (contacts, cb) {
         if (contacts && contacts.length > 0) {
           cb(null)
-        } else {
-          felog('no contacts')
+        } else if (!req.query.data_owner_host && req.query.data_owner_user === 'public') {
+          // exception for 'public'
+          cb(null)
+        } else if (req.freezrUserPrefs.blockMsgsFromNonContacts) {
+          felog('no contacts - invalid request - c')
+          // onsole.log('invalid request - c ', req.query.data_owner_host, req.query.requestor_host, req.query.data_owner_user)
           cb(helpers.error('invalid request - c'))
+        } else if ((!req.query.data_owner_host && req.query.requestor_host) || (req.query.data_owner_host && !req.query.requestor_host)) {
+          cb(helpers.error('invalid request - d')) // 2022-12
+        } else {
+          cb(null)
         }
       },
 
       // make sure permission has been granted
       function (cb) {
-        const dbQuery = {
-          table_id: req.query.table_id,
-          name: req.query.permission,
-          granted: true
-        }
-        req.freezrUserPermsDB.query(dbQuery, {}, function (err, grantedPerms) {
-          if (err) {
-            felog('invalid requst getting granted perms ', err)
-            cb(helpers.error('invalid request 1'))
-          } else if (!grantedPerms || grantedPerms.length < 1) {
-            felog('invalid requst getting granted perms ', { grantedPerms })
-            cb(helpers.error('invalid request 2'))
-          } else {
-            // [2021 - groups] freezrAttributes.reader
-            let hasRight = false
-            grantedPerms.forEach((item) => {
-              if (item.grantees && item.grantees.includes(requestor)) hasRight = true
-            })
-            // console.log('todo - here check for each requestee or the groups they are in... also see if permission name will be used')
-            felog('invalid request getting granted perms ', { err, requestor })
-            cb(hasRight ? null : helpers.error('invalid request getting permissions granted'))
+        if (req.query.data_owner_user === 'public' && !req.query.data_owner_host) { // this case isdealt with in sync below
+          // onsole.log('req.query.table_id ', req.query.table_id, '    req.query.permission: ', req.query.permission)
+          cb(null)
+        } else {
+          const dbQuery = {
+            table_id: req.query.table_id,
+            name: req.query.permission,
+            granted: true
           }
-        })
+          req.freezrUserPermsDB.query(dbQuery, {}, function (err, grantedPerms) {
+            if (err) {
+              felog('invalid requst getting granted perms ', err)
+              cb(helpers.error('invalid request 1'))
+            } else if (!grantedPerms || grantedPerms.length < 1) {
+              felog('invalid requst getting granted perms ', { grantedPerms })
+              console.warn('invalid requst getting granted perms ', { grantedPerms }, req.query)
+              cb(helpers.error('invalid request 2'))
+            } else {
+              // [2021 - groups] freezrAttributes.reader
+              let hasRight = false
+              grantedPerms.forEach((item) => {
+                if (item.grantees && item.grantees.includes(requestor)) hasRight = true
+              })
+              // console.log('todo - here check for each requestee or the groups they are in... also see if permission name will be used')
+              felog('invalid request getting granted perms ', { err, requestor })
+              cb(hasRight ? null : helpers.error('invalid request getting permissions granted'))
+            }
+          })
+        }
       },
 
       function (cb) {
-        if (req.query.data_owner_host === req.query.requestor_host) {
-          req.freezrValidationTokenDB.query(validationParamsFromQuery(req.query), null, function (err, returns) {
-            if (err) {
-              cb(err)
-            } else if (!returns || returns.length < 1) {
-              cb(helpers.error('not verifited 1'))
-            } else {
+        if (!req.query.data_owner_host) { // ie requestor is samehost as owner
+          if (req.query.data_owner_user === 'public') { // exception for common db's
+            // onsole.log('req.query.table_id ', req.query.table_id, '    req.query.permission: ', req.query.permission)
+            const perm = publicPerms[req.query.data_owner_user][req.query.permission]
+            if (perm && perm.table_id === req.query.table_id && perm.granted === 'all_server_users') {
               cb(null, { verified: true })
+            } else {
+              cb(helpers.error('not verifited for internal access 1'))
             }
-          })
+          } else {
+            req.freezrValidationTokenDB.query(validationParamsFromQuery(req.query), null, function (err, returns) {
+              if (err) {
+                cb(err)
+              } else if (!returns || returns.length < 1) {
+                cb(helpers.error('not verifited 1'))
+              } else {
+                cb(null, { verified: true })
+              }
+            })
+          }
         } else {
-          // https://flaviocopes.com/node-http-post
+          // https://flaviocopes.com/node-http-post:1
           const isLocalhost = helpers.startsWith(req.query.requestor_host, 'http://localhost')
           const https = isLocalhost ? require('http') : require('https')
 
           let queryString = 'validation_token=' + req.query.validation_token
           queryString += '&data_owner_user=' + req.query.data_owner_user
-          queryString += '&data_owner_host=' + req.query.data_owner_host
+          if (req.query.data_owner_host) queryString += '&data_owner_host=' + req.query.data_owner_host
           queryString += '&permission=' + req.query.permission
           queryString += '&table_id=' + req.query.table_id
           queryString += '&requestor_user=' + req.query.requestor_user
-          queryString += '&requestor_host=' + req.query.requestor_host
+          if (req.query.requestor_host) queryString += '&requestor_host=' + req.query.requestor_host
 
           const options = {
             hostname: isLocalhost ? 'localhost' : req.query.requestor_host.slice(8),
@@ -1740,7 +1868,9 @@ exports.CEPSValidator = function (req, res) {
       },
 
       function (otherServerReturns, cb) {
-        otherServerReturns = JSON.parse(otherServerReturns.toString())
+        // onsole.log({ otherServerReturns })
+        // otherServerReturns = JSON.parse(otherServerReturns.toString()) // changed from tostring 2022-11 - why tostring??
+        otherServerReturns = JSON.parse(JSON.stringify(otherServerReturns))
         if (otherServerReturns.verified) {
           const write = {
             logged_in: false,
@@ -1793,107 +1923,138 @@ const validationParamsFromQuery = function (query) {
   const params = {
     validation_token: query.validation_token,
     data_owner_user: query.data_owner_user,
-    data_owner_host: query.data_owner_host,
     permission: query.permission,
     table_id: query.table_id,
     requestor_user: query.requestor_user,
     expiration: { $gt: new Date().getTime() }
   }
+  if (query.data_owner_host) params.data_owner_host = query.data_owner_host
   return params
 }
 
 // CONFIGS
-var accountPagemanifest = { // manifest parameters for accounts pages
-  home: {
-    page_title: 'Accounts Home (Freezr)',
-    css_files: ['./public/info.freezr.public/public/freezr_style.css', 'account_home.css'],
-    page_url: 'account_home.html',
-    initial_query_func: exports.list_all_user_apps,
-    // initial_query: {'url':'/v1/account/app_list.json'},
-    app_name: 'info.freezr.account',
-    script_files: ['account_home.js']
-  },
-  settings: {
-    page_title: 'Account Settings (freezr)',
-    css_files: './public/info.freezr.public/public/freezr_style.css',
-    page_url: 'account_settings.html',
-    initial_query_func: function (req, res) {
-      if (req.freezrUserDS && req.freezrUserDS.fsParams && req.freezrUserDS.dbParams) {
-        req.freezrInternalCallFwd(null, { owner: req.freezrUserDS.owner, fsParamsType: req.freezrUserDS.fsParams.type, dbParamsType: req.freezrUserDS.dbParams.type })
-      } else {
-        req.freezrInternalCallFwd(null, { owner: null, error: 'no user ds found' })
-      }
+const publicPerms = { // permissions given to all users on a server
+  public: {
+    privateCodes: {
+      table_id: 'dev.ceps.privatefeeds.codes',
+      granted: 'all_server_users'
+    }
+  }
+}
+const accountPageManifest = function (params) { // manifest parameters for accounts pages
+  if (params.page === 'app' && !params.sub_page) params.sub_page = 'manage'
+  const manifests = {
+    home: {
+      page_title: 'Accounts Home (Freezr)',
+      css_files: ['./public/info.freezr.public/public/freezr_style.css', 'account_home.css'],
+      page_url: 'account_home.html',
+      initial_query_func: exports.list_all_user_apps,
+      app_name: 'info.freezr.account',
+      script_files: ['account_home.js']
+    },
+    settings: {
+      page_title: 'Account Settings (freezr)',
+      css_files: ['./public/info.freezr.public/public/freezr_style.css', 'account_home.css'],
+      page_url: 'account_settings.html',
+      initial_query_func: function (req, res) {
+        if (req.freezrUserDS && req.freezrUserDS.fsParams && req.freezrUserDS.dbParams) {
+          req.freezrInternalCallFwd(null, { owner: req.freezrUserDS.owner, fsParamsType: req.freezrUserDS.fsParams.type, dbParamsType: req.freezrUserDS.dbParams.type })
+        } else {
+          req.freezrInternalCallFwd(null, { owner: null, error: 'no user ds found' })
+        }
+      },
+      script_files: ['account_settings.js']
+    },
+    app: {
+      page_title: 'Apps (freezr)' + (' - ' + params.sub_page),
+      css_files: ['./public/info.freezr.public/public/freezr_style.css', 'account_app_management.css'],
+      page_url: 'account_app_' + params.sub_page + '.html',
+      // initial_query_func: exports.list_all_user_apps,
+      other_variables: (params.target_app ? ('const targetApp = "' + params.target_app + '";') : '') + ' let transformRecord',
+      script_files: ['./public/info.freezr.public/public/mustache.js'],
+      modules: ['account_app_' + params.sub_page + '.js']
+    },
+    confirmperm: {
+      page_title: 'Apps (freezr)' + (' - ' + params.sub_page),
+      css_files: ['./public/info.freezr.public/public/freezr_style.css', 'account_app_management.css'],
+      page_url: 'account_confirmperm.html',
+      // initial_query_func: exports.list_all_user_apps,
+      // other_variables: (params.target_app ? ('const targetApp = "' + params.target_app + '"') : ''),
+      modules: ['account_confrimperm.js']
+    },
+    resource_usage: {
+      page_title: 'resource usage (freezr)',
+      css_files: ['./public/info.freezr.public/public/freezr_style.css', 'resource_usage.css'],
+      page_url: 'account_resource_usage.html',
+      script_files: ['account_resource_usage.js', './public/info.freezr.public/public/mustache.js']
+    },
+    reauthorise: {
+      page_title: 'Apps (freezr)',
+      css_files: ['./public/info.freezr.public/public/freezr_style.css', './public/info.freezr.public/public/firstSetUp.css'],
+      page_url: 'account_reauthorise.html',
+      initial_query_func: function (req, res) {
+        if (req.freezrUserDS && req.freezrUserDS.owner && req.freezrUserDS.fsParams && req.freezrUserDS.fsParams.type) {
+          req.freezrInternalCallFwd(null, { owner: req.freezrUserDS.owner, fsParamsType: req.freezrUserDS.fsParams.type })
+        } else {
+          req.freezrInternalCallFwd(null, { owner: null, error: 'no user ds found' })
+        }
+      },
+      script_files: ['reauthorise.js']
+    },
+    reset: {
+      page_title: 'Apps (freezr)',
+      css_files: ['./public/info.freezr.public/public/freezr_style.css', './public/info.freezr.public/public/firstSetUp.css'],
+      page_url: 'account_reset.html',
+      initial_query_func: function (req, res) {
+        if (req.freezrUserDS && req.freezrUserDS.owner && req.freezrUserDS.fsParams && req.freezrUserDS.fsParams.type) {
+          req.freezrInternalCallFwd(null, { owner: req.freezrUserDS.owner, fsParamsType: req.freezrUserDS.fsParams.type })
+        } else {
+          req.freezrInternalCallFwd(null, { owner: null, error: 'no user ds found' })
+        }
+      },
+      script_files: ['reset.js']
+    },
+    perms: {
+      page_title: 'Permissions (freezr)',
+      css_files: ['./public/info.freezr.public/public/freezr_style.css', './public/info.freezr.public/public/firstSetUp.css'],
+      page_url: 'account_perm.html',
+      initial_query_func: exports.generatePermissionHTML,
+      script_files: ['account_perm.js']
+    },
+    autoclose: {
+      page_title: 'Autoclose tab (freezr)',
+      page_url: 'account_autoclose.html',
+      script_files: ['account_autoclose.js']
+    },
+    contacts: {
+      page_title: 'CEPS Contacts',
+      page_url: 'contacts.html',
+      css_files: ['contacts.css'],
+      script_files: ['contacts.js']
     },
 
-    script_files: ['account_settings.js']
-  },
-  app_management: {
-    page_title: 'Apps (freezr)',
-    css_files: ['./public/info.freezr.public/public/freezr_style.css', 'account_app_management.css'],
-    page_url: 'account_app_management.html',
-    // initial_query: {'url':'/v1/account/app_list.json'},
-    initial_query_func: exports.list_all_user_apps,
-    script_files: ['account_app_management.js', './public/info.freezr.public/public/mustache.js']
-  },
-  reauthorise: {
-    page_title: 'Apps (freezr)',
-    css_files: ['./public/info.freezr.public/public/freezr_style.css', './public/info.freezr.public/public/firstSetUp.css'],
-    page_url: 'account_reauthorise.html',
-    initial_query_func: function (req, res) {
-      if (req.freezrUserDS && req.freezrUserDS.owner && req.freezrUserDS.fsParams && req.freezrUserDS.fsParams.type) {
-        req.freezrInternalCallFwd(null, { owner: req.freezrUserDS.owner, fsParamsType: req.freezrUserDS.fsParams.type })
-      } else {
-        req.freezrInternalCallFwd(null, { owner: null, error: 'no user ds found' })
-      }
+    // console.log - Old versions - to remove
+    appdata_view: {
+      page_title: 'View all my data ',
+      page_url: 'account_appdata_view.html',
+      css_files: ['account_appdata_view.css'],
+      script_files: ['account_appdata_view.js', 'FileSaver.js']
     },
-    // initial_query: {'url':'/v1/account/app_list.json'},
-    script_files: ['reauthorise.js']
-  },
-  reset: {
-    page_title: 'Apps (freezr)',
-    css_files: ['./public/info.freezr.public/public/freezr_style.css', './public/info.freezr.public/public/firstSetUp.css'],
-    page_url: 'account_reset.html',
-    initial_query_func: function (req, res) {
-      if (req.freezrUserDS && req.freezrUserDS.owner && req.freezrUserDS.fsParams && req.freezrUserDS.fsParams.type) {
-        req.freezrInternalCallFwd(null, { owner: req.freezrUserDS.owner, fsParamsType: req.freezrUserDS.fsParams.type })
-      } else {
-        req.freezrInternalCallFwd(null, { owner: null, error: 'no user ds found' })
-      }
+    app_management: {
+      page_title: 'Apps (freezr)',
+      css_files: ['./public/info.freezr.public/public/freezr_style.css', 'account_app_management.css'],
+      page_url: 'account_app_manage.html',
+      // initial_query_func: exports.list_all_user_apps,
+      script_files: ['account_app_manage.js', './public/info.freezr.public/public/mustache.js']
     },
-    // initial_query: {'url':'/v1/account/app_list.json'},
-    script_files: ['reset.js']
-  },
-  perms: {
-    page_title: 'Permissions (freezr)',
-    css_files: ['./public/info.freezr.public/public/freezr_style.css', './public/info.freezr.public/public/firstSetUp.css'],
-    page_url: 'account_perm.html',
-    // initial_query: {'url':'/v1/account/app_list.json'},
-    initial_query_func: exports.generatePermissionHTML,
-    script_files: ['account_perm.js']
-  },
-  autoclose: {
-    page_title: 'Autoclose tab (freezr)',
-    page_url: 'account_autoclose.html',
-    script_files: ['account_autoclose.js']
-  },
-  appdata_view: {
-    page_title: 'View all my data ',
-    page_url: 'account_appdata_view.html',
-    css_files: ['account_appdata_view.css'],
-    script_files: ['account_appdata_view.js', 'FileSaver.js']
-  },
-  appdata_backup: {
-    page_title: 'Backup and Restore data',
-    page_url: 'account_appdata_backup.html',
-    css_files: ['account_appdata_backup.css'],
-    script_files: ['account_appdata_backup.js', 'FileSaver.js']
-  },
-  contacts: {
-    page_title: 'CEPS Contacts',
-    page_url: 'contacts.html',
-    css_files: ['contacts.css'],
-    script_files: ['contacts.js']
+    appdata_backup: {
+      page_title: 'Backup and Restore data',
+      page_url: 'account_appdata_backup.html',
+      css_files: ['account_appdata_backup.css'],
+      script_files: ['account_appdata_backup.js', 'FileSaver.js']
+    }
   }
+  return manifests[params.page]
 }
 
 // Loggers

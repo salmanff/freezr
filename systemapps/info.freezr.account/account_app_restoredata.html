@@ -1,0 +1,45 @@
+
+<div class="freezer_texture_outer">
+  <div class="freezer_texture_inner">
+    <div class="freezer_top_app_menu" id="adminFunctions">
+      <a href="/account/Home">Home</a>
+      &nbsp;
+    </div>
+
+    <div class="freezer_dialogueTitle">Restore Backed Up App Data</div>
+
+  
+    <div id="headerChooser" style="margin-top:20px"> </div>
+    <div id="warnings" style="color: red"> </div>
+
+    <img id="loading" style="padding-left:120px; display:none" src="/app_files/public/info.freezr.public/public/static/ajaxloaderBig.gif"/>
+
+    <div id="upload_area">
+      <form id="uploadForm" style="text-align:left">
+        <br/>
+        <input type="file" id="fileUploader" name="files[]" multiple />
+        <br/>
+      </form>
+      <div class="freezer_butt" id="uploadAndRestoreData">Restore data by uploading file</div>
+    </div>
+
+
+    <div id="upload_nums" ></div>
+    <div id="err_nums"  ></div>
+    <div id="backup_status" ></div>
+    <div id="check_record" style="display:none">
+      <div class="freezer_dialogueTitle marginLeft" >Decide for each record or all records:</div>
+      <br>
+      <div id="upload_butts">
+          <div class="freezer_butt" style="display:inline-block" id="skipRecord">SKIP RECORD</div>
+          <div class="freezer_butt" style="display:inline-block"  id="addRecord">ADD RECORD</div>
+          <div id="addAllRecords" style="display:inline-block"  class="freezer_butt">ADD ALL RECORDS IN FILE</div>
+          <div id="addAllFiles" style="display:inline-block"  class="freezer_butt">ADD ALL FILES</div>
+      </div>
+      <br>
+      <div id="current_record"></div>
+    </div>
+    
+  </div>
+</div>
+

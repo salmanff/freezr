@@ -41,15 +41,15 @@ freezr.initPageScripts = function() {
 			showWarning("Error connecting to server");
 		} else {
 			console.log("got app config ",configReturn)
-			dl.meta.all_collection_names = configReturn.collection_names;
 			dl.meta.manifest = configReturn.manifest;
+			dl.meta.app_tables = configReturn.app_tables;
 			dl.meta.current_collection_num = 0
 			dl.meta.num_points_retrieved = 0;
-			if (dl.meta.all_collection_names && dl.meta.all_collection_names.length>0) {
+			if (dl.meta.app_tables && dl.meta.app_tables.length>0) {
 				var coll_list = document.getElementById("collection_names");
 				coll_list.innerHTML="";
 				var collNum =0;
-				dl.meta.all_collection_names.forEach(function (aColl) {
+				dl.meta.app_tables.forEach(function (aColl) {
 					coll_list.innerHTML+="<option value='"+(collNum++)+"'>"+aColl+"</option>";
 				})
 			} else {
@@ -75,9 +75,9 @@ var change_collection = function() {
 }
 var getCollectionData = function () {
 	document.getElementById('table_wrap').style.display="block"
-	//onsole.log("to get next coll "+dl.current_collection.num+"-"+dl.meta.all_collection_names.length+" "+JSON.stringify(dl.meta));
+	//onsole.log("to get next coll "+dl.current_collection.num+"-"+dl.meta.app_tables.length+" "+JSON.stringify(dl.meta));
 		freezr.feps.postquery(
-			{appName:app_name, app_table:dl.meta.all_collection_names[dl.current_collection.num], count:retrieve_COUNT , skip:dl.current_collection.retrieved },
+			{appName:app_name, app_table:dl.meta.app_tables[dl.current_collection.num], count:retrieve_COUNT , skip:dl.current_collection.retrieved },
 			  gotCollectionData)
 };
 var gotCollectionData = function (error, returnJson) {
@@ -86,7 +86,7 @@ var gotCollectionData = function (error, returnJson) {
 	if (!Array.isArray(returnJson) && returnJson.results) {returnJson = returnJson.results} // case of admin query
 	dl.current_collection.retrieved+=returnJson.length
 	dl.current_collection.retrieved_all = (returnJson && returnJson.length<retrieve_COUNT);
-	//dl.app_tables.push( {'name':dl.meta.all_collection_names[dl.meta.current_collection_num], 'data':returnJson, 'retrieved_all':retrieved_all });
+	//dl.app_tables.push( {'name':dl.meta.app_tables[dl.meta.current_collection_num], 'data':returnJson, 'retrieved_all':retrieved_all });
 	//dl.meta.num_app_tables_retrieved++;
   if (error) console.warn(error) // console.log('need to handle error')
   showCollectionData(returnJson)
@@ -109,10 +109,10 @@ var gotMoreData = function(returnJson) {
 */
 
 var showCollectionData = function(dataSet) {
-	dl.current_collection.name = dl.meta.all_collection_names[dl.current_collection.num];
+	dl.current_collection.name = dl.meta.app_tables[dl.current_collection.num];
 	dl.current_collection.rowsShown=0;
 
-	const collection_name = dl.meta.all_collection_names[dl.current_collection.num];
+	const collection_name = dl.meta.app_tables[dl.current_collection.num];
 
 	dl.current_collection.fields = {
 		'_id':{'cellLen':40},

@@ -268,3 +268,5 @@ if (typeof module !== "undefined" && module.exports) {
     return saveAs;
   });
 }
+
+export { saveAs }

@@ -181,7 +181,7 @@ body{
   min-height: 200px;
 }
 
-/* Uploading */
+/* Uploading  */
 .drop-area {
   border: 2px dashed #ccc;
   border-radius: 20px;
@@ -197,4 +197,27 @@ body{
 }
 #upload_area {
   text-align: center;
+}
+
+
+.bigText {
+    font-size: 20px;
+    margin-bottom: 5px;
+	font-weight: bold;
+	width:100%;
+	text-align: center;
+}
+.big_butt {
+    margin: 10px;
+    opacity: 0.9;
+    color: blue;
+    background-color: #E2E2E2;
+    text-align: center;
+    min-width: 60px;
+    padding: 20px;
+    margin-left:10%;
+    margin-right:10%;
+    border-radius: 5px;
+    font-weight: bold;
+    cursor: pointer;
 }

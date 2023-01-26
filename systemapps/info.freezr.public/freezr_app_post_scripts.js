@@ -1,4 +1,6 @@
-// info.freezr.public -
+// freezr_app_post_scripts.js
+
+// info.freezr.public - updated 2021
 /*
   This file is used for stand alone apps that do not run on the freezr server.
   for electron - script file to be included after freezr_app_init.js and manifest.js .
@@ -62,7 +64,7 @@ freezerRestricted.menu.add_standAloneApp_login_dialogue = function (divToInsertI
       if (freezrMeta.serverAddress.slice(freezrMeta.serverAddress.length - 1) === '/') freezrMeta.serverAddress = freezrMeta.serverAddress.slice(0, freezrMeta.serverAddress.length - 1)
 
       const messageDiv = document.getElementById('freezr_login_message')
-      messageDiv.innerHTML = '<br/><div align="center">.<img src="../freezr/static/ajaxloaderBig.gif"/></div>'
+      messageDiv.innerHTML = '<br/><div align="center">.<img src="freezr/static/ajaxloaderBig.gif"/></div>'
       freezr.utils.ping(null, function (error, resp) {
         if (!resp || error) {
           console.warn(error)
@@ -100,7 +102,7 @@ freezerRestricted.menu.add_standAloneApp_login_dialogue = function (divToInsertI
       if (!freezrMeta.appName) {
         alert('developer error: variable freezrMeta.appName needs to be defined')
       } else {
-        messageDiv.innerHTML = '<br/><div align="center">.<img src="../freezr/static/ajaxloaderBig.gif"/></div>'
+        messageDiv.innerHTML = '<br/><div align="center">.<img src="freezr/static/ajaxloaderBig.gif"/></div>'
         freezerRestricted.connect.ask('/oauth/token', theInfo, function (error, resp) {
           resp = freezr.utils.parse(resp)
           if (error || (resp && resp.error)) {
@@ -116,7 +118,7 @@ freezerRestricted.menu.add_standAloneApp_login_dialogue = function (divToInsertI
             freezr.app.offlineCredentialsExpired = false
             freezr.app.loginCallback ? freezr.app.loginCallback(null, freezrMeta) : console.warn('Warning: Set freezr.app.loginCallback to handle log in response: ' + JSON.stringify(resp))
           } else {
-            messageDiv.innerHTML = 'developper error  2 - loggedin_app_name ' + resp.login_for_app_name + ' is not correct.'
+            messageDiv.innerHTML = 'developper error  2 - inputs are not correct.'
           }
         })
       }
@@ -165,7 +167,7 @@ freezr.utils.applogin = function (authUrl, cb) {
           } else if (!resp.access_token) {
             cb(new Error ( 'Error logging you in. The server gave an invalid response.' ) )
           } else if (resp.app_name !== freezrMeta.appName) {
-            cb(new Error ( 'Error - loggedin_app_name ' + resp.login_for_app_name + ' is not correct.' ) )
+            cb(new Error ( 'Error - loggedin_app_name[??] is not correct.'))
           } else {
             freezrMeta.appToken = resp.access_token
             freezr.serverVersion = resp.freezr_server_version
@@ -216,7 +218,6 @@ freezerRestricted.menu.showOfflinePermissions = function (error, outerPermission
     const groupedPermissions = outerPermissions[freezrMeta.appName]
 
     const IntroText = {
-      outside_scripts: 'This app is asking for permission to be able to access programming scripts from the web. This can be VERY DANGEROUS. DO NOT ACCEPT THIS unless you totally trust the app provider and the source of the script. <br/> <b> PROCEED WITH CAUTION.</b> ',
       thisAppToThisApp: 'This app is asking for permission to share data from this app:',
       thisAppToOtherApps: 'This app is asking for permissions to access data from other apps:',
       otherAppsToThisApp: 'Other apps are asking for permission to see your data from this app:',
@@ -233,8 +234,6 @@ freezerRestricted.menu.showOfflinePermissions = function (error, outerPermission
         sentence += accessWord + ': ' + (aPerm.return_fields ? (aPerm.return_fields.join(', ')) : 'ERROR') + ' with the following groups: ' + aPerm.sharable_groups.join(' ') + '.<br/>'
       } else if (aPerm.type === 'object_delegate') {
         sentence += accessWord + ' individual data records with the following groups:  ' + (aPerm.sharable_groups ? aPerm.sharable_groups.join(' ') : 'None') + '.<br/>'
-      } else if (aPerm.type === 'outside_scripts') {
-        sentence = (hasBeenAccepted ? 'This app can ' : 'This app wants to ') + ' access the following scripts from the web: ' + aPerm.script_url + '<br/>This script can take ALL YOUR DATA and evaporate it into the cloud.<br/>'
       }
       if (aPerm.outDated) sentence += 'This permission was previously granted but the permission paramteres have changed to you would need to re-authorise it.<br/>'
       aPerm.sentence = sentence
@@ -281,11 +280,10 @@ freezerRestricted.menu.showOfflinePermissions = function (error, outerPermission
       }
     }
 
-    if (groupedPermissions.thisAppToThisApp.length + groupedPermissions.outside_scripts.length + groupedPermissions.thisAppToOtherApps.length + groupedPermissions.otherAppsToThisApp.length === 0) {
+    if (groupedPermissions.thisAppToThisApp.length + groupedPermissions.thisAppToOtherApps.length + groupedPermissions.otherAppsToThisApp.length === 0) {
       writePermissions([], null, 'This app is not asking for any sharing permissions.')
     }
 
-    writePermissions(groupedPermissions.outside_scripts, 'outside_scripts')
     writePermissions(groupedPermissions.thisAppToThisApp, 'thisAppToThisApp')
     writePermissions(groupedPermissions.otherAppsToThisApp, 'otherAppsToThisApp')
     writePermissions(groupedPermissions.thisAppToOtherApps, 'thisAppToOtherApps')
@@ -295,12 +293,16 @@ freezerRestricted.menu.showOfflinePermissions = function (error, outerPermission
 
 freezr.utils.logout = function (logoutCallback) {
   freezerRestricted.connect.ask('/v1/account/applogout', null, function (error, resp) {
-    console.log({error, resp})
+    // console.log({error, resp})
     freezerRestricted.menu.close()
     if (!error || !resp.error || confirm('There was an error logging you out or connecting to the server. Do you want your login credentials removed?')) {
       document.cookie = 'app_token_' + freezrMeta.userId + '= null'
       freezrMeta.reset()
-      if (logoutCallback) logoutCallback(resp)
+      if (logoutCallback) {
+        logoutCallback(resp)
+      } else if (freezr.app.logoutCallback) {
+        freezr.app.logoutCallback(resp)
+      }
     }
   })
 }

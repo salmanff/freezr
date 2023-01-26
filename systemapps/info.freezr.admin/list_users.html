@@ -16,19 +16,24 @@
     <br/>
     <div id="user_list">
       <div class="freezer_app_page_title"> There are {{ users.length }} users</div>
-      <ul id="users">
-        {{#users}}
-          <li>
-            <span class="freezer_emphasis">{{user_id}}</span>
-            {{#email_address}}, {email_address}}, {{/email_address}}
-            {{#isAdmin}} (admin) {{/isAdmin}}
+      <div style = "display: grid; grid-template-columns: 200px 100px 100px 100px 200px; padding: 10px, row-gap: 5px">
+        <div>Name</div>
+        <div>email</div>
+        <div>File System</div>
+        <div>Database</div>
+        <div>Limits</div>
+        {{#users}} 
+          <div>{{user_id}} <span class="freezer_emphasis">{{#isAdmin}} (admin) {{/isAdmin}}</span></div>
+          <div>{{email_address}} </div>
+          <div>{{fsParams.type}} </div>
+          <div>{{dbParams.type}} </div>
+          <div class="limitsForUsers" id="limitsFor_{{user_id}}"> {{#limits.storage}} {{limits.storage}}MB {{/limits.storage}} <span id="click_limitsFor_{{user_id}}" style = "color: blue; cursor: pointer;">(usage) </span></div>
+        {{/users}}
+      </div>
 
-          </li>
-        {{/users}}
-        {{^users}}
-          <li> Sorry, there are currently no users </li>
-        {{/users}}
-      </ul>
+      {{^users}}
+        <div> Sorry, there are currently no users </div>
+      {{/users}}
     </div>
   </div>
 </div>

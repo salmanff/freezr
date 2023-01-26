@@ -115,33 +115,49 @@ NEDB_FOR_FREEZR.prototype.getAllAppTableNames = function (appOrTableNameOrNames,
   fdlog('getAllAppTableNames nedb ', appOrTableNameOrNames)
   const userId = this.oat.owner
   const dbPath = (this.env.fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/' + userId + '/db'
-  var list = []
+  let list = []
   if (typeof appOrTableNameOrNames === 'string') appOrTableNameOrNames = [appOrTableNameOrNames]
   this.db.customFS.readdir(dbPath, null, (err, files) => {
     // fdlog('read fs ', { files, err })
     if (!err) {
       files.forEach(file => {
         if (file.indexOf('/') > 0) { // dropbox??
-          var parts = file.split('/')
+          const parts = file.split('/')
           parts.shift()
           parts.shift()
           parts.shift()
           file = parts.join('/')
         }
-        appOrTableNameOrNames.forEach(name => {
-          name = name.replace(/\./g, '_')
-          const hasdb = file.substring(file.length - 3) === '.db'
-          if (helpers.startsWith(file, name)) {
-            list.push(file.slice(0, file.length - (hasdb ? 3 : 0)).replace(/_/g, '.'))
-          } else if (helpers.startsWith(file, '~' + name)) {
-            list.push(file.substring(1, file.length - (hasdb ? 3 : 0)).replace(/_/g, '.'))
-          }
-          // https://stackoverflow.com/questions/1960473/get-all-unique-values-in-a-javascript-array-remove-duplicates
-        })
+        if (appOrTableNameOrNames) {
+          appOrTableNameOrNames.forEach(name => {
+            name = name.replace(/\./g, '_')
+            const hasdb = file.substring(file.length - 3) === '.db'
+            if (helpers.startsWith(file, name)) {
+              list.push(file.slice(0, file.length - (hasdb ? 3 : 0)).replace(/_/g, '.'))
+            } else if (helpers.startsWith(file, '~' + name)) {
+              list.push(file.substring(1, file.length - (hasdb ? 3 : 0)).replace(/_/g, '.'))
+            }
+            // https://stackoverflow.com/questions/1960473/get-all-unique-values-in-a-javascript-array-remove-duplicates
+          })
+        } else {
+          list.push(file)
+        }
       })
     }
     list = list.filter((v, i, a) => a.indexOf(v) === i)
     callback(null, list)
+  })
+}
+
+NEDB_FOR_FREEZR.prototype.stats = function (callback) {
+  // fdlog('nedb for freezr - stats ')
+  const { dbParams, fsParams } = this.env
+  const filePath = (dbParams.db_path ? (dbParams.db_path + '/') : '') +
+    (fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/' +
+    this.oat.owner + '/db/' + fullName(this.oat) + '.db'
+  this.db.customFS.size(filePath, function (err, size) {
+    if (err && !size) size = 'n/a'
+    callback(err, { size, originalStats: null })
   })
 }
 

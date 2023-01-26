@@ -85,3 +85,41 @@ td {
 #click_goAuthFS {
   width:200px;
 }
+
+
+.formgridMain {
+    display: grid; 
+    padding: 10px; 
+    row-gap: 10px;
+    font-size: 14px
+}
+.formLabel {
+  padding-top: 8px;
+}
+.formLabelExplain {
+    margin-top: -10px;
+    font-size: 11px;
+    text-align: right;
+    font-style: italic;
+}
+.formInput {
+  border: 1px dotted grey; 
+  padding:3px;
+  font-size: 20px;
+}
+@media (max-width: 500px) {
+  .formgridMain {
+    grid-template-columns: 300px; 
+  }
+  .formLabelExplain {
+    grid-column: span 1; 
+  }
+}
+@media (min-width: 500px) {
+  .formgridMain {
+    grid-template-columns: 150px 300px; 
+  }
+  .formLabelExplain {
+    grid-column: span 2; 
+  }
+}

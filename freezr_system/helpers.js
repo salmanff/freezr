@@ -22,7 +22,7 @@ exports.FREEZR_USER_FILES_DIR = 'users_freezr'
       return user_id_input? user_id_input.trim().toLowerCase().replace(/ /g, "_"): null;
     };
     exports.system_apps = ["info.freezr.account","info.freezr.admin","info.freezr.public","info.freezr.permissions","info.freezr.posts","info.freezr.logs"];
-    exports.SYSTEM_ADMIN_COLLS = ['users','permissions','visit_log_daysum','params','oauth_permissions','app_tokens','public_records']
+    exports.SYSTEM_ADMIN_COLLS = ['users','permissions','visit_log_daysum','params','oauth_permissions','app_tokens']
     exports.SYSTEM_ADMIN_APPTABLES = exports.SYSTEM_ADMIN_COLLS.map(coll => {return ('info_freezr_admin_'+coll)})
     exports.permitted_types = {
         groups_for_objects: ["user","logged_in","public"],
@@ -33,6 +33,8 @@ exports.FREEZR_USER_FILES_DIR = 'users_freezr'
     const RESERVED_IDS =['fradmin', 'public', 'test']
 
 exports.is_system_app = function (appName) {
+    if (!appName) console.warn('Asking is_system_app for NULL APP')
+    if (!appName) return false
   let ret = false
   appName = appName.replace(/\./g, '_')
   exports.system_apps.forEach((item, i) => {
@@ -113,7 +115,7 @@ exports.is_system_app = function (appName) {
         var code = (typeof err == 'string')? err :(err.code ? err.code : err.name);
         var message = (typeof err == 'string')? err :(err.message ? err.message : code);
         res.writeHead(200, { "Content-Type" : "application/json" });
-        res.end(JSON.stringify({ error: "Action failed", code:err.code, message: err.message }) /*+ "\n"*/);
+        res.end(JSON.stringify({ error: err.message, code:err.code }) /*+ "\n"*/);
     }
 
 // ERRORS
@@ -276,6 +278,50 @@ exports.is_system_app = function (appName) {
       const now = new Date().getTime();
       return (now>expiry)
     }
+    exports.newVersionNumberIsHigher = function (oldNum, newNum) {
+        return versionCompare(oldNum, newNum) === -1
+    }
+    exports.newVersionNumberIsEuqalOrHigher = function (oldNum, newNum) {
+        return versionCompare(oldNum, newNum) <= 0
+    }
+
+    function versionCompare(v1, v2) { 
+        //https://www.geeksforgeeks.org/compare-two-version-numbers/
+        // vnum stores each numeric 
+        // part of version 
+        var vnum1 = 0, vnum2 = 0; 
+    
+        // loop until both string are 
+        // processed 
+        for (var i = 0, j = 0; (i < v1.length 
+                                || j < v2.length);) { 
+            // storing numeric part of 
+            // version 1 in vnum1 
+            while (i < v1.length && v1[i] != '.') { 
+                vnum1 = vnum1 * 10 + (v1[i] - '0'); 
+                i++; 
+            } 
+    
+            // storing numeric part of 
+            // version 2 in vnum2 
+            while (j < v2.length && v2[j] != '.') { 
+                vnum2 = vnum2 * 10 + (v2[j] - '0'); 
+                j++; 
+            } 
+    
+            if (vnum1 > vnum2) 
+                return 1; 
+            if (vnum2 > vnum1) 
+                return -1; 
+    
+            // if equal, reset variables and 
+            // go for next numeric part 
+            vnum1 = vnum2 = 0; 
+            i++; 
+            j++; 
+        } 
+        return 0; 
+    } 
 
 // Other..
 var reduceToUnique = function(aList) {

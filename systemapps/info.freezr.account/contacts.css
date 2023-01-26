@@ -10,90 +10,126 @@
   transition:height 0.3s ease-out;
 }
 
-
-
-#button_add {
+input {
+  height: 20px;
+  width: 20px;
 }
 
-#add_new_details {
-  margin-bottom: 30px;
-  border-bottom: 2px solid grey;
+.newDetailsDiv {
   height: 0px;
   overflow: hidden;
   transition: height 0.3s ease-out;
 }
 .field_for_add {
+  font-size: 16px;
   margin-top: 10px;
   width:100px;
   display: inline-block;
 }
 .field_to_add {
+  font-size: 16px;
   border:1px darkgrey solid;
   border-radius: 3px;
-  width: 200px;
-  min-width: 200px;
+  width: 250px;
+  min-width: 250px;
   display: inline-block;
   background-color: white;
 }
-.contacts_butt {
-  margin-left: 0px;
-  margin-top: 10px;
-  margin-bottom: 20px;
+.addNewButt {
+  display: inline-block;
+  margin: 10px;
 	color:blue;
 	text-align:center;
-	width:195px;
 	padding:3px;
 	background-color: #E2E2E2;
 	border-radius:5px;
 	font-weight: normal;
 	cursor: pointer;
 }
-.used_butt {
+#button_copyUrl {
+	color:blue;
+	cursor: pointer;
+}
+#button_useSameServerForNewContact, #button_regenerateCodeForPrivateFeed {
   margin-left: 0px;
-  margin-top: 10px;
-  margin-bottom: 20px;
+}
+.alink {
+  color: blue;
+  cursor: pointer;
+}
+
+.used_butt {
+  display: inline-block;
+  margin: 10px;
 	color:black;
 	text-align:center;
-	width:195px;
 	padding:3px;
 	background-color: none;
 	font-weight: normal;
-  cursor: normal;
+  cursor: pointer;
 }
 #loader {
   display:none;
   margin-left: 80px;
 }
-.smallButt {
+.smallButt { /* to remove */
   width: 30px;
   margin-top: -10px;
   cursor: pointer;
 }
-
-@media (min-width: 355px) {
-  .contacts_butt {
-    margin-left: 100px;
-  }
-  .used_butt {
-    margin-left: 100px;
-  }
-  #loader {
-    display:none;
-    margin-left: 180px;
-  }
+.smallTextButt {
+  display: inline-block;
+  margin: 3px;
+  margin-left:10px;
+	color:blue;
+	text-align:center;
+	width: 50px;
+	padding:2px;
+	background-color: #E2E2E2;
+	border-radius:3px;
+	font-weight: normal;
+	cursor: pointer;
+}
+.smallText {
+  font-size: 10px;
+  font-style: italic;
+  display: inline-block;
 }
 
-#contacts_table {
-  margin-top:30px;
+.groupOuter {
+  margin-bottom: 10px;
 }
+.group {
+  font-size: 16px
+}
+.groupName {
+  font-weight: bold;
+  margin-right: 5px;
+}
+.groupEdit {
+  cursor: pointer;
+  color: blue;
+  margin-right: 5px;
+}
+.groupMembers {
+  margin-right: 5px;
+  font-style: italic;
+}
+
+.mainSection, .subSection {
+  margin-top: 30px;
+  border-top: 1px dotted darkgray;
+}
+
 .gridlist  {
   max-width: 800px;
   margin: auto;
   display: grid;
-  grid-template-columns: 1fr 1fr 3fr 1fr;
+  grid-template-columns: 1fr 1fr 3fr 2fr;
+  /* grid-template-columns: 50px 50px 100px 200px 150px; */
   grid-gap: 2em;
   color: #222;
-  border-bottom: 1px solid #ddd;
+  border-top: 1px solid #ddd;
   padding: 1em 0;
 }
 .table_label {
@@ -107,13 +143,42 @@
   border-bottom: unset;
   font-weight: bold;
 }
-@media (max-width: 400px) {
+@media (max-width: 600px) {
   .gridlist {
     grid-template-columns: 1fr;
     grid-gap: 0.5em;
+    text-align: left;
   }
   .grid-header {
     display: none;
+  }
+  .disappearing {
+    display: inline-block;
+  }  
+  .addNewButt, .used_butt {
+    width: 75px;
+  }
+}
+@media (min-width: 600px) {
+  #loader {
+    display:none;
+    margin-left: 180px;
+  }
+  .disappearing {
+    display: none;
+  }  
+  .addNewButt, .used_butt {
+    width: 150px;
+  }
+}
+@media (max-width: 407px) {
+  .revDisappearing {
+    display: none;
+  }
+}
+@media (min-width: 407px) {
+  .revDisappearing {
+    display: inline-block;
   }
 }
 

@@ -37,6 +37,7 @@ const sendFailureOrRedirect = function (res, req, newUrl) {
 }
 
 exports.loggedInUserPage = function (req, res, dsManager, next) {
+  // all access to apps and accounts pass through this to get an app token, if logged in session
   // check logged in
   // get or set app token
   // addAccountDS and perms ds
@@ -44,7 +45,7 @@ exports.loggedInUserPage = function (req, res, dsManager, next) {
   fdlog('loggedInUserPage dsManager.freezrIsSetup', dsManager.freezrIsSetup, 'user', req.session.logged_in_user_id)
   if (!dsManager.freezrIsSetup || !req.session || !req.session.logged_in_user_id) {
     if (dsManager.freezrIsSetup) helpers.auth_warning('server.js', exports.version, 'accountLoggedIn', 'accountLoggedIn- Unauthorized attempt to access data ' + req.url + ' without login ')
-    sendFailureOrRedirect(res, req, '/account/login')
+    sendFailureOrRedirect(res, req, '/account/login?fwdTo=' + req.url)
   } else if (req.params.app_name === 'info.freezr.admin' && !req.session.logged_in_as_admin) {
     sendFailureOrRedirect(res, req, '/account/home?redirect=adminOnly')
   } else {
@@ -88,6 +89,8 @@ exports.loggedInUserPage = function (req, res, dsManager, next) {
   }
 }
 exports.loggedInOrNotForSetUp = function (req, res, dsManager, next) {
+  // used for self registration
+  // app.get('/admin/selfregister', loggedInOrNotForSetUp, publicUserPage, adminHandler.generate_UserSelfRegistrationPage)
   req.params.app_name = 'info.freezr.public'
 
   fdlog('loggedInOrNotForSetUp ', dsManager.freezrIsSetup, 'user', req.session.logged_in_user_id)
@@ -98,7 +101,7 @@ exports.loggedInOrNotForSetUp = function (req, res, dsManager, next) {
     res.redirect('/')
   } else if (!req.session || !req.session.logged_in_user_id) {
     req.freezr_server_version = exports.version
-    if (req.freezrAllowSelfReg) {
+    if (req.freezrSelfRegOptions.allow) {
       req.freezrSetUpStatus = 'unRegisteredUser'
       next()
     } else {
@@ -148,19 +151,41 @@ exports.publicUserPage = function (req, res, dsManager, next) {
   ) {
     sendFailureOrRedirect(res, req, '/admin/firstSetUp')
   } else if (helpers.is_system_app(req.params.app_name)) {
-    const userDS = dsManager.setSystemUserDS('public', { fsParams: { type: 'local' }, dbParams: {} })
-    if (userDS) {
-      userDS.getorInitAppFS(req.params.app_name, {}, function (err, appFS) {
+    if (!dsManager.freezrIsSetup) {
+      const userDS = dsManager.setSystemUserDS('public', { fsParams: { type: 'local' }, dbParams: {} })
+      if (userDS) {
+        userDS.getorInitAppFS(req.params.app_name, {}, function (err, appFS) {
+          if (err) {
+            felog('publicUserPage ', 'Could not get appFS')
+            sendFailureOrRedirect(res, req, '/')
+          } else {
+            req.freezrAppFS = appFS
+            next()
+          }
+        })
+      } else {
+        sendFailureOrRedirect(res, req, '/')
+      }
+    } else {
+      dsManager.getOrSetUserDS('public', function (err, userDS) {
         if (err) {
+          console.warn('COULD NOT GET APP FS', err)
           felog('publicUserPage ', 'Could not get appFS')
           sendFailureOrRedirect(res, req, '/')
+        } else if (userDS && userDS.getorInitAppFS) {
+          userDS.getorInitAppFS(req.params.app_name, {}, function (err, appFS) {
+            if (err) {
+              felog('publicUserPage ', 'Could not get appFS')
+              sendFailureOrRedirect(res, req, '/')
+            } else {
+              req.freezrAppFS = appFS
+              next()
+            }
+          })
         } else {
-          req.freezrAppFS = appFS
-          next()
+          sendFailureOrRedirect(res, req, '/')
         }
       })
-    } else {
-      sendFailureOrRedirect(res, req, '/')
     }
   } else if (req.params.user_id) {
     dsManager.getOrSetUserDS(req.params.user_id, function (err, userDS) {
@@ -200,8 +225,10 @@ exports.accountLoggedInAPI = function (req, res, dsManager, next) {
     // visitLogger.record(req, freezr_environment, freezr_prefs, {source:'userDataAccessRights'});
     getAppTokenParams(dsManager.getDB(APP_TOKEN_OAC), req, function (err, tokenInfo) {
       // {userId, appName, loggedIn}
+      // onsole.log('here ', { err, tokenInfo })
       if (!tokenInfo || !owner || err) {
         felog('accountLoggedInAPI', 'err in getAppTokenParams', err)
+        console.warn('error with token : ', { err })
         res.sendStatus(401)
       } else if (!['info.freezr.account', 'info.freezr.admin'].includes(tokenInfo.app_name) && !['info.freezr.account', 'info.freezr.admin'].includes(req.params.app_name)) {
         felog('accountLoggedInAPI', 'auth error - trying to access account with non account token')
@@ -227,6 +254,7 @@ exports.accountLoggedInAPI = function (req, res, dsManager, next) {
 }
 
 exports.userLoginHandler = function (req, res, dsManager, next) {
+  //   app.post('/v1/account/login', userLoginHandler)
   // check logged in
   // get or set app token
   // addAccountDS and perms ds
@@ -261,7 +289,7 @@ exports.userLoginHandler = function (req, res, dsManager, next) {
 
       // 2. check the password
       function (results, cb) {
-        var u = new User(results[0])
+        const u = new User(results[0])
         if (!results || results.length === 0) {
           cb(helpers.auth_failure('access_handler.js', exports.version, 'userLoginHandler', 'Wrong credentials'))
         } else if (results.length > 1) {
@@ -304,12 +332,15 @@ exports.userLoginHandler = function (req, res, dsManager, next) {
 }
 
 exports.appTokenLoginHandler = function (req, res, dsManager, next) {
+  //   app.post('/oauth/token', appTokenLoginHandler)
   if (!dsManager.freezrIsSetup) {
     helpers.auth_warning('server.js', exports.version, 'userLoginHandler', 'Unauthorized attempt to server without being set up')
     res.sendStatus(401)
   } else {
     req.freezr_server_version = exports.version
   }
+
+  // onsole.log('appTokenLoginHandler req.body', req.body)
 
   const password = req.body.password
   const expiry = req.body.expiry
@@ -406,21 +437,19 @@ exports.appTokenLoginHandler = function (req, res, dsManager, next) {
 
 exports.userAPIRights = function (req, res, dsManager, next) {
   // onsole.log("userDataAccessRights sess "+(req.session?"Y":"N")+"  loggin in? "+req.session.logged_in_user_id+" param id"+req.params.userid);
-  // if (freezr_environment.freezrIsSetup && req.session && req.session.logged_in && req.session.logged_in_user_id){
   if (dsManager.freezrIsSetup && req.session && req.header('Authorization')) {
     // visitLogger.record(req, freezr_environment, freezr_prefs, {source:'userDataAccessRights'});
     getAppTokenParams(dsManager.getDB(APP_TOKEN_OAC), req, function (err, tokenInfo) {
       // {userId, appName, loggedIn}
-      fdlog('userAPIRights tokenInfo', { tokenInfo })
+      fdlog('userAPIRights tokenInfo for ' + req.url, { tokenInfo })
       fdlog('userAPIRights req.header(Authorization)', req.header('Authorization'))
       if (err) {
-        /* // console.log - todo - review this - why commented?
-          if (req.freezrAPIRightsOptional) { // used for messages
-          req.freezrTokenInfo = null
-          next()
-        } else  */
-        felog(' userAPIRights', 'err in getAppTokenParams', err)
-        res.sendStatus(401)
+        if (err.message === 'Token has expired.') {
+          helpers.send_failure(res, err, 'access_handler', exports.version, 'userAPIRights')
+        } else {
+          felog(' userAPIRights', 'err in getAppTokenParams', err)
+          res.sendStatus(401)
+        }
       } else {
         fdlog('got token info ', tokenInfo)
         req.freezrTokenInfo = tokenInfo
@@ -487,9 +516,8 @@ exports.userLogOut = function (req, res, dsManager, next) {
 }
 
 exports.getManifest = function (req, res, dsManager, next) {
-  fdlog('getting getManifest in access_handler ', req.freezrTokenInfo)
-
-  const appName = req.freezrTargetApp || req.freezrTokenInfo.app_name
+  fdlog('getting getManifest in access_handler ', req.freezrTokenInfo, 'req.req.query.targetApp ', req.query.targetApp)
+  const appName = (req.freezrTokenInfo.app_name === 'info.freezr.account' && (req.query.targetApp || req.body.targetApp)) ? (req.query.targetApp || req.body.targetApp) : req.freezrTokenInfo.app_name
   const ownerId = req.freezrTokenInfo.owner_id
 
   async.waterfall([
@@ -508,7 +536,7 @@ exports.getManifest = function (req, res, dsManager, next) {
     function (list, cb) {
       if (!list || list.length === 0 || !list[0].manifest) {
         // no manifest - Adding blank getManifest in access_handler
-        req.freezrRequestorManifest = { pages: {} }
+        req.freezrRequestorManifest = { identifier: appName, pages: {} }
       } else {
         // Adding full getManifest in access_handler
         // if (list && list[0]) fdlog('list[0].manifest', list[0].manifest)
@@ -540,6 +568,8 @@ const getAppTokenParams = function (tokendb, req, callback) {
       callback(helpers.error('mismatch', 'user_id does not match logged in (check_app_token_and_params) '))
     } else if (record.one_device && record.user_device !== req.session.device_code) {
       callback(helpers.error('mismatch', 'one_device checked but device does not match (check_app_token_and_params) '))
+    } else if (!record.expiry || record.expiry < new Date().getTime()) {
+      callback(helpers.error('expired', 'Token has expired.'))
     } else {
       const tokenInfo = { owner_id: record.owner_id, requestor_id: record.requestor_id, app_name: record.app_name, logged_in: record.logged_in }
       // onsole.log("checking device codes ..", req.session.device_code, the_user, req.params.requestor_app)
@@ -556,7 +586,7 @@ const getTokenFromCacheOrDb = function (tokendb, appToken, callback) {
     fdlog('sending cached appToken getTokenFromCacheOrDb...')
     callback(null, [tokendb.cache[appToken]])
   } else {
-    tokendb.query({ app_token: appToken, expiry: { $gt: new Date().getTime() } }, null, callback)
+    tokendb.query({ app_token: appToken /* expiry: { $gt: new Date().getTime() } */ }, null, callback)
   }
 }
 const getOrSetAppTokenForLoggedInUser = function (tokendb, req, callback) {

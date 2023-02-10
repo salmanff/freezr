@@ -1393,6 +1393,7 @@ NEW     message:
                   }
                   const paramsCopy = JSON.parse(JSON.stringify(params))
                   paramsCopy.recipient_id = username
+                  delete paramsCopy.record
                   if (!serverurl || paramsCopy.recipient_host === paramsCopy.sender_host) {
                     paramsCopy.recipient_host = null
                     paramsCopy.group_members = req.freezrMessageToMembers
@@ -1409,6 +1410,7 @@ NEW     message:
                     paramsCopy.group_members = reconfigureMembersBySwitchingSendersAndReceivers(req.freezrMessageToMembers, params.sender_host, params.recipient_host)
                     createAndTransmitMessage(req.freezrSentMessages, permittedRecord, paramsCopy, function (err) {
                       if (err) {
+                        felog('transmitted msg with ', { err })
                         recipientsWithErrorsSending.push({ fullname: member, reasons: 'failure to send' })
                       } else {
                         recipientsSuccessfullysentTo.push(member)
@@ -1457,7 +1459,8 @@ NEW     message:
         let status = 0
         async.waterfall([
           function (cb) {
-            const fields = ['app_id', 'sender_id', 'sender_host', 'recipient_host', 'recipient_id', 'type', 'contact_permission', 'table_id', 'record_id', 'nonce', 'record', 'message', 'messaging_permission', 'group_members']
+            const fields = ['app_id', 'sender_id', 'sender_host', 'recipient_host', 'recipient_id', 'type', 'contact_permission', 'table_id', 'nonce', 'message', 'messaging_permission', 'group_members', 'record_id', 'record', 'message_id']
+            const fieldExceptions = ['message', 'record_id', 'record', 'message_id']
             let failed = false
             if (!req.body.type) { req.body.type = 'share_records' } // temp hacj to revisit and fix
             for (const [key, keyObj] of Object.entries(req.body)) {
@@ -1469,7 +1472,7 @@ NEW     message:
                 // failed = true
               }
             }
-            fields.forEach(key => { if (!receivedParams[key] && key !== 'message') failed = true })
+            fields.forEach(key => { if (!receivedParams[key] && !fieldExceptions.includes(key)) failed = true })
             if (failed) {
               cb(new Error('failed to get keys for sharing'))
             } else {
@@ -1704,7 +1707,13 @@ NEWDO?  message:
       const verifyReq = https.request(sendOptions, (verifyRes) => {
         verifyRes.on('data', (returns) => {
           if (returns) returns = returns.toString()
-          callback(null, returns)
+          try {
+            returns = JSON.parse(returns)
+            callback(null, returns)
+          } catch (e) {
+            console.warn('errir getting trsnsmit ', { returns })
+            callback(new Error('unisccessful transmission'))
+          }
         })
       })
       verifyReq.on('error', (error) => {

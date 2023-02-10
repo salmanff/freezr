@@ -74,7 +74,7 @@ const dg = {
         } else {
           console.warn(propName + ' is not a valid property of a ' + type)
         }
-      });
+      })
     }
 
     if (otherChildren) this.appendArray(el, otherChildren)

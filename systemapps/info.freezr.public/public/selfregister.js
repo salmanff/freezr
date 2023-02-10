@@ -346,7 +346,6 @@ const isValidEmail = function (aText) {
   return aText && aText.indexOf('@') > 1 && aText.indexOf('@') < aText.indexOf('.') && aText.indexOf('.') < aText.length - 1
 }
 const gotRegisterStatus = function (error, data) {
-  console.log('gotRegisterStatus ', { error, data })
   if (error || !data) {
     document.getElementById('main_form_sections').style.display = 'block'
     document.getElementById('launch_spinner').style.display = 'none'

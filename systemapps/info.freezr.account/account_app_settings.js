@@ -51,7 +51,7 @@ const normliseGithubUrl = function (aUrl) {
 }
 
 const drawStandAloneApps = async function (manifest) {
-  const otherFuncsDiv = dg.div({ style: { display: 'flex', 'flex-wrap': 'wrap' } })
+  const otherFuncsDiv = dg.div({ style: { display: 'flex', 'flex-wrap': 'wrap', 'align-items': 'center', 'justify-content': 'center' } })
   const messages = dg.div({ id: 'freezrAppSettingsMessages', style: { 'font-size': '12px' } })
 
   const outer = dg.div(
@@ -115,7 +115,9 @@ const drawStandAloneApps = async function (manifest) {
             console.warn(err)
             messages.innerHTL = 'Error trying to get password.'
           } else {
-            window.open(manifest.standAloneApps.ios.link + '?url=' + resp.full_url, '_blank')
+            console.log({ manifest })
+            console.log('opening ' + manifest.standAloneApps.ios.link + '?url=' + resp.full_url)
+            window.open(manifest.standAloneApps.ios.link + '?url=' + resp.full_url, '_self')
           }
         })
       }

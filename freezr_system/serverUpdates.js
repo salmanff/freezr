@@ -96,11 +96,7 @@ const updates = [
       }
 
       convertNextRecordFromFradminToPublic(dsManager, [], callback)
-      // get admin db -> temp info_freezr_admin_public_records
-      // recursively get a record
-      // write to public db ->  temp info_freezr_admin_public_records
-      // delete on fradmin
-      // callback(null)
+
     }
   }
 ]

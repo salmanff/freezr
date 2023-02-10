@@ -134,7 +134,7 @@ USER_DS.prototype.getUseageWarning = function () {
   if (!this.useage || !this.useage.storageLimit) return { ok: true }
   if (this.useage.errorInCalculating) console.warn('this.useage.errorInCalculating', this.useage.errorInCalculating)
   const isNotOk = this.useage.errorInCalculating ||
-    (!this.useage.lastStorageCalcs?.totalSize && (this.useage.storageLimit * 1000000 > this.useage.lastStorageCalcs?.totalSize))
+    (this.useage.lastStorageCalcs?.totalSize !== null && this.useage.lastStorageCalcs?.totalSize !== undefined && (this.useage.storageLimit * 1000000 > this.useage.lastStorageCalcs?.totalSize))
   const w = {
     ok: !isNotOk,
     storageLimit: this.useage.storageLimit,

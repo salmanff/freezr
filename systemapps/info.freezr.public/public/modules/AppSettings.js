@@ -113,7 +113,8 @@ const createPermissionsDiv = function (outerPermissions, currentAppName) {
           if (errors > 0) {
             dg.el('message', { top: true }).innerHTML = 'There were some errors. Please try again'
           } else {
-            window.open(('/account/app/settings/com.salmanff.poster?message=All Permissions have been ' + (acceptAll ? 'accepted.' : 'denied.')), '_self')
+            const appName = document.getElementById('freezrPermsDiv').getAttribute('data-appName')
+            window.open(('/account/app/settings/' + appName + '?message=All Permissions have been ' + (acceptAll ? 'accepted.' : 'denied.')), '_self')
           }
           // refreshDiv()
         }

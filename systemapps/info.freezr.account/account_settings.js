@@ -52,7 +52,7 @@ freezr.initPageScripts = function () {
   }
 
   freezr.utils.getPrefs(function (err, prefs) {
-    // onsole.log({ err, prefs })
+    if (err) console.warn({ err, prefs })
     document.getElementById('userBlockMsgsToNonContacts').checked = prefs.blockMsgsToNonContacts
     document.getElementById('userBlockMsgsFromNonContacts').checked = prefs.blockMsgsFromNonContacts
   })
@@ -65,15 +65,13 @@ freezr.initPageScripts = function () {
       blockMsgsFromNonContacts: document.getElementById('userBlockMsgsFromNonContacts').checked
     }
 
-    console.log({ theInfo })
-
     freezerRestricted.connect.write('/v1/account/data/setPrefs.json', theInfo, gotChangePrefsStatus, 'jsonString')
   }
 
   document.getElementById('choosePict').onclick = choosePict
   document.getElementById('profilePictDelete').onclick = deletePict
   document.getElementById('profilePictInner').onerror = function () {
-    console.log('error on pict')
+    console.warn('error on pict')
     document.getElementById('profilePictDelete').style.display = 'none'
     document.getElementById('profilePictOuter').style.display = 'none'
     document.getElementById('profilePictPathMsg').style.display = 'none'
@@ -104,7 +102,6 @@ freezr.initPageScripts = function () {
 }
 
 const gotChangePrefsStatus = function (error, data) {
-  console.log(' gotChangePrefsStatus ', { error, data })
   data = freezr.utils.parse(data)
   if (error) {
     showError('Error changing prefs -  ' + error.message)
@@ -127,8 +124,6 @@ const gotPasswordChangeStatus = function (error, data) {
 }
 
 const gotRemoveStatus = function (error, data) {
-  console.log('gotRemoveStatus', { error, data })
-  console.log('gotRemoveStatus', JSON.stringify(data))
   data = freezr.utils.parse(data)
   window.scrollTo({ top: 0, behavior: 'smooth' })
   if (error) {
@@ -203,8 +198,6 @@ const choosePict = function (evt) {
 }
 const uploadPictNow = function (file) {
   const parts = file.name.split('.')
-  console.log('file name ', file.name, { parts })
-
   const uploadData = new FormData()
   uploadData.append('file', file)
   uploadData.append('file_name', 'profilePict.jpg')
@@ -212,7 +205,6 @@ const uploadPictNow = function (file) {
   const url = '/feps/upload/info.freezr.account'
 
   freezerRestricted.connect.send(url, uploadData, function (error, returndata) {
-    console.log({ error, returndata })
     if (error || returndata.err) {
       console.warn({ error, returndata })
       showError(error && error.message ? error.message : returndata.err)
@@ -228,7 +220,6 @@ const uploadPictNow = function (file) {
 }
 const deletePict = async function () {
   const delInfo = await freepr.feps.delete('profilePict.jpg', { app_table: 'info.freezr.account.files' })
-  console.log({ delInfo })
   document.getElementById('profilePictInner').src = '/publicfiles/' + freezrMeta.userId + '/info.freezr.account/profilePict.jpg?timestamp=' + new Date().getTime()
   showError('Profile picture removed')
 }

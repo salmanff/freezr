@@ -173,6 +173,7 @@ exports.write_record = function (req, res) { // create update or upsert
     // 1. check basics
     function (cb) {
       if (!granted) {
+        fdlog('not gramted err ', req)
         cb(authErr('unauthorized write access'))
       } else if (!isUpsert && !isUpdate && Object.keys(write).length <= 0) {
         cb(appErr('Missing data parameters.'))
@@ -1068,18 +1069,18 @@ exports.shareRecords = function (req, res) {
                 }
               } else { // remove grant
                 if (hasPrivateFeed) {
-                  accessiblesObject.isPublic = results[0].isPublic
-                  accessiblesObject.privateLinks = results[0].privateLinks
+                  accessiblesObject.isPublic = (results && results.length > 0) ? results[0].isPublic : false
+                  accessiblesObject.privateLinks = (results && results.length > 0) ? results[0].privateLinks : null
                   accessiblesObject.privateFeedNames = helpers.removeFromListIfExists(accessiblesObject.privateFeedNames, codeOrName)
                 } else if (hasPrivateLink) {
-                  accessiblesObject.isPublic = results[0].isPublic
-                  accessiblesObject.privateFeedNames = results[0].privateFeedNames
+                  accessiblesObject.isPublic = (results && results.length > 0) ? results[0].isPublic : false
+                  accessiblesObject.privateFeedNames = (results && results.length > 0) ? results[0].privateFeedNames: null
                   accessiblesObject.privateLinks = helpers.removeFromListIfExists(accessiblesObject.privateLinks, codeOrName)
                 } else {
-                  accessiblesObject.privateLinks = results[0].privateLinks
-                  accessiblesObject.privateFeedNames = results[0].privateFeedNames
+                  accessiblesObject.privateLinks = (results && results[0] && results[0].privateLinks) ? results[0].privateLinks : null
+                  accessiblesObject.privateFeedNames = (results && results[0] && results[0].privateFeedNames) ? results[0].privateFeedNames : null
                   accessiblesObject.isPublic = false
-                }
+                } 
                 if (!accessiblesObject.isPublic && (!accessiblesObject.privateFeedNames || accessiblesObject.privateFeedNames.length === 0) && (!accessiblesObject.privateLinks || accessiblesObject.privateLinks.length === 0)) {
                   req.freezrPublicRecordsDB.delete_record(publicid, {}, cb2)
                 } else {
@@ -1208,6 +1209,7 @@ NEW     message:
       const recipientFullName = (params.recipient_id + '@' + params.recipient_host).replace(/\./g, '_')
       if (!params.sender_id) params.sender_id = req.freezrTokenInfo.requestor_id
       if (!params.app_id) params.app_id = req.freezrTokenInfo.app_name
+      const isRecordLessMessageReply = (params.message_id && !params.record_id && params.type === 'message_records')
 
       async.waterfall([
         // 1 basic checks
@@ -1223,7 +1225,7 @@ NEW     message:
             return !failed
           }
 
-          if (!objectFieldsHaveAllStrings(params, ['app_id', 'sender_id', 'sender_host', 'contact_permission', 'table_id', 'record_id'])) {
+          if (!objectFieldsHaveAllStrings(params, ['app_id', 'sender_id', 'sender_host', 'contact_permission', 'table_id'] || (!params.record_id && !params.message_id))) {
             cb(new Error('field insufficency mismatch'))
           } else if (params.type !== 'share_records' && params.type !== 'message_records') {
             cb(helpers.error(null, 'only share_records and message-_ecords type messaging currently allowed'))
@@ -1285,7 +1287,13 @@ NEW     message:
 
         // 3 get record and make sure grantee is in it.. keep a copy
         function (cb) {
-          req.freezrRequesteeDB.read_by_id(params.record_id, cb)
+          if (params.record_id) {
+            req.freezrRequesteeDB.read_by_id(params.record_id, cb)
+          } else if (isRecordLessMessageReply) {
+            req.freezrGotMessages.read_by_id(params.message_id, cb)
+          } else {
+            cb(new Error('no record id or message id provided'))
+          }
         },
         // consdtruct a permitted-record
         function (fetchedRecord, cb) {
@@ -1385,7 +1393,7 @@ NEW     message:
                   }
                   const paramsCopy = JSON.parse(JSON.stringify(params))
                   paramsCopy.recipient_id = username
-                  if (!serverurl) {
+                  if (!serverurl || paramsCopy.recipient_host === paramsCopy.sender_host) {
                     paramsCopy.recipient_host = null
                     paramsCopy.group_members = req.freezrMessageToMembers
                     sameHostMessageExchange(req, username, permittedRecord, params, function (err) {
@@ -1415,13 +1423,17 @@ NEW     message:
         },
 
         function (cb) {
-          if (!recordAccessibleField) recordAccessibleField = {}
-          recipientsSuccessfullysentTo.forEach(member => {
-            if (!recordAccessibleField[member]) recordAccessibleField[member] = {}
-            if (!recordAccessibleField[member].messaged) recordAccessibleField[member].messaged = []
-            recordAccessibleField[member].messaged.push(new Date().getTime()) // newd -> list of dates??
-          })
-          req.freezrRequesteeDB.update(params.record_id, { _accessible: recordAccessibleField }, { replaceAllFields: false, newSystemParams: true }, cb)
+          if (isRecordLessMessageReply) {
+            cb(null, null)
+          } else {
+            if (!recordAccessibleField) recordAccessibleField = {}
+            recipientsSuccessfullysentTo.forEach(member => {
+              if (!recordAccessibleField[member]) recordAccessibleField[member] = {}
+              if (!recordAccessibleField[member].messaged) recordAccessibleField[member].messaged = []
+              recordAccessibleField[member].messaged.push(new Date().getTime()) // newd -> list of dates??
+            })
+            req.freezrRequesteeDB.update(params.record_id, { _accessible: recordAccessibleField }, { replaceAllFields: false, newSystemParams: true }, cb)
+          }
         }
 
       ], function (err, ret) {

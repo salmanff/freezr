@@ -246,17 +246,25 @@ exports.addMessageDb = function (req, res, dsManager, next) {
         res.sendStatus(401)
       } else {
         req.freezrSentMessages = sentMessages
-        getGotMessagesAndContactsFor(dsManager, req.body, req.freezrCepsGroups, function (err, gotMessageDbs, contactsDBs, groupMembers, badContacts) {
+        dsManager.getorInitDb({ app_table: 'dev.ceps.messages.got', owner }, {}, function (err, gotMessages) {
           if (err) {
-            helpers.state_error('Could not access gotMessages - addMessageDb')
+            helpers.state_error('Could not access sentMessages - addMessageDb')
             res.sendStatus(401)
           } else {
-            req.freezrOtherPersonGotMsgs = gotMessageDbs
-            req.freezrOtherPersonContacts = contactsDBs
-            req.freezrMessageToMembers = groupMembers
-            req.freezrBadContacts = badContacts
-            next()
-            // exports.addUserPermsAndRequesteeDB(req, res, dsManager, next)
+            req.freezrGotMessages = gotMessages
+            getGotMessagesAndContactsFor(dsManager, req.body, req.freezrCepsGroups, function (err, gotMessageDbs, contactsDBs, groupMembers, badContacts) {
+              if (err) {
+                helpers.state_error('Could not access gotMessages - addMessageDb')
+                res.sendStatus(401)
+              } else {
+                req.freezrOtherPersonGotMsgs = gotMessageDbs
+                req.freezrOtherPersonContacts = contactsDBs
+                req.freezrMessageToMembers = groupMembers
+                req.freezrBadContacts = badContacts
+                next()
+                // exports.addUserPermsAndRequesteeDB(req, res, dsManager, next)
+              }
+            })
           }
         })
 

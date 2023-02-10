@@ -565,15 +565,16 @@ const getAppTokenParams = function (tokendb, req, callback) {
     } else if (!record.requestor_id || !record.owner_id || !record.app_name) {
       callback(helpers.error('mismatch', 'parameters do not match expected value (check_app_token_and_params)'))
     } else if (record.logged_in && record.requestor_id !== req.session.logged_in_user_id) {
+      console.warn('user_id does not match logged in  ', record.logged_in, 'ecord.requestor_id', record.requestor_id, 'logged_in_user_id', req.session.logged_in_user_id)
       callback(helpers.error('mismatch', 'user_id does not match logged in (check_app_token_and_params) '))
     } else if (record.one_device && record.user_device !== req.session.device_code) {
       callback(helpers.error('mismatch', 'one_device checked but device does not match (check_app_token_and_params) '))
     } else if (!record.expiry || record.expiry < new Date().getTime()) {
+      console.warn('token expied ', { appToken })
       callback(helpers.error('expired', 'Token has expired.'))
     } else {
       const tokenInfo = { owner_id: record.owner_id, requestor_id: record.requestor_id, app_name: record.app_name, logged_in: record.logged_in }
       // onsole.log("checking device codes ..", req.session.device_code, the_user, req.params.requestor_app)
-
       callback(err, tokenInfo)
     }
   })

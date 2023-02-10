@@ -5,6 +5,7 @@
 freezr.initPageScripts = function () {
   const searchParams = new URLSearchParams(window.location.search)
   const autoInstallUrl = normliseGithubUrl(searchParams.get('autoInstallUrl'))
+  const action = normliseGithubUrl(searchParams.get('action'))
   const autoInstallApp = searchParams.get('autoInstallApp')
   console.log({ autoInstallApp, autoInstallUrl })
   if (!autoInstallUrl || !autoInstallApp) window.location = '/account/app/manage'
@@ -21,7 +22,7 @@ freezr.initPageScripts = function () {
       if (error || d.err) {
         showError(error.message || d.err || 'Error installing!')
       } else {
-        window.location = '/account/app/settings/' + autoInstallApp + '?message=You successfully installed the app.'
+        window.location = '/account/app/settings/' + autoInstallApp + '?' + (action ? ('action=' + action + '&') : '') + 'message=You successfully installed the app.'
       }
     })
   }

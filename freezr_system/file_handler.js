@@ -117,7 +117,7 @@ exports.load_page_html = function (req, res, opt) {
         })
       }
       if (opt.full_path_scripts) {
-        opt.full_script_files.forEach(function (pathToFile) {
+        opt.full_path_scripts.forEach(function (pathToFile) {
           scriptFiles = scriptFiles + '<script src="' + pathToFile + '" type="text/javascript"></script>'
         })
       }

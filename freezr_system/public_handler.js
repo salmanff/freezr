@@ -829,6 +829,27 @@ exports.get_public_file = function (req, res) {
     }
   })
 }
+exports.old_get_public_file = function (req, res) {
+  // app.get('/v1/publicfiles/:user_id/:requestee_app/*', addPublicRecordsDB, addPublicUserFs, publicHandler.get_public_file);
+  fdlog('get_public_file')
+
+  let parts = req.originalUrl.split('/')
+  parts = parts.slice(5) // remove '/v1/publicfiles/:user_id/:requestee_app',
+  const dataObjectId = req.params.user_id + '/' + decodeURI(parts.join('/')).split('?')[0].split('#')[0]
+  
+  req.freezruserFilesDb.read_by_id(dataObjectId, (err, resultingRecord) => {
+    if (err || !resultingRecord) {
+      felog('no related records getting piublic file', dataObjectId, err)
+      res.sendStatus(401)
+    } else if (resultingRecord._accessible && resultingRecord._accessible._public && resultingRecord._accessible._public.granted) {
+      const endPath = unescape(parts.join('/').split('?')[0])
+      req.freezrAppFS.sendUserFile(endPath, res)
+    } else {
+      console.warn('not permitted to get public file' + dataObjectId + ' ' + JSON.stringify(resultingRecord._accessible))
+      res.sendStatus(401)
+    }
+  })
+}
 
 // ancillary functions and name checks
 function firstElementKey (obj) {

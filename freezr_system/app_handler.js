@@ -307,7 +307,7 @@ exports.read_record_by_id = function (req, res) {
         const requestee = req.freezrAttributes.owner_user_id.replace(/\./g, '_')
 
         req.freezrAttributes.grantedPerms.forEach(aPerm => {
-          if (aPerm.type === 'write_own' && fetchedRecord._created_by_user === req.freezrAttributes.requestor_user_id && fetchedRecord._created_by_app === req.freezrAttributes.requestor_app) {
+          if (aPerm.type === 'write_own' && fetchedRecord._created_by_user === req.freezrAttributes.requestor_user_id) { //  && fetchedRecord._created_by_app === req.freezrAttributes.requestor_app
             accessToRecord = true
             relevantPerm = aPerm
           } else if (fetchedRecord._accessible && fetchedRecord._accessible[requestee] &&
@@ -395,7 +395,7 @@ exports.db_query = function (req, res) {
   } else if (thePerm.type === 'write_own') {
     if (!req.body.q) req.body.q = {}
     req.body.q._created_by_user = req.freezrAttributes.requestor_user_id
-    if (req.freezrAttributes.requestor_app !== 'info.freezr.account') req.body.q._created_by_app = req.freezrAttributes.requestor_app
+    // if (req.freezrAttributes.requestor_app !== 'info.freezr.account') req.body.q._created_by_app = req.freezrAttributes.requestor_app
   } else if (thePerm.type === 'db_query') {
     // for db_queries make sure query fits the intended schema
     fdlog('todo future functionality')
@@ -588,6 +588,7 @@ exports.restore_record = function (req, res) {
   const options = req.body.options || { }
   const dataObjectId = options.data_object_id
   const isUpdate = dataObjectId && options.updateRecord
+  const isUpsert = dataObjectId && options.upsertRecord
 
   const appErr = function (message) { return helpers.app_data_error(exports.version, 'restore_record', (options.app_name || req.params.app_table), message) }
   const authErr = function (message) { return helpers.auth_failure('app_handler', exports.version, 'restore_record', req.params.app_table + ': ' + message) }
@@ -614,7 +615,7 @@ exports.restore_record = function (req, res) {
     },
 
     function (cb) {
-      if (!dataObjectId && !isUpdate) { // Simple create object with no id
+      if (!dataObjectId && !isUpdate && !isUpsert) { // Simple create object with no id
         cb(null, null)
       } else if (dataObjectId) { // isUpsert or update
         req.freezrRequesteeDB.read_by_id(dataObjectId, function (err, results) {
@@ -629,7 +630,7 @@ exports.restore_record = function (req, res) {
     function (results, cb) {
       if (results && isUpdate && results._date_created /* ie is non empty record */) {
         req.freezrRequesteeDB.update(dataObjectId, write, { old_entity: results, restoreRecord: true, replaceAllFields: true }, cb)
-      } else if (results && !isUpdate) { // should have gotten results
+      } else if (results && !isUpdate && !isUpsert) { // should have gotten results
         cb(appErr('Existing record found when this should not be an update '))
       } else if (isUpdate) { // should have gotten results
         cb(appErr('record not found for an update restore'))
@@ -752,6 +753,7 @@ exports.shareRecords = function (req, res) {
         cb(helpers.error('PermissionNotGranted', 'permission not granted yet'))
       } else if (results[0].table_id !== req.body.table_id) {
         fdlog('results', results[0], 'req.body', req.body)
+        console.warn('results[0].table_id ', results[0].table_id, 'req.body.table_id', req.body.table_id)
         cb(helpers.error('TableMissing', 'The table being granted permission to does not correspond to the permission '))
       } else {
         if (results.length > 1) felog('two permissions found where one was expected ' + JSON.stringify(results))
@@ -868,7 +870,7 @@ exports.shareRecords = function (req, res) {
             allowedGrantees.forEach((grantee) => {
               grantee = grantee.replace(/\./g, '_')
               const granteeKey = (grantee === '_public' || grantee === '_privatelink') ? grantee : ((helpers.startsWith(grantee, '_privatefeed:')) ? grantee.substr(0, 12) : grantee)
-              codeOrName = helpers.startsWith(helpers.startsWith(grantee, '_privatefeed:')) ? grantee.substr(13) : null
+              codeOrName = helpers.startsWith(grantee, '_privatefeed:') ? grantee.substr(13) : null
 
               if (!accessible[granteeKey]) accessible[granteeKey] = {}
               accessible[granteeKey].granted = true

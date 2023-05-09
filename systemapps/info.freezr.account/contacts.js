@@ -78,7 +78,7 @@ freezr.initPageScripts = function () {
     if (err) {
       showWarning(err.message)
     } else {
-      freezr.feps.postquery({ appToken, app_table: 'dev.ceps.privatefeeds.codes' }, function (err, resp) {
+      freezr.ceps.getquery({ appToken, app_table: 'dev.ceps.privatefeeds.codes' }, function (err, resp) {
         console.log('getPrivateFeedToken intial query ', { resp })
         if (err) {
           showWarning(err)

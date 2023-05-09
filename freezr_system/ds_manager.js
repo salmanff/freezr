@@ -17,7 +17,7 @@ const DB_CHANGE_COUNT_THRESHOLD = 50
 
 const pathSep = path.sep
 const ROOT_DIR = helpers.removeLastpathElement(__dirname) + pathSep
-const ENV_FILE_DIR = path.normalize(ROOT_DIR + 'node_modules/nedb-asyncfs/env') + pathSep
+const ENV_FILE_DIR = path.normalize(ROOT_DIR + 'node_modules' + pathSep + 'nedb-asyncfs' + pathSep + 'env' + pathSep)
 
 function DATA_STORE_MANAGER () {
   this.freezrIsSetup = false

@@ -4,6 +4,7 @@ exports.version = '0.0.122'
 
 const async = require('async')
 const flags_obj = require("./flags_obj.js")
+const path = require('path')
 
 exports.RESERVED_FIELD_LIST = ["_id", "_date_created", "_date_modified","_accessible","_publicid","_date_accessibility_mod"];
 // ,"_date_published" removed as need to trust apps to set it
@@ -364,13 +365,13 @@ exports.getUniqueWords = function (anObject,theFields){
   return reduceToUnique(allWords);
     }
 }
-exports.removeLastpathElement = function (path, depth) {
+exports.removeLastpathElement = function (statedPath, depth) {
   if (!depth) depth = 1
-  var parts = path.split('/')
+  const parts = statedPath.split(path.sep)
   for (let i = 0; i < depth; i++) {
-    parts.pop()
+      parts.pop()
   }
-  return parts.join('/')
+  return parts.join(path.sep)
 }
 exports.variables_are_similar = function (obj1, obj2) {
     //onsole.log("variables_are_similar ",JSON.stringify(obj1),JSON.stringify(obj2)," - - - - -----------------")

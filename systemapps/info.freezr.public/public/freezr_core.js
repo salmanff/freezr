@@ -534,7 +534,7 @@ freezr.utils.publicPathFromId = function (fileId, requesteeApp, userId) {
   return '/publicfiles/' + requesteeApp + '/' + userId + '/' + fileId
 }
 freezr.utils.fileIdFromPath = function (filePath) {
-  // returns the id given a private or public url of a freezr file path
+  // returns the id given a private or public url of a freezr file path // todo - review fix 2023
   if (!filePath) return null
   let parts = filePath.split('/')
   const type = (parts[4] === 'userfiles' ? 'private' : (parts[4] === 'publicfiles' ? 'public' : null))

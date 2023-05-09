@@ -839,7 +839,7 @@ exports.old_get_public_file = function (req, res) {
   
   req.freezruserFilesDb.read_by_id(dataObjectId, (err, resultingRecord) => {
     if (err || !resultingRecord) {
-      felog('no related records getting piublic file', dataObjectId, err)
+      felog('no related records getting old public file', dataObjectId, err)
       res.sendStatus(401)
     } else if (resultingRecord._accessible && resultingRecord._accessible._public && resultingRecord._accessible._public.granted) {
       const endPath = unescape(parts.join('/').split('?')[0])

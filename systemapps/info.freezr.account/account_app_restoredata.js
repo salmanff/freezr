@@ -1,6 +1,7 @@
 // freezr accounts accpunt_app_restoredata.js
 /*
 To Do => access to Admin files and to public files
+  Add a choice for upsert or update or add as new (where we remove the upsert boolean and the _id)
 
 */
 /* global freezr, freezrMeta, freezerRestricted, confirm, FileReader, transformRecord */
@@ -140,7 +141,7 @@ const processNextRecord = function () {
       app_table: appTable,
       app_name: uploader.file_content.meta.app_name,
       // password: dl.password,
-      updateRecord: true,
+      upsertRecord: true,
       data_object_id: record._id
     }
     delete record._id

@@ -295,7 +295,7 @@ freezr.perms.shareRecords = function (idOrQuery, options, callback) {
 
         Options - CEPS
         name: permissionName - OBLIGATORY
-        'table_id': app_name (defaults to app self) (Should be obligatory?)
+        'table_id': app_name (defaults to what is in the permission definition - Is requried if more than one table in the permission
         'action': 'grant' or 'deny' (or anything else)
         'grantees': people being granted access (can also put grantee which is converted to a list [grantee])
         publicid: sets a public id instead of the automated accessible_id
@@ -306,24 +306,24 @@ freezr.perms.shareRecords = function (idOrQuery, options, callback) {
         doNotList - Does appear in the public table but doesnt show up on the ppage query list.
 
         idOrQuery being query is NON-CEPS - ie query_criteria or object_id_list
+        idOrQuery can also be null but ONLY for read_all, write_all permissions (2023)
         */
       }
       //
   }
   if (!options.grantees && options.grantee) options.grantees = [options.grantee]
-  if (!idOrQuery) {
-    callback(new Error('must incude object id or a search query'))
-  } else if (!options.grantees || options.grantees.length < 1 || !Array.isArray(options.grantees) || !options.table_id || !options.name) {
-    callback(new Error('must incude permission name, grantee and table_id'))
+  if (!options.grantees || options.grantees.length < 1 || !Array.isArray(options.grantees) || !options.name) {
+    console.warn({ options })
+    callback(new Error('must incude permission name, grantee'))
   } else {
     options.grant = (options.action === 'grant')
-    if (typeof idOrQuery === 'string') {
+    if (idOrQuery && typeof idOrQuery === 'string') {
       options.record_id = idOrQuery
       if (options.publicid || options.pubDate || options.unlisted) cepsOrFeps = 'feps'
     } else {
       cepsOrFeps = 'feps'
-      if (typeof idOrQuery === 'object') options.query_criteria = idOrQuery
-      if (idOrQuery.constructor === Array) options.object_id_list = idOrQuery
+      if (idOrQuery && typeof idOrQuery === 'object') options.query_criteria = idOrQuery
+      if (idOrQuery && idOrQuery.constructor === Array) options.object_id_list = idOrQuery
     }
     const url = '/' + cepsOrFeps + '/perms/share_records'
     freezerRestricted.connect.ask(url, options, callback)
@@ -651,7 +651,7 @@ freezerRestricted.connect.send = function (url, postData, callback, method, cont
   }
 
   const coreUrl = url ? url.split('?')[0] : ''
-  const PATHS_WO_TOKEN = ['/oauth/token', '/ceps/ping', '/v1/account/login', '/v1/admin/self_register', '/v1/admin/oauth/public/get_new_state', '/v1/admin/oauth/public/validate_state']
+  const PATHS_WO_TOKEN = ['/oauth/token', '/ceps/ping', '/v1/account/login', '/v1/admin/self_register', '/v1/admin/oauth/public/get_new_state', '/v1/admin/oauth/public/validate_state'] // , '/ceps/perms/validationtoken/set'
   if (badBrowser) {
     callback(new Error('You are using a non-standard browser. Please upgrade.'))
   // } else if (!options.urlAuthOverride && !freezerRestricted.connect.authorizedUrl(url, method)) {

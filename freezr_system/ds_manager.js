@@ -341,6 +341,38 @@ DATA_STORE_MANAGER.prototype.getorInitDb = function (OAC, options, callback) {
     })
   }
 }
+DATA_STORE_MANAGER.prototype.getorInitDbs = function (OAC, options, callback) {
+  // OAC can take a single collectiona nd app_name app_table ot an array of aoo_tables or 
+  fdlog('getorInitDbs ', { OAC, options })
+  if (!OAC || !OAC.owner || (!OAC.app_table && !OAC.app_tables)) {
+    callback(new Error('cannot get db without a properly formed AOC'))
+  } else {
+    this.getOrSetUserDS(OAC.owner, function (err, userDS) {
+      if (err) {
+        felog('getorInitDb err for ' + OAC.owner, err)
+        callback(err)
+      } else if (OAC.app_tables && Array.isArray((OAC.app_tables))) {
+        // !oac.app_name  + collection cannot take multiple values but oac.app_table can be an array of tableas
+        const list = []
+        async.forEach(OAC.app_tables, function (tableName, cb) {
+          userDS.getorInitDb({ owner: OAC.owner, app_table: tableName }, options, function (err, db) {
+            if (db) list.push(db)
+            cb(err)
+          })
+        },
+        function (err) {
+          if (err) {
+            callback(err)
+          } else {
+            callback(null, list)
+          }
+        })
+      } else {
+        userDS.getorInitDb(OAC, options, callback)
+      }
+    })
+  }
+}
 USER_DS.prototype.getorInitDb = function (OAC, options, callback) {
   if (this.owner !== OAC.owner) throw new Error('getorInitDb SNBH - user trying to get another users info' + this.owner + ' vs ' + OAC.owner)
 

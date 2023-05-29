@@ -135,12 +135,16 @@ const buttons = {
   },
   addBlankApp: function () {
     const appName = document.getElementById('appNameForBlankApp').innerText
-    if (!appName) {
-      showError('Please enter an app name')
-    } else if (!isValidAppName(appName)) {
+    const servedUrl = document.getElementById('appUrlForBlankApp').innerText || null
+    const displayName = document.getElementById('appDisplayNameForBlankApp').innerText || null
+    // later grab logo and manifest to populate...
+
+    if (!isValidAppName(appName) && !servedUrl) {
       showError('Invalid app name - please correct the app name')
+    } else if (!isValidAppName(appName) && servedUrl && !isValidUrl(servedUrl)) {
+      showError('Invalid app url - please correct the app url or leave blank if not needed')
     } else {
-      freezerRestricted.connect.ask('/v1/account/app_install_blank', { app_name: appName }, function (error, returndata) {
+      freezerRestricted.connect.ask('/v1/account/app_install_blank', { app_name: appName, served_url: servedUrl, app_display_name: displayName }, function (error, returndata) {
         if (error || returndata.err) {
           console.warn({ error, returndata })
           showError('Error updating app!')
@@ -180,6 +184,13 @@ const installSuccessProcess = function (returndata) {
   } else {
     showError('Could not get appname!! ??')
   }
+}
+const isValidUrl = function (appName) {
+  if (!appName) return false
+  if (appName.length < 1) return false
+  if (!startsWithOneOf(appName, ['/', 'https://', 'http://'])) return false
+  if (appName.indexOf('/oapp/') < -1) return false
+  return true
 }
 const isValidAppName = function (appName) {
   if (!appName) return false

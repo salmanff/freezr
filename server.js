@@ -8,7 +8,7 @@ const VERSION = '0.0.211'
 // const tester1 = require(__dirname + '/node_modules/nedb-asyncfs/env/dbfs_googleDrive.js')
 
 // INITALISATION / APP / EXPRESS
-console.log('=========================  VERSION Jan 2023  =======================')
+console.log('=========================  VERSION May 2023  =======================')
 const express = require('express')
 const bodyParser = require('body-parser')
 const multer = require('multer')
@@ -111,6 +111,18 @@ const loggedInUserPage = function (req, res, next) {
     accessHandler.loggedInUserPage(req, res, dsManager, next)
   }
 }
+const validatedOutsideUserAppPage = function (req, res, next) {
+  req.freezrStatus = freezrStatus
+  accessHandler.validatedOutsideUserAppPage(req, res, dsManager, next)
+}
+const loggedInOrValidatedUserPage = function (req, res, next) {
+  if (req.session && req.session.logged_in_user_id && req.params.user_id && req.params.user_id !== 'public' && req.session.logged_in_user_id !== req.params.user_id) {
+    accessHandler.validatedOutsideUserAppPage(req, res, dsManager, next)
+  } else {
+    accessHandler.loggedInUserPage(req, res, dsManager, next)
+  }
+}
+
 const loggedInOrNotForSetUp = function (req, res, next) {
   req.params.app_name = 'info.freezr.public'
   req.freezrAllowSelfReg = freezrPrefs.allowSelfReg
@@ -140,7 +152,6 @@ const checkFirstSetUp = function (req, res, next) {
     res.sendStatus(401)
   } else {
     fdlog('todo - ALSO CHECK THERE ARE NO USERS IN DB? - dsManager.initialEnvironment ' + JSON.stringify(dsManager.initialEnvironment))
-    console.log('todo - ALSO CHECK THERE ARE NO USERS IN DB? - dsManager.initialEnvironment ' + JSON.stringify(dsManager.initialEnvironment))
     req.freezrStatus = freezrStatus
     req.freezrInitialEnvCopy = JSON.parse(JSON.stringify(dsManager.initialEnvironment))
     const localManager = new DS_MANAGER()
@@ -148,7 +159,6 @@ const checkFirstSetUp = function (req, res, next) {
     localManager.getOrInitUserAppFS('fradmin', 'info.freezr.public', {}, (err, localAppFS) => {
       if (err) felog('server.js', 'Serious error in fs of localManager - this should not happen!!!', err)
       req.freezrAppFS = localAppFS
-      console.log('got fradmin')
       next()
     })
   }
@@ -183,7 +193,7 @@ const addSelfRegOptions = function (req, res, next) {
 }
 
 const redirectToIndex = function (req, res, next) {
-  res.redirect('/apps/' + req.params.app_name + '/index.html')
+  res.redirect(req.path + '/index.html')
 }
 const userAPIRights = function (req, res, next) {
   accessHandler.userAPIRights(req, res, dsManager, next)
@@ -316,11 +326,16 @@ const addAppUses = function (cookieSecrets) {
   app.get('/app_files/:app_name/public/static/:file', loggedInUserPage, servePublicAppFile) // since there is no user id, iser must be logged in
   // console.log todo review - why .use and not .get on below
   app.use('/app_files/:app_name/static/:file', loggedInUserPage, serveAppFile)
-  app.use('/app_files/:user_id/:app_name/:file', loggedInUserPage, serveAppFile)
+  app.use('/app_files/:user_id/:app_name/:file', loggedInOrValidatedUserPage, serveAppFile)
   app.use('/app_files/:app_name/:file', loggedInUserPage, serveAppFile)
   app.get('/apps/:user_id/:app_name/public/static/:file', publicUserPage, serveAppFile)
   app.get('/apps/:app_name/static/:file', loggedInUserPage, serveAppFile)
   app.get('/apps/:user_id/:app_name/static/:file', loggedInUserPage, serveAppFile)
+
+  // Outside user App
+  app.get('/oapp/:user_id/:app_name', redirectToIndex) // user_id is of the owner
+  app.get('/oapp/:user_id/:app_name/:page', validatedOutsideUserAppPage, getManifest, appHandler.generatePage)
+
 
   // public todo fdlog('to review')
   app.get('/pcard/:user_id/:requestor_app/:permission_name/:app_name/:collection_name/:data_object_id', publicUserPage, addPublicRecordsDB, addPublicUserFs, publicHandler.generatePublicPage)
@@ -697,7 +712,6 @@ async.waterfall([
   },
 
   function (cb) {
-    // console.log('got oacs - !!!!', { ret })
     fdlog('startup waterfall - set up part 8 - todo - redo visit logger ')
     cb(null)
   },

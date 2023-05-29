@@ -401,14 +401,20 @@ exports.addUserPermsAndRequesteeDB = function (req, res, dsManager, next) {
   // For changeNamedPermissions and shareRecords
 
   fdlog('perm handler addUserPermsAndRequesteeDB path ', req.path, 'body ', req.body, req.freezrTokenInfo)
-
+  
   let requesteeAppTable, owner
+  let getListOfItems = false
+  let mayNotNeedTableId = false
+  // todo - above ugly - better way to do this
+
   if (req.path.indexOf('permissions/change') > 0) {
     requesteeAppTable = req.body.change.table_id
     owner = req.session.logged_in_user_id
+    if (Array.isArray((requesteeAppTable))) getListOfItems = true
   } else if (req.path.indexOf('perms/share_records') > 0) {
     requesteeAppTable = req.body.table_id
     owner = req.freezrTokenInfo.owner_id
+    mayNotNeedTableId = true // May not need a table if it is a read_all for example
   } else if (req.path.indexOf('ceps/message/initiate') > 0) {
     requesteeAppTable = req.body.table_id
     owner = req.freezrTokenInfo.requestor_id
@@ -421,15 +427,20 @@ exports.addUserPermsAndRequesteeDB = function (req, res, dsManager, next) {
   }
 
   fdlog('addUserPermsAndRequesteeDB ', { requesteeAppTable, owner })
-  dsManager.getorInitDb({ app_table: requesteeAppTable, owner }, {}, function (err, freezrRequesteeDB) {
-    if (err) {
+  const oac = getListOfItems ? { app_tables: requesteeAppTable, owner } : { app_table: requesteeAppTable, owner }
+  dsManager.getorInitDbs(oac, {}, function (err, freezrRequesteeDB) {
+    if (!mayNotNeedTableId && err) {
       felog('addUserPermsAndRequesteeDB', 'Could not access main freezrRequesteeDB  - addUserPermsAndRequesteeDB', err)
       res.sendStatus(401)
-    } else if (!freezrRequesteeDB || !freezrRequesteeDB.read_by_id) {
-      console.error('Could not access requested db in addUserPermsAndRequesteeDB- err for ' + requesteeAppTable + ' and owner ' + owner)
+    } else if (!mayNotNeedTableId && (!freezrRequesteeDB || (!freezrRequesteeDB.read_by_id && !getListOfItems))) {
+      console.error('Could not access requested db in addUserPermsAndRequesteeDB- err for ' + requesteeAppTable.toString() + ' and owner ' + owner)
       res.sendStatus(401)
     } else {
-      req.freezrRequesteeDB = freezrRequesteeDB
+      if (getListOfItems) {
+        req.freezrRequesteeDBs = freezrRequesteeDB
+      } else {
+        req.freezrRequesteeDB = freezrRequesteeDB
+      }
 
       dsManager.getorInitDb({ app_table: 'info.freezr.account.permissions', owner }, {}, function (err, freezrUserPermsDB) {
         if (err) {

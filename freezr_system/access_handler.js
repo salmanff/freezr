@@ -88,6 +88,158 @@ exports.loggedInUserPage = function (req, res, dsManager, next) {
     })
   }
 }
+exports.validatedOutsideUserAppPage = function (req, res, dsManager, next) {
+  // todo - only works for others logged into the same app right noew
+  fdlog('loggedInUserPage dsManager.freezrIsSetup', dsManager.freezrIsSetup, 'user', req.session.logged_in_user_id)
+  
+  const deviceCode = req.session.device_code
+  const userId = req.session.logged_in_user_id
+  const appName = req.params.app_name
+  const owner = req.params.user_id
+  // onsole.log('validatedOutsideUserAppPage ', { owner, appName, userId, deviceCode })
+  if (!appName || !userId || !deviceCode) {
+    // onsole.log('NO DATA to get token - need to be creating ', { appName, userId})
+    validateLoggedInUserOutsideAppAccessAndAddAppFs(req, res, dsManager, next)
+  } else {
+    const tokendb = dsManager.getDB(APP_TOKEN_OAC)
+    tokendb.query({ owner_id: owner, requestor_id: userId, app_name: appName, user_device: deviceCode }, null, // 
+      (err, tokenInfo) => {
+      // getAppTokenParams(dsManager.getDB(APP_TOKEN_OAC), req, function (err, tokenInfo) {
+      // {userId, appName, loggedIn}
+        fdlog('validatedOutsideUserAppPage tokenInfo for ' + req.url, { tokenInfo })
+        fdlog('validatedOutsideUserAppPage req.header(Authorization)', req.header('Authorization'))
+        if (!err && tokenInfo.length > 0) {
+          fdlog('validatedOutsideUserAppPage got token info ', tokenInfo)
+          // check freezrTokenInfo for app_name owner_id requestor_id
+          req.freezrTokenInfo = recordWithOldestExpiry(tokenInfo)
+          addAppFs(req, res, dsManager, next)
+        } else {
+          if (req.session.logged_in_user_id) {
+            if (err && err.message === 'Token has expired.' && tokenInfo && tokenInfo.length > 0) {
+              req.freezrOldTokenInfo = tokenInfo[0]
+            }
+            validateLoggedInUserOutsideAppAccessAndAddAppFs(req, res, dsManager, next)
+          } else {
+            console.log('Cannot validate outside users yet - this is coming')
+          }
+        }
+      })
+  }
+}
+
+const validateLoggedInUserOutsideAppAccessAndAddAppFs = function (req, res, dsManager, next) {
+  const requestor = req.session.logged_in_user_id
+  const owner = req.params.user_id
+  const appToken = helpers.generateAppToken(requestor, req.params.app_name, req.session.deviceCode)
+
+  req.freezr_server_version = exports.version
+
+  async.waterfall([
+    // 1 make sure requestor has app installed
+    function (cb) {
+      dsManager.getorInitDb({ app_table: 'info.freezr.account.app_list', owner: req.session.logged_in_user_id }, {}, cb)
+    },
+    function (requestorAppDb, cb) {
+      requestorAppDb.query({ app_name: req.params.app_name }, {}, cb) // todonow -> add "outside app"
+    },
+    function (requestorApps, cb) {
+      // onsole.log({requestorApps })
+      // todo  - make sure it exists (other wise could be used as an attack vector??)
+      cb()
+    },
+
+
+    // 2 Make sure owner has granted permission
+    function (cb) {
+      dsManager.getUserPerms(owner, cb)
+    },
+    function (ownerPermsDB, cb) {
+      const dbQuery = {
+        requestor_app: req.params.app_name,
+        type: 'use_app',
+        granted: true,
+        grantees: requestor
+      }
+      ownerPermsDB.query(dbQuery, {}, cb)
+    },
+    function (grantedPerms, cb) {
+      if (grantedPerms.length === 0) {
+        cb(new Error('perm not granted'))
+      } else {
+        cb()
+      }
+    },
+
+    // 3 Generate App token
+    function (cb) {
+      dsManager.getorInitDb(APP_TOKEN_OAC, {}, cb)
+    },
+    function (tokendb, cb) {
+      const write = {
+        logged_in: null,
+        source_device: req.session.device_code,
+        requestor_id: requestor,
+        owner_id: owner,
+        app_name: req.params.app_name,
+        app_password: null,
+        app_token: appToken, // create token instead
+        expiry: (new Date().getTime() + EXPIRY_DEFAULT), // + 100000), // todonow - change back to default
+        user_device: req.session.device_code,
+        date_used: new Date().getTime() - 1000
+      }
+      tokendb.cache[write.app_token] = write
+      if (req.freezrOldTokenInfo) {
+        tokendb.update(req.freezrOldTokenInfo._id, write, { replaceAllFields: true }, cb)
+      } else {
+        tokendb.create(null, write, null, cb)
+      }
+    },
+    function (results, cb) {
+      // temp
+      req.freezrTokenInfo = {
+        app_name: req.params.app_name,
+        owner_id: owner,
+        app_token: appToken
+      }
+      cb()
+    }
+  ], function (err) {
+    if (err) {
+      res.redirect('/')
+    } else {
+      addAppFs(req, res, dsManager, next)
+    }
+  })
+}
+const addAppFs = function (req, res, dsManager, next) {
+  fdlog('addAppFs', req.freezrAttributes)
+  const owner = req.params.user_id
+
+  req.freezr_server_version = exports.version
+
+  async.waterfall([
+    // Get  AppFS to pass on to next()
+    function (cb) {
+      dsManager.getOrSetUserDS(owner, cb)
+    },
+    function (userDS, cb) {
+      userDS.getorInitAppFS(req.params.app_name, {}, cb)
+    },
+    function (appFS, cb) {
+      req.freezrAppFS = appFS
+      cb()
+    }
+
+  ], function (err) {
+    if (err) {
+      res.redirect('/')
+    } else {
+      next()
+    }
+  })
+}
+
+
 exports.loggedInOrNotForSetUp = function (req, res, dsManager, next) {
   // used for self registration
   // app.get('/admin/selfregister', loggedInOrNotForSetUp, publicUserPage, adminHandler.generate_UserSelfRegistrationPage)
@@ -439,12 +591,14 @@ exports.userAPIRights = function (req, res, dsManager, next) {
   // onsole.log("userDataAccessRights sess "+(req.session?"Y":"N")+"  loggin in? "+req.session.logged_in_user_id+" param id"+req.params.userid);
   if (dsManager.freezrIsSetup && req.session && req.header('Authorization')) {
     // visitLogger.record(req, freezr_environment, freezr_prefs, {source:'userDataAccessRights'});
+    fdlog('userPAI rights appToken', getAppTokenFromHeader(req))
     getAppTokenParams(dsManager.getDB(APP_TOKEN_OAC), req, function (err, tokenInfo) {
       // {userId, appName, loggedIn}
       fdlog('userAPIRights tokenInfo for ' + req.url, { tokenInfo })
       fdlog('userAPIRights req.header(Authorization)', req.header('Authorization'))
       if (err) {
         if (err.message === 'Token has expired.') {
+          fdlog('expired token in userAPI rights ', tokenInfo)
           helpers.send_failure(res, err, 'access_handler', exports.version, 'userAPIRights')
         } else {
           felog(' userAPIRights', 'err in getAppTokenParams', err)
@@ -555,7 +709,8 @@ const getAppTokenParams = function (tokendb, req, callback) {
   const appToken = getAppTokenFromHeader(req)
   getTokenFromCacheOrDb(tokendb, appToken, (err, results) => {
     fdlog('getAppTokenParams - got cahced token getTokenFromCacheOrDb ', results)
-    const record = (results && results.length > 0) ? results[0] : null
+    // const record = (results && results.length > 0) ? results[0] : null
+    const record = recordWithOldestExpiry(results)
     if (err) {
       callback(err)
     } else if (results.length === 0 || !record) {
@@ -571,7 +726,8 @@ const getAppTokenParams = function (tokendb, req, callback) {
       callback(helpers.error('mismatch', 'one_device checked but device does not match (check_app_token_and_params) '))
     } else if (!record.expiry || record.expiry < new Date().getTime()) {
       console.warn('token expied ', { appToken })
-      callback(helpers.error('expired', 'Token has expired.'))
+      const tokenInfo = { owner_id: record.owner_id, requestor_id: record.requestor_id, app_name: record.app_name, logged_in: record.logged_in }
+      callback(helpers.error('expired', 'Token has expired.'), tokenInfo)
     } else {
       const tokenInfo = { owner_id: record.owner_id, requestor_id: record.requestor_id, app_name: record.app_name, logged_in: record.logged_in }
       // onsole.log("checking device codes ..", req.session.device_code, the_user, req.params.requestor_app)
@@ -579,6 +735,20 @@ const getAppTokenParams = function (tokendb, req, callback) {
     }
   })
 }
+const recordWithOldestExpiry = function (records) {
+  if (!records || records.length === 0) {
+    fdlog('no records - sending null')
+    return null
+  }
+  let newest = records[0]
+  records.forEach(record => {
+    if (record.expiry > newest.expiry) {
+      newest = record
+    }
+  })
+  return newest
+}
+
 const getTokenFromCacheOrDb = function (tokendb, appToken, callback) {
   const nowTime = new Date().getTime()
   if (!appToken) {

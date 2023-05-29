@@ -480,6 +480,7 @@ exports.list_all_user_apps = function (req, res) {
           return {
             app_name: app.app_name,
             removed: app.removed,
+            served_url: app.served_url,
             _date_modified: app._date_modified,
             _id: app._id,
             app_display_name:
@@ -490,7 +491,14 @@ exports.list_all_user_apps = function (req, res) {
         })
         for (let i = 0; i < results.length; i++) {
           if (results[i].app_name && results[i].app_name === results[i].app_display_name) { results[i].app_display_name = results[i].app_display_name.replace(/\./g, '. ') }
-          results[i].logo = '/app_files/' + results[i].app_name + '/static/logo.png'
+          const appOwnerAndNameForLogo = function (url) {
+            if (!url) return null
+            const parts = url.split('/')
+            const idx = parts.indexOf('oapp')
+            if (idx < 0 || parts.length < idx + 3) return null
+            return parts[idx + 1] + '/' + parts[idx + 2]
+          }
+          results[i].logo = '/app_files/' + (appOwnerAndNameForLogo(results[i].served_url) || results[i].app_name) + '/static/logo.png'
           if (results[i].removed) {
             removedApps.push(results[i])
           } else {
@@ -510,7 +518,7 @@ exports.list_all_user_apps = function (req, res) {
         helpers.send_failure(res, err, 'account_handler', exports.version, 'list_all_user_apps')
       }
     } else {
-      // onsole.log(" results",{removedApps:removedApps, user_apps:userApps})
+      // onsole.log(" results",{ removedApps, userApps })
       if (req.freezrInternalCallFwd) {
         req.freezrInternalCallFwd(null, { removed_apps: removedApps, user_apps: userApps })
       } else {
@@ -623,10 +631,23 @@ exports.install_blank_app = function (req, res) {
   // from access_handler and perm_handler
   fdlog('install_blank_app ')
   const appName = req.body.app_name
+  const servedUrl = req.body.served_url
+  const appDisplayName = req.body.app_display_name
+  if (servedUrl && !appName) {
+    // console.log('todo should be able to get appname from app url - Also could get manifest and logo')
+  }
   const manifest = {
     identifier: appName,
-    display_name: appName,
+    served_url: servedUrl,
+    display_name: appDisplayName || appName,
     version: 0
+  }
+  const validUrl = function (appUrl) {
+    if (!appUrl) return false
+    if (appUrl.length < 1) return false
+    if (!helpers.starts_with_one_of(servedUrl, ['/', 'https://', 'http://'])) return false
+    if (appUrl.indexOf('/oapp/') < -1) return false
+    return true
   }
   const flags = new Flags({ app_name: appName, didwhat: 'installed' })
 
@@ -639,6 +660,8 @@ exports.install_blank_app = function (req, res) {
         cb(helpers.invalid_data('app name missing - that is the name of the app zip file name before any spaces.', 'account_handler', exports.version, 'install_blank_app'))
       } else if (helpers.system_apps.indexOf(appName) > -1 || !helpers.valid_app_name(appName)) {
         cb(helpers.invalid_data('app name not allowed: ' + appName, 'account_handler', exports.version, 'install_blank_app'))
+      } else if (servedUrl && !validUrl(servedUrl)) {
+        cb(helpers.invalid_data('url invalid: ' + servedUrl, 'account_handler', exports.version, 'install_blank_app'))
       } else {
         req.freezrUserAppListDB.read_by_id(appName, cb)
       }
@@ -1213,7 +1236,7 @@ function groupPermissions (returnPermissions, appName) {
         groupedPermissions.thisAppToThisApp.push(aPerm)
       } else if (['upload_pages'].indexOf(aPerm.type) > -1 && aPerm.requestor_app === appName) {
         groupedPermissions.thisAppToThisApp.push(aPerm)
-      } else if (['share_records', 'read_all', 'message_records', 'write_own', 'write_all', 'db_query'].indexOf(aPerm.type) > -1 && aPerm.requestor_app !== appName && helpers.startsWith(aPerm.table_id, appName)) {
+      } else if (['share_records', 'read_all', 'message_records', 'write_own', 'write_all', 'db_query', 'use_app'].indexOf(aPerm.type) > -1 && aPerm.requestor_app !== appName && helpers.startsWith(aPerm.table_id, appName)) {
         groupedPermissions.otherAppsToThisApp.push(aPerm)
       } else if (['share_records', 'read_all', 'write_all', 'message_records', 'write_own', 'db_query'].indexOf(aPerm.type) > -1 && aPerm.requestor_app === appName && !helpers.startsWith(aPerm.table_id, appName)) {
         groupedPermissions.thisAppToOtherApps.push(aPerm)
@@ -1281,6 +1304,8 @@ exports.generatePermissionHTML = function (req, res) {
               sentence += accessWord + ' read all the records, and write / edit new records in the table: ' + "<b style='color:purple;'>" + aPerm.table_id + '</b>,' + '.<br/>'
             } else if (aPerm.type === 'upload_pages') {
               sentence += accessWord + ' individual files with the public.<br/>'
+            } else if (aPerm.type === 'use_app') {
+              sentence += ' allow other people to access the app itself.<br/>'
             } else if (aPerm.type === 'db_query') {
               sentence += accessWord + 'query the table: ' + "<b style='color:purple;'>" + aPerm.table_id + '</b>,' + '.<br/>'
             }
@@ -1356,27 +1381,32 @@ exports.changeNamedPermissions = function (req, res) {
             // Get all records with grantee permissions and remove the permission
             async.forEach(oldGrantees, function (grantee, cb2) {
               // console.log('THIS NEEDS TO BE UPDATED!!!??? 2021')
+              if (req.freezrRequesteeDB) req.freezrRequesteeDBs = [req.freezrRequesteeDB]
               const thequery = {}
               thequery['_accessible.' + grantee + '.' + fullPermName + '.granted'] = true
-              req.freezrRequesteeDB.query(thequery, {}, function (err, recs) {
-                if (err) felog('changeNamedPermissions', 'ERR in freezrRequesteeDB query ', thequery, ' err: ', err)
-                fdlog('todo - also need to update freezrPublicPermDB if there are no more public permissions')
-                async.forEach(recs, function (rec, cb3) {
-                  const accessible = rec._accessible
-                  const publicid = (accessible[grantee] && accessible[grantee][fullPermName] && accessible[grantee][fullPermName].publicid) ? accessible[grantee][fullPermName].publicid : null
-                  if (accessible[grantee] && accessible[grantee][fullPermName]) delete accessible[grantee][fullPermName]
-                  if (helpers.isEmpty(accessible[grantee])) delete accessible[grantee]
-                  req.freezrRequesteeDB.update(rec._id, { accessible }, { replaceAllFields: false }, function (err) {
-                    if (err) felog('changeNamedPermissions', 'ERR in freezrRequesteeDB update ', rec._id, 'err: ', err)
-                    if (grantee !== '_public') {
-                      cb3(err)
-                    } else {
-                      // accessiblesQuery = {permissionName: permQuery.name, table_id: permQuery.table_id, requestor_app:permQuery.requestor_app, dataOwner:req.session.logged_in_user_id,  originalRecordId:}
-                      req.freezrPublicRecordsDB.delete_record(publicid, cb3)
-                    }
-                  })
-                }, cb2)
-              })
+
+              async.forEach(req.freezrRequesteeDBs, function (freezrRequesteeDB, cb3) {
+                freezrRequesteeDB.query(thequery, {}, function (err, recs) {
+                  if (err) felog('changeNamedPermissions', 'ERR in freezrRequesteeDB query ', thequery, ' err: ', err)
+                  fdlog('todo - also need to update freezrPublicPermDB if there are no more public permissions')
+                  async.forEach(recs, function (rec, cb4) {
+                    const accessible = rec._accessible
+                    const publicid = (accessible[grantee] && accessible[grantee][fullPermName] && accessible[grantee][fullPermName].publicid) ? accessible[grantee][fullPermName].publicid : null
+                    if (accessible[grantee] && accessible[grantee][fullPermName]) delete accessible[grantee][fullPermName]
+                    if (helpers.isEmpty(accessible[grantee])) delete accessible[grantee]
+                    freezrRequesteeDB.update(rec._id, { accessible }, { replaceAllFields: false }, function (err) {
+                      if (err) felog('changeNamedPermissions', 'ERR in freezrRequesteeDB update ', rec._id, 'err: ', err)
+                      if (grantee !== '_public') {
+                        cb4(err)
+                      } else {
+                        // accessiblesQuery = {permissionName: permQuery.name, table_id: permQuery.table_id, requestor_app:permQuery.requestor_app, dataOwner:req.session.logged_in_user_id,  originalRecordId:}
+                        req.freezrPublicRecordsDB.delete_record(publicid, cb4)
+                      }
+                    })
+                  }, cb3)
+                })
+              },
+              cb2)
             }, function (err) {
               if (err) felog('changeNamedPermissions', 'if error, the perm update should be added to a clean up list')
               if (err) {
@@ -1437,9 +1467,11 @@ exports.changeNamedPermissions = function (req, res) {
 }
 
 const permissionObjectFromManifestParams = function (requestorApp, manifestPerm) {
+  const ALLOWED_PERMISSION_TYPES = ['upload_pages', 'share_records', 'read_all', 'message_records', 'write_own', 'write_all', 'db_query', 'use_app']
   const PERMISSION_FIELD_TYPES = {
     requestor_app: 'string',
-    table_id: 'string',
+    table_id: 'string', // but can also store an array, if table_ids is declared
+    table_ids: 'array',
     type: 'string',
     name: 'string',
     description: 'string',
@@ -1460,9 +1492,14 @@ const permissionObjectFromManifestParams = function (requestorApp, manifestPerm)
     felog('permissionObjectFromManifestParams', 'cannot make permission without a name ', { requestorApp, name })
     err = 'Cannot make permission without a name.'
   }
-  if (!err && (!manifestPerm.type || (!manifestPerm.table_id && manifestPerm.type !== 'upload_pages'))) {
+  const DONT_NEED_TABLES = ['use_app', 'upload_pages']
+  if (!manifestPerm.table_id && !manifestPerm.table_ids && !DONT_NEED_TABLES.includes(manifestPerm.type)) {
     felog('permissionObjectFromManifestParams', 'cannot make permission without a table ', { manifestPerm, requestorApp, name })
     err = (err ? ' And ' : name + ': ') + 'Cannot make permission without a table_id or type. '
+  }
+  if (!manifestPerm.type || ALLOWED_PERMISSION_TYPES.indexOf(manifestPerm.type) < 0) {
+    felog('permissionObjectFromManifestParams', 'permission type is not allowed', { manifestPerm, requestorApp, name })
+    err = (err ? ' And ' : name + ': ') + 'Permission type ' + manifestPerm.type + ' is not valid.'
   }
 
   if (!err) {
@@ -1477,6 +1514,7 @@ const permissionObjectFromManifestParams = function (requestorApp, manifestPerm)
             returnpermission[key] = []
           } else if (Array.isArray(manifestPerm[key])) {
             returnpermission[key] = [...manifestPerm[key]]
+            // todo - all data within array must be strings
           } else {
             err += key + ' '
           }
@@ -1501,6 +1539,10 @@ const permissionObjectFromManifestParams = function (requestorApp, manifestPerm)
     } else {
       returnpermission.name = name
       returnpermission.requestor_app = requestorApp
+      if (returnpermission.table_ids && !returnpermission.table_id) {
+        returnpermission.table_id = returnpermission.table_ids
+      }
+      delete returnpermission.table_ids
     }
   }
 
@@ -1626,7 +1668,7 @@ const createOrUpdateUserAppList = function (userAppListDb, manifest, env, callba
         if (env || appEntity.env) appEntity.env = env
         userAppListDb.update(appName, appEntity, { replaceAllFields: true }, cb)
       } else {
-        appEntity = { app_name: appName, app_display_name: appDisplayName, manifest, env, removed: false }
+        appEntity = { app_name: appName, app_display_name: appDisplayName, served_url: manifest.served_url, manifest, env, removed: false }
         userAppListDb.create(appName, appEntity, null, cb)
       }
     }
@@ -1764,7 +1806,7 @@ exports.CEPSValidator = function (req, res) {
         } else if (!req.query.data_owner_host && req.query.data_owner_user === 'public') {
           // exception for 'public'
           cb(null)
-        } else if (req.freezrUserPrefs.blockMsgsFromNonContacts) {
+        } else if (req.freezrUserPrefs && req.freezrUserPrefs.blockMsgsFromNonContacts) {
           felog('no contacts - invalid request - c')
           // onsole.log('invalid request - c ', req.query.data_owner_host, req.query.requestor_host, req.query.data_owner_user)
           cb(helpers.error('invalid request - c'))

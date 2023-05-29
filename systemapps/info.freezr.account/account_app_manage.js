@@ -179,12 +179,18 @@ const buttons = {
   addBlankApp: function () {
     userHasIntiatedAcions = true
     const appName = document.getElementById('appNameForBlankApp').innerText
+    const servedUrl = document.getElementById('appUrlForBlankApp').innerText || null
+    const displayName = document.getElementById('appDisplayNameForBlankApp').innerText || null
+    console.log({ appName, servedUrl, displayName })
+    // later grab logo and manifest to populate...
 
-    if (!validAppName(appName)) {
+    if (!validAppName(appName) && !servedUrl) {
       showError('Invalid app name - please correct the app name')
+    } else if (!validAppName(appName) && servedUrl && !validUrl(servedUrl)) {
+      showError('Invalid app url - please correct the app url or leave blank if not needed')
     } else {
       freezerRestricted.menu.resetDialogueBox(true)
-      freezerRestricted.connect.ask('/v1/account/app_install_blank', { app_name: appName }, function (error, returndata) {
+      freezerRestricted.connect.ask('/v1/account/app_install_blank', { app_name: appName, served_url: servedUrl, app_display_name: displayName }, function (error, returndata) {
         // onsole.log(returndata)
         returndata.isBlankOfflineApp = true
         if (error || (returndata && returndata.err)) {
@@ -427,6 +433,13 @@ const writeErrorsToFreezrDialogue = function (data) {
   if (data.err) el.innerHTML += '<br/>(' + JSON.stringify(data.err) + ')'
 }
 
+const validUrl = function (appName) {
+  if (!appName) return false
+  if (appName.length < 1) return false
+  if (!startsWithOneOf(appName, ['/', 'https://', 'http://'])) return false
+  if (appName.indexOf('/oapp/') < -1) return false
+  return true
+}
 const validAppName = function (appName) {
   if (!appName) return false
   if (appName.length < 1) return false

@@ -25,7 +25,7 @@ const appHeaderFor = async function (manifest) { // Logo and name / description 
 
   return dg.div( // grid with..
     {
-      style: { display: 'grid', 'grid-template-columns': (LOGO_SIZE + 'px 2fr'), cursor: 'pointer' },
+      style: { display: 'grid', 'grid-template-columns': (LOGO_SIZE + 'px 1fr 1fr'), cursor: 'pointer' },
       onclick: function () { window.location = ('/apps/' + manifest.identifier)}
     },
 
@@ -59,7 +59,9 @@ const appHeaderFor = async function (manifest) { // Logo and name / description 
         : null
       ),
       dg.br()
-    )
+    ),
+
+    dg.div({ className: 'freezer_butt', style: { 'text-align': 'left' } }, 'Launch App')
   )
 }
 

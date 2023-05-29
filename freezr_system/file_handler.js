@@ -80,7 +80,7 @@ exports.load_page_html = function (req, res, opt) {
 
       let cssFiles = ''
       let thePath
-      const userId = (helpers.is_system_app(opt.app_name)) ? null : opt.user_id
+      const userId = (helpers.is_system_app(opt.app_name)) ? null : opt.owner_id
       if (opt.css_files) {
         if (typeof opt.css_files === 'string') opt.css_files = [opt.css_files]
         opt.css_files.forEach(function (aFile) {
@@ -88,7 +88,7 @@ exports.load_page_html = function (req, res, opt) {
           if (exports.fileExt(thePath) === 'css') {
             cssFiles = cssFiles + ' <link rel="stylesheet" href="' + thePath + '" type="text/css" />'
           } else {
-            felog('load_page_skeleton', 'ERROR - NON CSS FILE BEING USED FOR CSS for:' + opt.user_id + ' app:' + opt.app_name + ' page: ' + opt.page_url)
+            felog('load_page_skeleton', 'ERROR - NON CSS FILE BEING USED FOR CSS for:' + opt.owner_id + ' app:' + opt.app_name + ' page: ' + opt.page_url)
           }
         })
       }
@@ -97,7 +97,7 @@ exports.load_page_html = function (req, res, opt) {
           if (exports.fileExt(aFilePath) === 'css') {
             cssFiles = cssFiles + ' <link rel="stylesheet" href="' + aFilePath + '" type="text/css" />'
           } else {
-            felog('load_page_skeleton', 'ERROR - NON CSS FILE BEING USED FOR CSS for: ' + aFilePath + ' at ' + opt.user_id + ' app:' + opt.app_name + ' page: ' + opt.page_url)
+            felog('load_page_skeleton', 'ERROR - NON CSS FILE BEING USED FOR CSS for: ' + aFilePath + ' at ' + opt.owner_id + ' app:' + opt.app_name + ' page: ' + opt.page_url)
           }
         })
       }

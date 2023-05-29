@@ -43,7 +43,7 @@ freezr Account Home
             {{#user_apps}}
             <div class="freezrBox" {{#offThreadWip}} style="border-color:palevioletred" {{/offThreadWip}}>
                 <div class="fBoxImgOuter">
-                <a class="fBoxA" href="/apps/{{app_name}}">
+                <a class="fBoxA" href="{{#served_url}}{{served_url}}{{/served_url}}{{^served_url}}/apps/{{app_name}}{{/served_url}}">
                     <img src="{{logo}}" width="80px" class="fBoxImg" id="goto_2_{{app_name}}">
                 </a>
                 </div>
@@ -72,7 +72,7 @@ freezr Account Home
                 <button class="tablinks" id ="button_tabs_featured">Featured</button>
                 <button class="tablinks" id ="button_tabs_upload" >Upload</button>
                 <button class="tablinks" id ="button_tabs_download">Download</button>
-                <button class="tablinks" id ="button_tabs_blank">Authorise</button>
+                <button class="tablinks" id ="button_tabs_blank">Served Apps</button>
                 <button class="tablinks" style="display:none" id ="button_tabs_dev">Dev</button>
             </div>
     
@@ -134,14 +134,20 @@ freezr Account Home
             </div>
     
             <div id="tab_blank" class="tabcontent">
-                <h3>Authorise an offline app (outside of this server)</h3>
-                <p>This is used for apps that just want to store your data on your freezr via CEPS (without installing an app on your server).</p>
+                <h3>Run an app that is served from another server ot account.</h3>
+                <p>This is used for apps running on other servers, where you can authenticate yourself, and / or allow them to store your data on this freezr.</p>
                 <div id="addBlankApp">
-                    <span class="texttop">app Name:</span>
+                    <span class="texttop" style="width: 100px; display: inline-block;">app url:</span>
+                    <div id="appUrlForBlankApp" class="input" contenteditable="true"></div>
+                    <br>
+                    <span class="texttop"  style="width: 100px; display: inline-block;">app name:</span>
                     <div id="appNameForBlankApp" class="input" contenteditable="true"></div>
                     <br>
+                    <span class="texttop"  style="width: 100px; display: inline-block;">Displayed as:</span>
+                    <div id="appDisplayNameForBlankApp" class="input" contenteditable="true"></div>
+                    <br>
                     <div class="fBoxGrid">
-                        <div id="button_addBlankApp" class="freezrButt">Add offline app</div>
+                        <div id="button_addBlankApp" class="freezrButt">Add Served App</div>
                     </div>
                 </tr>
                 </div>

@@ -68,6 +68,7 @@ const generatePageWithManifest = function (req, res, manifest) {
     script_files: [], // pageParams.script_files, //[],
     messages: { showOnStart: false },
     user_id: req.session.logged_in_user_id,
+    owner_id: req.freezrTokenInfo.owner_id || req.session.logged_in_user_id,
     user_is_admin: req.session.logged_in_as_admin,
     app_name: req.params.app_name,
     app_display_name: ((manifest && manifest.display_name) ? manifest.display_name : req.params.app_name),
@@ -80,7 +81,11 @@ const generatePageWithManifest = function (req, res, manifest) {
   if (!req.params.internal_query_token) {
     helpers.send_internal_err_page(res, 'app_handler', exports.version, 'generatePage', 'app_token missing in generatePageWithManifest')
   } else {
-    res.cookie('app_token_' + req.session.logged_in_user_id, req.params.internal_query_token, { path: '/apps/' + req.params.app_name })
+    let appPrefix = '/apps/'
+    const parts = req.originalUrl.split('/')
+    if (parts.length > 1 && parts[1] === 'oapp') appPrefix = '/oapp/' + req.freezrTokenInfo.owner_id + '/'
+    console.log('setting cookie at ' + appPrefix + req.params.app_name + ' for user ' + req.session.logged_in_user_id)
+    res.cookie('app_token_' + req.session.logged_in_user_id, req.params.internal_query_token, { path: appPrefix + req.params.app_name })
 
     // options.messages.showOnStart = (results.newCode && manifest && manifest.permissions && Object.keys(manifest.permissions).length > 0);
     if (pageParams.css_files) {
@@ -677,7 +682,7 @@ exports.shareRecords = function (req, res) {
     publicid: sets a publid id instead of the automated accessible_id (nb old was pid)
     pubDate: sets the publish date
     unlisted - for public items that dont need to be lsited separately in the public_records database
-    idOrQuery being query is NON-CEPS - ie query_criteria or object_id_list
+    idOrQuery being query is NON-CEPS - ie query_criteria or object_id_list - can be null for read_all, write_all
     fileStructure - for serving user uploaded web pages => json object with {js: [], css:[]}
   */
   fdlog('shareRecords, req.body: ', req.body)
@@ -713,6 +718,8 @@ exports.shareRecords = function (req, res) {
   let hasPrivateFeed = false
   let hasPrivateLink = false
   let codeOrName = null
+  const PERMS_WITH_ACCESS_TO_ALL_RECORDS = ['read_all', 'write_all', 'write_own', 'app_access']
+  let permDoesntNeedTableId = false
 
   fdlog('shareRecords from ' + userId + 'for requestor app ' + requestorApp + ' query:' + JSON.stringify(recordQuery) + ' action' + JSON.stringify(req.body.grant) + ' perm: ' + req.body.name + ' action ' + req.params.action + ' req.freezrUserPrefs ' + req.freezrUserPrefs)
   function appErr (message) {
@@ -722,9 +729,7 @@ exports.shareRecords = function (req, res) {
   async.waterfall([
     // 0 make basic checks and get the perm
     function (cb) {
-      if (!recordQuery) {
-        cb(appErr('Missing query to set access'))
-      } else if (req.body.publicid && (typeof req.body.record_id !== 'string' || (!req.session.logged_in_as_admin && !helpers.startsWith(req.body.publicid, ('@' + req.session.logged_in_user_id + '/'))))) { // implies: req.body.grantees.includes('_public') or 'privtefeed or privatelink'
+      if (req.body.publicid && (typeof req.body.record_id !== 'string' || (!req.session.logged_in_as_admin && !helpers.startsWith(req.body.publicid, ('@' + req.session.logged_in_user_id + '/'))))) { // implies: req.body.grantees.includes('_public') or 'privtefeed or privatelink'
         if (typeof req.body.record_id !== 'string') {
           cb(appErr('input error - cannot assign a public id to more than one entity - please include one record if under record_id'))
         } else {
@@ -735,8 +740,8 @@ exports.shareRecords = function (req, res) {
         cb(appErr('input error - cannot assign a file structure to more than one entity, and it has to be made public, and end with html'))
       } else if (!req.body.name) {
         cb(appErr('error - need permission name to set access'))
-      } else if (!req.body.table_id) {
-        cb(appErr('error - need requested table_id to work on permission'))
+      // } else if (!req.body.table_id) {
+      //   cb(appErr('error - need requested table_id to work on permission'))
       } else if (!req.body.grantees || req.body.grantees.length < 1) {
         cb(appErr('error - need people or gorups to grant permissions to.'))
       } else if (!requestorApp) {
@@ -751,17 +756,25 @@ exports.shareRecords = function (req, res) {
         cb(helpers.error('PermissionMissing', 'permission with name ' + req.body.name + ' and app ' + requestorApp + 'does not exist - try re-installing app'))
       } else if (!results[0].granted) {
         cb(helpers.error('PermissionNotGranted', 'permission not granted yet'))
-      } else if (results[0].table_id !== req.body.table_id) {
+      } else if (req.body.table_id && results[0].table_id !== req.body.table_id) {
         fdlog('results', results[0], 'req.body', req.body)
         console.warn('results[0].table_id ', results[0].table_id, 'req.body.table_id', req.body.table_id)
         cb(helpers.error('TableMissing', 'The table being granted permission to does not correspond to the permission '))
+      } else if (!req.body.table_id && PERMS_WITH_ACCESS_TO_ALL_RECORDS.indexOf(results[0].type) < 0 && results[0].type !== 'use_app') {
+        cb(appErr('error - need requested table_id to work on permission'))
       } else {
         if (results.length > 1) felog('two permissions found where one was expected ' + JSON.stringify(results))
         grantedPermission = results[0]
+        permDoesntNeedTableId = PERMS_WITH_ACCESS_TO_ALL_RECORDS.indexOf(grantedPermission.type) >= 0 || grantedPermission.type === 'use_app'
+
         // fdlog({ grantedPermission })
-        if ((grantedPermission.type === 'share_records' || grantedPermission.type === 'message_records') && grantedPermission.table_id === req.freezrRequesteeDB.oac.app_table && !req.body.fileStructure && !isHtmlMainPage) {
+        if (!recordQuery && !permDoesntNeedTableId) {
+          cb(appErr('Missing query to set access'))
+        } else if ((grantedPermission.type === 'share_records' || grantedPermission.type === 'message_records') && grantedPermission.table_id === req.freezrRequesteeDB.oac.app_table && !req.body.fileStructure && !isHtmlMainPage) {
           cb(null)
         } else if (grantedPermission.type === 'upload_pages' && req.freezrRequesteeDB.oac.app_table.split('.').pop() === 'files') {
+          cb(null)
+        } else if (permDoesntNeedTableId) {
           cb(null)
         } else {
           felog('check error ', { grantedPermission }, 'oac: ', req.freezrRequesteeDB.oac)
@@ -854,10 +867,16 @@ exports.shareRecords = function (req, res) {
     // get the records and add the grantees in _accessible (or remove them)
     function (cb) {
       // onsole.log(recordQuery)
-      req.freezrRequesteeDB.query(recordQuery, null, cb)
+      if (permDoesntNeedTableId) {
+        cb(null, null)
+      } else {
+        req.freezrRequesteeDB.query(recordQuery, null, cb)
+      }
     },
     function (records, cb) {
-      if (!records || records.length === 0) {
+      if (permDoesntNeedTableId) {
+        cb(null)
+      } else if (!records || records.length === 0) {
         cb(new Error('no records found to add or remove'))
       } else {
         recordsToChange = records
@@ -1163,9 +1182,11 @@ const checkReadPermission = function (req, forcePermName) {
       if (!forcePermName || perm.name === forcePermName) {
         granted = true
         relevantAndGrantedPerms.push(perm)
+        readAll = readAll || ['write_all', 'read_all'].includes(perm.type)
       }
     }
-    readAll = readAll || ['write_all', 'read_all'].includes(perm.type)
+    // moved up 2023-05
+    // readAll = readAll || ['write_all', 'read_all'].includes(perm.type)
   })
   return [granted, readAll, relevantAndGrantedPerms]
 }

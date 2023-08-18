@@ -2,12 +2,14 @@
 // freezr.info - nodejs system files - logger.js
 
 /* TO DO
-  // THIS NEEDS TO BE REDONE COMPLETELY
-
-	//  reloadDb at the beginning
-
-	// get rid of "throw errors"...
-
+  - keep list and record to db every once in a while -> eg dg authFailures type: login (or token)
+    - keep a whitelist based on an 'app' that user can upload defining a function -> only for main admin user
+  - show current and historics in an admin page... and unlock logins ... and use client side APIs
+  - keep track of fake tokens
+  - keep track of live tokens -> 
+    - keep track of loggedin visitors and validatedguests
+  - keep track of non logged in visitors to ppages
+    - 
 */
 
 var helpers = require('./helpers.js'),
@@ -16,6 +18,129 @@ var helpers = require('./helpers.js'),
     file_handler = require('./file_handler.js');
 
 exports.version = '0.0.122'
+
+const MAX_LOGIN_ATTEMPTS_BEFORE_FREEZE = 100
+const MAX_LOGINS_BEFORE_SAVE = 1000
+const MAX_LOGIN_ATTEMPTS_PER_IP_ADDRESS = 3
+const FREEZE_ATTEMPT_WINDOW = 1000 * 60 * 60 // 60 minutes
+const TIME_TO_UNFREEZE = 1000 * 60 * 60 // 60 minutes
+const MAX_TIME_BEFORE_SAVE = 1000 * 60 * 60 * 24 // 1 day
+const LOG_AOC = {
+  app_name:'info.freezr.admin',
+  collection_name:"visit_logs",
+  owner:'fradmin'
+}
+
+
+exports.tooManyLogInAttempts = function (visitLogs, req) {
+  if (!visitLogs.failedAttemptTimerStart) visitLogs.failedAttemptTimerStart = new Date().getTime()
+	if (!visitLogs.fails) visitLogs.fails = {}
+	if (!visitLogs.fails.list) visitLogs.fails.list = []
+	if (!visitLogs.fails.savedList) visitLogs.fails.savedList = []
+  
+  // unfreeze if TIME_TO_UNFREEZE has passed
+  if (visitLogs.fails.wasFrozen && (visitLogs.fails.wasFrozen + TIME_TO_UNFREEZE < new Date().getTime()))  visitLogs.fails.wasFrozen = null
+
+  const visitorIp = getClientAddress(req)
+
+  console.log('tooManyLogInAttempts visitlog length is now ', visitLogs.fails, ' list len ', visitLogs.fails.list.length)
+  console.log('tooManyLogInAttempts last  item  ', visitLogs.fails.list[visitLogs.fails.list.length - 1])
+
+  const fullList = visitLogs.fails.savedList.concat(visitLogs.fails.list)
+  if (visitLogs.fails.wasFrozen ) {
+    // todo add white listed IPs
+    return true
+  } else if (visitLogs.fails.list.length > 0) {
+    let ttlLen = 0
+    let ipLen = 0
+    for (let i = visitLogs.fails.list.length-1; i >= 0; i--) {
+      if (visitLogs.fails.list.date < new Date().getTime() - FREEZE_ATTEMPT_WINDOW) {
+        console.log('time has passed - break')
+        break
+      }
+      ttLen++
+      if (visitLogs.fails.list[i].ipaddress == visitorIp) ipLen++
+    }
+    if (ttlLen > MAX_LOGIN_ATTEMPTS_BEFORE_FREEZE) {
+      visitLogs.fails.wasFrozen = new Date().getTime()
+      return true
+    }
+    if (ipLen > MAX_LOGIN_ATTEMPTS_PER_IP_ADDRESS) return true
+    return false
+  } else {
+    return false
+  }
+}
+exports.addNewFailedLogin = function (dsManager, req, options) {
+  const visitLogs = dsManager.visitLogs
+	if (!visitLogs.fails) visitLogs.fails = {}
+	if (!visitLogs.fails.list) visitLogs.fails.list = []
+	visitLogs.fails.list.push(loginrecord(req, options))
+	console.log('added to list visitlog length is now ', visitLogs.fails.list.length, loginrecord(req))
+	// console.log('logtr from add new ', {visitLogs})
+  setTimeout(() => {
+    cleanUpVisitLoginFailures(dsManager)
+  }, 5);
+	return false
+}
+
+const cleanUpVisitLoginFailures = function (dsManager, options) {
+  // remove old samed ones if most recent is >
+  const fails = dsManager.visitLogs.fails
+  const now = new Date().getTime()
+  if (!options) options = { forceSave: false }
+  if (options.forceSave || fails.list.length > MAX_LOGINS_BEFORE_SAVE || (fails.list.length > 0 && fails.list[0].date + MAX_TIME_BEFORE_SAVE < now)) {
+    const itemToSave = {
+      date: now,
+      type: 'failedLogins',
+      list: fails.list
+    }
+    dsManager.getorInitDb(LOG_AOC, {}, function (err, logDb) {
+      if (err) {
+        console.error('error getting log_aoc to record logs')
+      } else {
+        logDb.create(null, itemToSave, null, function (err) {
+          if (err) {
+            console.error('error writing logs to log_aoc')
+          } else {
+            if (!fails.savedList) fails.savedList = []
+            fails.savedList = fails.savedList .concat(JSON.parse(JSON.stringify(fails.list)))
+            let cutFromItem = 0
+        
+            for (let i = fails.savedList.length-1; i >= 0; i--) {
+              if (fails.savedList[i].date + FREEZE_ATTEMPT_WINDOW <  now) {
+                sliceFromHere = i
+                break
+              }
+            }
+            if (sliceFromHere) fails.savedList = fails.savedList.slice(sliceFromHere)
+          }
+        })
+      }
+    })
+  }
+}
+
+const loginrecord = function(req, options) {
+  const rec = {
+    ipaddress: getClientAddress(req),
+    date: new Date().getTime(),
+    userId: req.body?.user_id
+  }
+  if (options && options.tooManyLogins) rec.source = 'toomany'
+  return rec
+}
+
+
+// OLD VISIT LOGGER
+/* TO DO
+  // THIS NEEDS TO BE REDONE COMPLETELY
+
+	//  reloadDb at the beginning
+
+	// get rid of "throw errors"...
+
+*/
 
 const MAX_NUM_DETAIL_REFS = 100;
 const MAX_NUM_FULL_LOGS_IN_FILE = 100;
@@ -33,7 +158,6 @@ const LOGGER_APC = {
   collection_name:"visit_log_daysum",
   owner:'fradmin'
 }
-
 
 exports.reloadDb = function (env_params, callback) {
 	// get the latest from db

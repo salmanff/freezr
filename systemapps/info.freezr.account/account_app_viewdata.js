@@ -120,6 +120,7 @@ const click = {
     dl.current_collection.retrievedAll = (gotData && gotData.length < VIEW_RETRIEVE_COUNT)
     if (!dl.current_collection.records) dl.current_collection.records = []
     dl.current_collection.records = dl.current_collection.records.concat(gotData)
+    if (!dl.current_collection.name) dl.current_collection.name = document.getElementById('collection_names').value // for when only one collection exists and refresh doesnt trigger
     const coll = dl.current_collection.name.slice(dl.meta.app_name.length + 1)
     dl.current_collection.collmanifest = dl.meta?.manifest?.app_tables ? dl.meta?.manifest?.app_tables[coll] : null
     // onsole.log({ dl })

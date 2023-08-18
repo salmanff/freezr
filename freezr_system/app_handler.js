@@ -84,7 +84,7 @@ const generatePageWithManifest = function (req, res, manifest) {
     let appPrefix = '/apps/'
     const parts = req.originalUrl.split('/')
     if (parts.length > 1 && parts[1] === 'oapp') appPrefix = '/oapp/' + req.freezrTokenInfo.owner_id + '/'
-    console.log('setting cookie at ' + appPrefix + req.params.app_name + ' for user ' + req.session.logged_in_user_id)
+    fdlog('setting cookie at ' + appPrefix + req.params.app_name + ' for user ' + req.session.logged_in_user_id)
     res.cookie('app_token_' + req.session.logged_in_user_id, req.params.internal_query_token, { path: appPrefix + req.params.app_name })
 
     // options.messages.showOnStart = (results.newCode && manifest && manifest.permissions && Object.keys(manifest.permissions).length > 0);

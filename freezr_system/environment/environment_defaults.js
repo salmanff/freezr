@@ -376,15 +376,14 @@ exports.checkDB = function (env, options, callback) {
             felog('checkDB', 'got err in checkDB - testDb 1 ', err2)
             callback(null, { checkpassed: false, resource: 'DB' })
           } else if (savedData) {
-            fdlog({ tempTestManager })
             testDB.update('test_write_id', { foo: 'updated bar' }, { replaceAllFields: false }, (err2, results) => {
               if (err2) felog('checkDB', 'got err in checkDB - testDb 2 ', err2)
-              callback(null, { checkpassed: (!err2), resource: 'DB' })
+              callback(err2, { checkpassed: (!err2), resource: 'DB' })
             })
           } else {
             testDB.create('test_write_id', { foo: 'bar' }, null, (err3, results) => {
-              if (err) felog('checkDB', 'got err in checkDB - testDb 3 ', err3)
-              callback(null, { checkpassed: (!err2), resource: 'DB' })
+              if (err3) felog('checkDB', 'got err in checkDB - testDb 3 ', err3)
+              callback(err3, { checkpassed: (!err2), resource: 'DB' })
             })
           }
         })
@@ -535,7 +534,6 @@ exports.tryGettingEnvFromautoConfig = function (callback) {
 
     // Get params from the db
     function (cb) {
-      // onsole.log('r.envOnFile ', r.envOnFile)
       const fsParams = (r.envOnFile && r.envOnFile.fsParams) ? r.envOnFile.fsParams : r.autoConfig.fsParams
       const dbParams = (r.envOnFile && r.envOnFile.dbParams) ? r.envOnFile.dbParams : r.autoConfig.dbParams
       fdlog('using autoconfig dbparmams is', dbParams)

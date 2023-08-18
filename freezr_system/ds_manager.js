@@ -22,6 +22,7 @@ const ENV_FILE_DIR = path.normalize(ROOT_DIR + 'node_modules' + pathSep + 'nedb-
 function DATA_STORE_MANAGER () {
   this.freezrIsSetup = false
   this.users = {} // each a USER_DS
+  this.visitLogs = {}
 }
 function USER_DS (owner, env) {
   const self = this
@@ -431,6 +432,7 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
   ds.db = new DB_CREATOR({ dbParams, fsParams, extraCreds }, OAC)
 
   ds.db.initDB(function (err) {
+    fdlog(' in ds manager - intied db ')
     if (err) {
       felog('initDB Err ', ds.owner, err)
       callback(err)

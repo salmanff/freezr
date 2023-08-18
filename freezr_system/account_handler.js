@@ -16,7 +16,7 @@ const fileHandler = require('./file_handler.js')
 require('./flags_obj.js')
 
 exports.generate_login_page = function (req, res) {
-  // app.get('/login', publicUserPage, accountHandler.generate_login_page)
+  // app.get('/login', publicUserPage, accountHandler.generate_login_page) .. no longer used
   // app.get('/account/login', publicUserPage, accountHandler.generate_login_page)
   fdlog('login_page ' + JSON.stringify(req.url))
   if (req.session && req.session.logged_in_user_id && req.url === '/account/login') { // last term relevant only if freezr preferences file has been deleted

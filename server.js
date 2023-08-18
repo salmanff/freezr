@@ -1,7 +1,6 @@
 // freezr.info - nodejs system files - main file: server.js
 const VERSION = '0.0.211'
 
-// todo: const visitLogger = require('./freezr_system/visit_logger.js')
 
 // testing that files do not have errors
 // console.log('dirname ' + __dirname)
@@ -28,6 +27,8 @@ const appHandler = require('./freezr_system/app_handler.js')
 const permHandler = require('./freezr_system/perm_handler.js')
 const publicHandler = require('./freezr_system/public_handler.js')
 const DS_MANAGER = require('./freezr_system/ds_manager.js')
+
+// const visitLogger = require('./freezr_system/visit_logger.js')
 
 // LOGGING
 const LOG_ERRORS = true
@@ -364,7 +365,7 @@ const addAppUses = function (cookieSecrets) {
   app.get('/v1/developer/manifest', userAPIRights, getTargetManifest, addUserDs, appHandler.getManifest)
 
   // account pages
-  app.get('/login', publicUserPage, accountHandler.generate_login_page)
+  // app.get('/login', publicUserPage, accountHandler.generate_login_page)
   app.get('/account/login', checkSetUp, publicUserPage, accountHandler.generate_login_page)
   app.get('/account/logout', userLogOut)
   app.get('/account/reauthorise', accountLoggedInUserPage, function (req, res, next) { req.params.page = 'reauthorise'; next() }, accountHandler.generateAccountPage)
@@ -591,8 +592,8 @@ async.waterfall([
   // See if db is working => freezrStatus.can_read_write_to_db
   function (dbWorks, cb) {
     fdlog('startup waterfall - set up part 2 - dbworks ? ', dbWorks)
-    if (dbWorks) freezrStatus.can_read_write_to_db = true
-    if (dbWorks && dsManager.freezrIsSetup) {
+    if (dbWorks && dbWorks.checkpassed) freezrStatus.can_read_write_to_db = true
+    if (dbWorks && dbWorks.checkpassed && dsManager.freezrIsSetup) {
       dsManager.initOacDB(PARAMS_OAC, null, (err, adminParams) => {
         if (err) console.warn('error writing to db after test has passed - this should not happen!!! - (todo: can_read_write_to_db to false?)', err)
         cb(null)
@@ -603,7 +604,7 @@ async.waterfall([
   },
   function (cb) {
     fdlog('startup waterfall - set up part 2a - todo - this was added as a fix for dbx - to check if needed - to review todo')
-    if (dsManager.freezrIsSetup) {
+    if (dsManager.freezrIsSetup && freezrStatus.can_read_write_to_db) {
       dsManager.initOacDB(USER_DB_OAC, null, (err, userDb) => {
         if (err) felog('server.js', 'could not get USER_DB_OAC - error writing to db after test has passed - this should not happen!!! - (todo: can_read_write_to_db to false?)', err)
         cb(null)
@@ -679,7 +680,7 @@ async.waterfall([
 
   function (cb) {
     fdlog('startup waterfall - set up part 6 - Get freezr main preferences')
-    if (dsManager.freezrIsSetup) {
+    if (dsManager.freezrIsSetup && freezrStatus.can_read_write_to_db) {
       adminHandler.get_or_set_prefs(dsManager.getDB(PARAMS_OAC), 'main_prefs', DEFAULT_PREFS, false, function (err, mainPrefsOnDb) {
         freezrPrefs = mainPrefsOnDb
         cb(err)
@@ -719,10 +720,14 @@ async.waterfall([
   function (cb) {
     if (dsManager.freezrIsSetup) {
       dsManager.systemEnvironment = dsManager.initialEnvironment
-      dsManager.setSystemUserDS('public', { dbParams: dsManager.users.fradmin.dbParams, fsParams: dsManager.users.fradmin.fsParams })
       console.log('Set up on Database   : ' + dsManager.initialEnvironment.dbParams.type)
       console.log('File System: ' + dsManager.initialEnvironment.fsParams.type)
-      adminHandler.check_server_version_and_implement_updates(dsManager, VERSION, cb)
+      if (freezrStatus.can_read_write_to_db) {
+        dsManager.setSystemUserDS('public', { dbParams: dsManager.users.fradmin.dbParams, fsParams: dsManager.users.fradmin.fsParams })
+        adminHandler.check_server_version_and_implement_updates(dsManager, VERSION, cb)
+      } else {
+        cb(null)
+      }
     } else {
       console.log('++++++++++++++ No initialEnvironment on db or file - FIRST REGISTRATION WILL BE TRIGGERED ++++++++++++++')
       fdlog('Initial Params   : ' + JSON.stringify(dsManager.initialEnvironment))

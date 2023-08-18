@@ -7,6 +7,7 @@ exports.version = '0.0.200'
 const async = require('async')
 const helpers = require('./helpers.js')
 const userObj = require('./user_obj.js') // eslint-disable-line
+const visitLogger = require('./visit_logger.js')
 
 const APP_TOKEN_OAC = {
   app_name: 'info.freezr.admin',
@@ -239,7 +240,6 @@ const addAppFs = function (req, res, dsManager, next) {
   })
 }
 
-
 exports.loggedInOrNotForSetUp = function (req, res, dsManager, next) {
   // used for self registration
   // app.get('/admin/selfregister', loggedInOrNotForSetUp, publicUserPage, adminHandler.generate_UserSelfRegistrationPage)
@@ -416,6 +416,9 @@ exports.userLoginHandler = function (req, res, dsManager, next) {
   if (!dsManager.freezrIsSetup) {
     felog('userLoginHandler', 'Unauthorized attempt to server without being set up')
     res.sendStatus(401)
+  } else if (visitLogger.tooManyLogInAttempts(dsManager.visitLogs, req)) {
+    // get list of amdin users and allow them in gradually
+    res.sendStatus(401)
   } else {
     req.freezr_server_version = exports.version
     const userId = (req.body && req.body.user_id) ? userIdFromUserInput(req.body.user_id) : null
@@ -474,8 +477,20 @@ exports.userLoginHandler = function (req, res, dsManager, next) {
       }
     ],
     function (err) {
+      if (err) console.log('msg -> ', err.message)
       if (!err) {
         helpers.send_success(res, { logged_in: true, user_id: userId })
+      } else if (err.message === 'Authentication error: Wrong credentials') {
+        console.log('nned to go to visit logger')
+        const tooManyLogins = visitLogger.tooManyLogInAttempts(dsManager.visitLogs, req)
+        visitLogger.addNewFailedLogin(dsManager, req, { tooManyLogins })
+        if (tooManyLogins) {
+          console.warn('too many logins attempted')
+          helpers.send_failure(res, helpers.auth_failure('access_handler.js', exports.version, 'userLoginHandler', 'Wrong credentials'), 'access_handler', exports.version, 'login')
+        } else {
+          helpers.send_failure(res, err, 'access_handler', exports.version, 'login')
+        }
+        // res.redirect('/ppage')
       } else {
         helpers.send_failure(res, err, 'access_handler', exports.version, 'login')
       }

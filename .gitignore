@@ -1,2 +1,7 @@
-
+/users_freezr
+/node_modules
+.replit
+replit.nix
+.DS_Store
+/freezr_system/.DS_Store
 .DS_Store

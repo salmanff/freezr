@@ -25,15 +25,11 @@ exports.FREEZR_USER_FILES_DIR = 'users_freezr'
 
 // Valid names
 // OTHER FUNCS TO REVIEW
-exports.user_id_from_user_input = function (userIdInput) {
-  //
-  return userIdInput ? decodeURIComponent(userIdInput.trim().toLowerCase()) : null
+exports.permitted_types = {
+    groups_for_objects: ['user','logged_in','public'],
+    //groups_for_fields: ['user','logged_in'],
+    type_names: ['object_delegate', 'db_query'] // used in getDataObject
 }
-    exports.permitted_types = {
-        groups_for_objects: ['user','logged_in','public'],
-        //groups_for_fields: ['user','logged_in'],
-        type_names: ['object_delegate', 'db_query'] // used in getDataObject
-    }
 
 exports.is_system_app = function (appName) {
     if (!appName) console.warn('Asking is_system_app for NULL APP')
@@ -72,7 +68,10 @@ exports.user_id_is_valid = function(uid) {
   uid = decodeURIComponent(uid)
   return (uid.length < MAX_USER_NAME_LEN && RESERVED_IDS.indexOf(uid) < 0 && !exports.startsWith(uid, 'freezr') && uid.indexOf('@') < 0 && uid.indexOf('_') < 0 && uid.indexOf('"') < 0 && uid.indexOf("'") < 0 && uid.indexOf(' ') < 0 && uid.indexOf('/') < 0 && uid.indexOf('{') < 0 && uid.indexOf('}') < 0 && uid.indexOf('(') < 0 && uid.indexOf(')') < 0)
 }
-
+exports.userIdFromUserInput = function (userIdInput) {
+  //
+  return userIdInput ? decodeURIComponent(userIdInput.trim().toLowerCase().replace(/ /g, '_')) : null
+}
 exports.valid_filename = function (fn) {
     var re = /[^\.a-zA-Z0-9-_ ]/;
     // @"^[\w\-. ]+$" http://stackoverflow.com/questions/11794144/regular-expression-for-valid-filename

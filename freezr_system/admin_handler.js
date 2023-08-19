@@ -290,7 +290,7 @@ exports.user_register = function (req, res) {
 
   const registerType = req.body.register_type // must be 'normal' for the moment
   const rawPassword = req.body.password
-  const userId = helpers.user_id_from_user_input(req.body.user_id)
+  const userId = helpers.userIdFromUserInput(req.body.user_id)
 
   const userInfo = {
     user_id: userId,
@@ -415,8 +415,8 @@ exports.self_register = function (req, res) {
 
 const firstSetUp = function (req, res) {
   fdlog('firstSetUp - first time register (or resetting of parameters) for body:', req.body, ' req.freezrInitialEnvCopy: ', req.freezrInitialEnvCopy)
-  const uid = helpers.user_id_from_user_input(req.body.userId)
-  const { userId, password } = req.body
+  const { password } = req.body
+  const userId = helpers.userIdFromUserInput(req.body.userId)
   const fsParams = req.body?.env?.fsParams ? 
     (req.body.env.fsParams.choice === 'sysDefault' ? 
       req.freezrInitialEnvCopy.fsParams : 
@@ -444,9 +444,9 @@ const firstSetUp = function (req, res) {
     function (cb) {
       if (req.freezrDsManager.freezrIsSetup) {
         cb(regAuthFail('System is already initiated.', 'auth-initedAlready'))
-      } else if (!uid) {
+      } else if (!userId) {
         cb(helpers.missing_data('user id'))
-      } else if (!helpers.user_id_is_valid(uid)) {
+      } else if (!helpers.user_id_is_valid(userId)) {
         cb(regAuthFail('Valid user id needed to initiate.', 'auth-invalidUserId'))
       } else if (!req.body.password) {
         cb(helpers.missing_data('password'))
@@ -594,7 +594,7 @@ const firstSetUp = function (req, res) {
       const freezrPrefsTempPw = helpers.randomText(20)
 
       req.freezrDsManager.freezrIsSetup = true
-      req.freezrDsManager.firstUser = uid
+      req.freezrDsManager.firstUser = userId
       req.freezrDsManager.systemEnvironment = { fsParams, dbParams }
       req.freezrDsManager.systemEnvironment.firstUser = userId
       req.freezrDsManager.freezrPrefsTempPw = { pw: freezrPrefsTempPw, timestamp: new Date().getTime() }
@@ -618,7 +618,7 @@ const setupNewUserParams = function (req, res) {
   // req.freezrAllowAccessToSysFsDb = freezrPrefs.allowAccessToSysFsDb
   // req.allUsersDb = dsManager.getDB(USER_DB_OAC)
 
-  const uid = req.session.logged_in_user_id || helpers.user_id_from_user_input(req.body.userId)
+  const uid = req.session.logged_in_user_id || helpers.userIdFromUserInput(req.body.userId)
   const { password, action, email } = req.body
   const fsParams = environmentDefaults.checkAndCleanFs(req.body.env.fsParams, req.freezrInitialEnvCopy)
   const dbParams = environmentDefaults.checkAndCleanDb(req.body.env.dbParams, req.freezrInitialEnvCopy)

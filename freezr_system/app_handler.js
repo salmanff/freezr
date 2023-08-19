@@ -225,7 +225,7 @@ exports.write_record = function (req, res) { // create update or upsert
           cb(helpers.auth_failure('app_handler', exports.version, 'write_record', req.freezrAttributes.requestor_app, errmsg))
         }
       } else if (isUpdate && !isUpsert) { // should have gotten results
-        console.warn('; no record found err for update in  write_rec ', { write, results, dataObjectId, isUpsert, isUpdate })
+        console.log('; no record found err in  write_rec ', { write, results, dataObjectId, isUpsert, isUpdate })
         cb(appErr('record not found'))
       } else { // upsert / create - new document - should not have gotten results
         if (req.freezrAttributes.owner_user_id !== req.freezrAttributes.requestor_user_id) {

@@ -442,7 +442,7 @@ exports.userLoginHandler = function (req, res, dsManager, next) {
   // addAccountDS and perms ds
   // add user status
   fdlog('userLoginHandler')
-  const userId = (req.body && req.body.user_id) ? userIdFromUserInput(req.body.user_id) : null
+  const userId = (req.body && req.body.user_id) ? helpers.userIdFromUserInput(req.body.user_id) : null
 
   if (!dsManager.freezrIsSetup) {
     felog('userLoginHandler', 'Unauthorized attempt to server without being set up')
@@ -477,11 +477,7 @@ exports.userLoginHandler = function (req, res, dsManager, next) {
       function (results, cb) {
         const u = new User(results[0])
         if (!results || results.length === 0) {
-          console.warn(' no such user ', userId)
-          userDb.query({ }, null, function(err, res) {
-            console.log(' all users ', { err, res, userDb })
-            cb(helpers.auth_failure('access_handler.js', exports.version, 'userLoginHandler', 'Wrong credentials 1'))
-          })
+          cb(helpers.auth_failure('access_handler.js', exports.version, 'userLoginHandler', 'Wrong credentials'))
         } else if (results.length > 1) {
           cb(helpers.auth_failure('access_handler.js', exports.version, 'userLoginHandler', 'funky error getting too many users'))
         } else if (u.check_passwordSync(req.body.password)) {
@@ -492,7 +488,7 @@ exports.userLoginHandler = function (req, res, dsManager, next) {
           cb(null)
         } else {
           felog('userLoginHandler', 'wrong password - need to limit number of wring passwords - set a file in the datastore ;) ')
-          cb(helpers.auth_failure('access_handler.js', exports.version, 'userLoginHandler', 'Wrong credentials 3'))
+          cb(helpers.auth_failure('access_handler.js', exports.version, 'userLoginHandler', 'Wrong credentials'))
         }
       },
 
@@ -516,12 +512,12 @@ exports.userLoginHandler = function (req, res, dsManager, next) {
       if (!err) {
         visitLogger.recordLoggedInVisit(dsManager, req, { userId, visitType: 'apis' })
         helpers.send_success(res, { logged_in: true, user_id: userId })
-      } else if (err.message === 'Authentication error: Wrong credentials 4') {
+      } else if (err.message === 'Authentication error: Wrong credentials') {
         const tooManyLogins = visitLogger.tooManyFailedAuthAttempts(dsManager.visitLogs, req, 'login')
         visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: (tooManyLogins ? 'tooMany' : 'creds'), accessPt: 'login', userId })
         if (tooManyLogins) {
           console.warn('userLoginHandler: too many logins attempted ', { userId })
-          helpers.send_failure(res, helpers.auth_failure('access_handler.js', exports.version, 'userLoginHandler', 'Wrong credentials 2'), 'access_handler', exports.version, 'login')
+          helpers.send_failure(res, helpers.auth_failure('access_handler.js', exports.version, 'userLoginHandler', 'Wrong credentials'), 'access_handler', exports.version, 'login')
         } else {
           helpers.send_failure(res, err, 'access_handler', exports.version, 'login')
         }
@@ -879,10 +875,7 @@ const getOrSetAppTokenForLoggedInUser = function (tokendb, req, callback) {
 const getAppTokenFromHeader = function (req) {
   return (req.header('Authorization') && req.header('Authorization').length > 10) ? req.header('Authorization').slice(7) : null
 }
-const userIdFromUserInput = function (userIdInput) {
-  //
-  return userIdInput ? userIdInput.trim().toLowerCase().replace(/ /g, '_') : null
-}
+
 
 // Loggers
 const LOG_ERRORS = true

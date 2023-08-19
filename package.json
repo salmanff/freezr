@@ -27,7 +27,14 @@
     "nedb-asyncfs": "2.0.4",
     "request": "^2.88.0",
     "sharp": "^0.31.3",
-    "uuid": "^8.2.0"
+    "uuid": "^8.2.0",
+
+    "@google-cloud/datastore": "^8.0.0",
+    "node-fetch": "^3.3.2",
+    "original-fs": "^1.2.0"
+  },
+  "notes": {
+    "replit": "@google-cloud/datastore, node-fetch and original-fs only used by replit"
   },
   "scripts": {
     "test": "./node_modules/mocha/bin/mocha",

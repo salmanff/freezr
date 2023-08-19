@@ -47,7 +47,7 @@ const resetMainperms = async function () {
 }
 
 const changeConfirmCallCallback = function (error, returnJson, permissionObject, currentAppName, evt) {
-  console.log('changeConfirmCallCallback ', { error, returnJson, permissionObject, currentAppName })
+  // onsole.log('changeConfirmCallCallback ', { error, returnJson, permissionObject, currentAppName })
   document.getElementById('confirm_dialogue_inner').style.display = 'none'
   if (returnJson && returnJson.success && !error) {
     showError('Permission ' + (permissionObject.action === ACCEPT ? 'accepted' : 'revoked') + ' successfully. <br> Other permissions can be managed below.')

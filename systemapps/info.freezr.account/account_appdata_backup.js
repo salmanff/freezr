@@ -354,7 +354,7 @@ var processNextRecord = function() {
 			delete record._id
 
 			let url= "/feps/restore/"+app_table
-	    freezerRestricted.connect.send(url, JSON.stringify({record, options }), restoreRecCallBack, "POST", 'application/json');
+	    freezerRestricted.connect.send(url, { record, options }, restoreRecCallBack, "POST", 'application/json');
 		} else {
 			//askToProcessNextRecord();
 			processNextFile();

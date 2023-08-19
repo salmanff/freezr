@@ -50,7 +50,7 @@ freezr.ceps.create = function (data, ...optionsAndCallback) {
     const appTable = options.app_table || (freezrMeta.appName + (options.collection ? ('.' + options.collection) : ''))
     const url = (options.host || '') + '/ceps/write/' + appTable
     const writeOptions = { appToken: (options.appToken || null) }
-    freezerRestricted.connect.send(url, JSON.stringify(data), callback, 'POST', 'application/json', writeOptions)
+    freezerRestricted.connect.send(url, data, callback, 'POST', 'application/json', writeOptions)
   }
 }
 freezr.feps.create = function (data, ...optionsAndCallback) {
@@ -67,7 +67,7 @@ freezr.feps.create = function (data, ...optionsAndCallback) {
     const appTable = options.app_table || (freezrMeta.appName + (options.collection ? ('.' + options.collection) : ''))
     const url = (options.host || '') + '/feps/write/' + appTable + (options.data_object_id ? ('/' + options.data_object_id + (options.upsert ? '?upsert=true' : '')) : '')
     const writeOptions = { appToken: (options.appToken || null) }
-    freezerRestricted.connect.send(url, JSON.stringify(data), callback, 'POST', 'application/json', writeOptions)
+    freezerRestricted.connect.send(url, data, callback, 'POST', 'application/json', writeOptions)
   }
 }
 freezr.feps.upload = function (file, options, callback) {
@@ -80,7 +80,7 @@ freezr.feps.upload = function (file, options, callback) {
     options = options || {}
     options.overwrite = !options.doNotOverWrite
     const url = (options.host || '') + '/feps/upload/' + freezrMeta.appName
-    const writeOptions = {}
+    const writeOptions = { uploadFile: true }
     if (options.appToken) {
       writeOptions.appToken = options.appToken
       delete options.appToken
@@ -172,7 +172,7 @@ freezr.feps.postquery = function (...optionsAndCallback) {
   }
   if (options.count) writeOptions.count = options.count
   if (options.skip) writeOptions.skip = options.skip
-  freezerRestricted.connect.send(url, JSON.stringify(options), callback, 'POST', 'application/json', writeOptions)
+  freezerRestricted.connect.send(url, options, callback, 'POST', 'application/json', writeOptions)
 }
 freezr.ceps.update = function (data = {}, ...optionsAndCallback) {
   // simple record update, assuming data has a ._id object
@@ -185,7 +185,7 @@ freezr.ceps.update = function (data = {}, ...optionsAndCallback) {
     const appTable = options.app_table || (freezrMeta.appName + (options.collection ? ('.' + options.collection) : ''))
     const url = (options.host || '') + '/ceps/update/' + appTable + '/' + data._id
     const writeOptions = { appToken: (options.appToken || null) }
-    freezerRestricted.connect.send(url, JSON.stringify(data), callback, 'PUT', 'application/json', writeOptions)
+    freezerRestricted.connect.send(url, data, callback, 'PUT', 'application/json', writeOptions)
   }
 }
 freezr.feps.update = function (data = {}, ...optionsAndCallback) {
@@ -199,12 +199,15 @@ freezr.feps.update = function (data = {}, ...optionsAndCallback) {
     callback(new Error('No _id to update... and no query'))
   } else if (data._id && options.q) {
     callback(new Error('need to update either _id or a query - not both'))
+  } else if (!options.app_table && !options.collection) {
+    callback(new Error('need to define collection or app table.'))
   } else {
     const appTable = options.app_table || (freezrMeta.appName + (options.collection ? ('.' + options.collection) : ''))
-    const url = (options.host || '') + '/feps/update/' + appTable + (data._id ? ('/' + data._id) : '') + (options.setkeys ? '?setkeys=true' : '')
+    const url = (options.host || '') + '/feps/update/' + appTable + (data._id ? ('/' + data._id) : '') + (options?.replaceAllFields ? '?replaceAllFields=true' : '')
     if (options.q) data = { q: options.q, keys: data }
     const writeOptions = { appToken: (options.appToken || null) }
-    freezerRestricted.connect.send(url, JSON.stringify(data), callback, 'PUT', 'application/json', writeOptions)
+    // if (options.replaceAllFields) writeOptions.replaceAllFields = true
+    freezerRestricted.connect.send(url, data, callback, 'PUT', 'application/json', writeOptions)
   }
 }
 freezr.ceps.delete = function (dataObjectId, options, callback) {
@@ -235,7 +238,7 @@ freezr.feps.delete = function (idOrQuery, options, callback) {
     const url = (options.host || '') + '/feps/delete/' + appTable + (isSingleRecord ? ('/' + idOrQuery) : '')
     const body = isSingleRecord ? {} : idOrQuery
     const writeOptions = { appToken: (options.appToken || null) }
-    freezerRestricted.connect.send(url, JSON.stringify(body), callback, 'DELETE', 'application/json', writeOptions)
+    freezerRestricted.connect.send(url, body, callback, 'DELETE', 'application/json', writeOptions)
   }
 }
 freezr.feps.getByPublicId = function (dataObjectId, options, callback) {
@@ -257,7 +260,7 @@ freezr.feps.publicquery = function (options, callback) {
     delete options.appToken
     delete options.host
   }
-  freezerRestricted.connect.send(url, JSON.stringify(options), callback, 'POST', 'application/json', readOptions)
+  freezerRestricted.connect.send(url, options, callback, 'POST', 'application/json', readOptions)
 }
 
 // Permissions and file permissions
@@ -543,15 +546,17 @@ freezr.utils.fileIdFromPath = function (filePath) {
   return decodeURI(parts.join('/'))
 }
 freezr.utils.getCookie = function (cname) {
-  const name = cname + '='
-  const ca = document.cookie.split(';')
-  for (let i = 0; i < ca.length; i++) {
-    let c = ca[i]
-    while (c.charAt(0) === ' ') {
-      c = c.substring(1)
-    }
-    if (c.indexOf(name) === 0) {
-      return c.substring(name.length, c.length)
+  if (freezr.app.isWebBased) {
+    const name = cname + '='
+    const ca = document.cookie.split(';')
+    for (let i = 0; i < ca.length; i++) {
+      let c = ca[i]
+      while (c.charAt(0) === ' ') {
+        c = c.substring(1)
+      }
+      if (c.indexOf(name) === 0) {
+        return c.substring(name.length, c.length)
+      }
     }
   }
   return ''
@@ -608,12 +613,11 @@ freezerRestricted.connect.ask = function (url, data, callback, type) {
   let contentType = ''
 
   if (!type || type === 'jsonString') {
-    postData = data ? JSON.stringify(data) : '{}'
+    postData = data || {}
     contentType = 'application/json' // 'application/x-www-form-urlencoded' //
   } else {
     postData = data
   }
-  // todo - add posting pictures (???)
 
   freezerRestricted.connect.send(url, postData, callback, 'POST', contentType)
 }
@@ -622,7 +626,7 @@ freezerRestricted.connect.write = function (url, data, callback, type) {
   let contentType = ''
 
   if (!type || type === 'jsonString') {
-    postData = JSON.stringify(data)
+    postData = data
     contentType = 'application/json'
   } else {
     postData = data
@@ -641,58 +645,57 @@ freezerRestricted.connect.read = function (url, data, callback, options) {
   freezerRestricted.connect.send(url, null, callback, 'GET', null, options)
 }
 freezerRestricted.connect.send = function (url, postData, callback, method, contentType, options = {}) {
-  let req = null
-  let badBrowser = false
   if (!callback) callback = freezr.utils.testCallBack
-  try {
-    req = new XMLHttpRequest()
-  } catch (e) {
-    badBrowser = true
-  }
 
+  if (options.textResponse) console.warn('fetch with options.textResponse not tested')
+  
   const coreUrl = url ? url.split('?')[0] : ''
   const PATHS_WO_TOKEN = ['/oauth/token', '/ceps/ping', '/v1/account/login', '/v1/admin/self_register', '/v1/admin/oauth/public/get_new_state', '/v1/admin/oauth/public/validate_state'] // , '/ceps/perms/validationtoken/set'
-  if (badBrowser) {
-    callback(new Error('You are using a non-standard browser. Please upgrade.'))
-  // } else if (!options.urlAuthOverride && !freezerRestricted.connect.authorizedUrl(url, method)) {
-  //  callback(new Error('You are not allowed to send data to third party sites like ' + url))
-  } else if (!options.appToken && !freezrMeta.appToken && !freezr.utils.getCookie('app_token_' + freezrMeta.userId) && PATHS_WO_TOKEN.indexOf(coreUrl) < 0) {
+  if (!options.appToken && !freezrMeta.appToken && !freezr.utils.getCookie('app_token_' + freezrMeta.userId) && PATHS_WO_TOKEN.indexOf(coreUrl) < 0) {
     callback(new Error('Need to obtain an app token before sending data to ' + url))
   } else {
     if (!freezerRestricted.utils.startsWith(url, 'http') && !freezr.app.isWebBased && freezrMeta.serverAddress) { url = freezrMeta.serverAddress + url }
-    req.open(method, url, true)
-    if (!freezr.app.isWebBased && freezrMeta.serverAddress) {
-      req.withCredentials = true
-      req.crossDomain = true
+
+    const accessToken = options.appToken || (freezr.app.isWebBased ? freezr.utils.getCookie('app_token_' + freezrMeta.userId) : freezrMeta.appToken)
+    const headers = {
+      Authorization: 'Bearer ' + accessToken
     }
-    req.onreadystatechange = function () {
-      if (req && req.readyState === 4) {
-        let jsonResponse = req.responseText
-        if ((!options || !options.textResponse) && jsonResponse) jsonResponse = freezr.utils.parse(jsonResponse)
-        if (this.status === 200 && jsonResponse && !jsonResponse.error) {
-          callback(null, jsonResponse)
-        } else if (jsonResponse && jsonResponse.error) {
-          console.error('ERROR SYNCING ', { jsonResponse })
-          const error = new Error(jsonResponse.error)
-          if (jsonResponse.message) error.message = jsonResponse.message
-          callback(error)
-        } else {
-          const error = new Error('Connection error ')
-          error.status = this.status
-          if (this.status === 0) error.code = 'noComms'
-          if (this.status === 400) error.code = 'noServer'
-          if (!error.code) error.code = 'unknownErr'
-          // if (this.status === 401 && !freezr.app.isWebBased) { freezr.app.offlineCredentialsExpired = true }
-          callback(error)
-        }
+    if (contentType) headers['Content-Type'] = contentType
+    // const overRideSecurity = (!freezr.app.isWebBased && freezrMeta.serverAddress) 
+    async function sendReq (url, postData) { // https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
+      // Default options are marked with *
+      const postOptions = { // developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
+        method,
+        headers,
+        // mode: (overRideSecurity ? 'cors' : 'cors'), // no-cors, *cors, same-origin
+        // credentials: (overRideSecurity ? 'omit' : 'same-origin'), // include, *same-origin, omit
+        // cache: "no-cache", // *default, no-cache, reload, force-cache, only-if-cached
+        // redirect: "follow", // manual, *follow, error
+        // referrerPolicy: "no-referrer", // no-referrer, *no-referrer-when-downgrade, origin, origin-when-cross-origin, same-origin, strict-origin, strict-origin-when-cross-origin, unsafe-url
+        body: (postData ? (options?.uploadFile ? postData : JSON.stringify(postData)) : null) // body data type must match "Content-Type" header
+      }
+      const response = await fetch(url, postOptions)
+      if (response.status === 200) {
+        return (options.textResponse ? response.text() : response.json()) // parses JSON response into native JavaScript objects
+      } else {
+        const error = new Error(response.statusText)
+        if (response.status === 0) error.code = 'noComms'
+        if (response.status === 400) error.code = 'noServer'
+        if (!response.code) error.code = 'unknownErr'
+        if (response.status === 401 && !freezr.app.isWebBased) { freezr.app.offlineCredentialsExpired = true }
+        error.status = response.status
+        throw error
       }
     }
-    if (contentType) req.setRequestHeader('Content-type', contentType)
-    const accessToken = options.appToken || (freezr.app.isWebBased ? freezr.utils.getCookie('app_token_' + freezrMeta.userId) : freezrMeta.appToken)
-    req.setRequestHeader('Authorization', 'Bearer ' + accessToken)
-    req.send(postData)
+    sendReq(url, postData).then((jsonResponse) => {
+      callback(null, jsonResponse)
+    }).catch((e) => {
+      console.warn('caught err', e)
+      callback(e)
+    })
   }
 }
+
 freezerRestricted.connect.authorizedUrl = function (aUrl, method) {
   if (freezerRestricted.utils.startsWith(aUrl, 'http') && (freezr.app.isWebBased || !freezerRestricted.utils.startsWith(aUrl, freezrMeta.serverAddress))) {
     // todo - to make authorized sites
@@ -849,10 +852,13 @@ freezerRestricted.menu.addLoginInfoToDialogue = function (aDivName, addTitle) {
 }
 
 // event listeners
-document.onkeydown = function (evt) {
-  if (evt.key === 'Escape' && document.getElementById('freezer_dialogueOuter') && document.getElementById('freezer_dialogueOuter').style.display === 'block') { freezerRestricted.menu.close() }
+try {
+  document.onkeydown = function (evt) {
+    if (evt.key === 'Escape' && document.getElementById('freezer_dialogueOuter') && document.getElementById('freezer_dialogueOuter').style.display === 'block') { freezerRestricted.menu.close() }
+  }
+} catch (e) {
+  console.warn('ignore err if is an offline app', e)
 }
-
 freezr.utils.addFreezerDialogueElements = freezerRestricted.menu.addFreezerDialogueElements
 freezr.utils.freezrMenuOpen = freezerRestricted.menu.freezrMenuOpen
 freezr.utils.freezrMenuClose = freezerRestricted.menu.close

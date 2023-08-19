@@ -6,14 +6,11 @@
 exports.version = '0.0.200'
 
 const helpers = require('../helpers.js')
-// const MongoClient = require('mongodb').MongoClient
+
 const { MongoClient } = require('mongodb')
-const { ObjectID } = require("mongodb");
-// const ObjectID = require('mongodb').ObjectID
-const async = require('async')
+const { ObjectId } = require('mongodb')
 
 const ARBITRARY_FIND_COUNT_DEFAULT = 100
-const DEFAULT_UNIFIED_DB_NAME = 'freezrdb'
 
 function MONGO_FOR_FREEZR (environment, ownerAppTable) {
   // Note: environment must have dbParams
@@ -23,7 +20,7 @@ function MONGO_FOR_FREEZR (environment, ownerAppTable) {
   this.env = environment
   this.oat = ownerAppTable
 
-  this.dbname = fullOACName(ownerAppTable) + '.db'
+  // this.dbname = fullOACName(ownerAppTable) + '.db'
 }
 
 MONGO_FOR_FREEZR.prototype.initDB = function (callback) {
@@ -42,13 +39,13 @@ MONGO_FOR_FREEZR.prototype.read_by_id = function (id, callback) {
   // }, 0)
 
   fdlog('in mongo db read_by_id ', this.env)
-  const [dbName, client, coll] = getCollFrom(this)
+  const [collName, client, coll] = getCollFrom(this)
   coll.findOne({ _id: getRealObjectId(id) })
     .then(response => {
       return callback(null, response)
     })
     .catch(err => {
-      console.warn('got err in read db ', { dbName, err })
+      console.warn('got err in read db ', { collName, err })
       return callback(err)
     })
     .finally(() => {
@@ -58,14 +55,14 @@ MONGO_FOR_FREEZR.prototype.read_by_id = function (id, callback) {
 MONGO_FOR_FREEZR.prototype.create = function (id, entity, options, callback) {
   fdlog('dbApi_mongodb Create entity ', { entity })
   if (id) entity._id = getRealObjectId(id)
-  const [dbName, client, coll] = getCollFrom(this)
+  const [collName, client, coll] = getCollFrom(this)
   coll.insertOne(entity)
     .then(response => {
       const theId = response?.insertedId
       return callback(null, { success: true, _id: theId })
     })
     .catch(err => {
-      console.warn('got err in write db ', { dbName, err })
+      console.warn('got err in write db ', { collName, err })
       return callback(err)
     })
     .finally(() => {
@@ -86,15 +83,15 @@ MONGO_FOR_FREEZR.prototype.update_multi_records = function (idOrQuery, updatesTo
   } else if (idOrQuery.$and || idOrQuery.$or) {
     felog('currently cannot do $and and $or of _ids - need to add objectIds iteratively [???]')
   }
-  const [dbName, client, coll] = getCollFrom(this)
-  fdlog('in update_multi_records gort dbName ', { dbName })
+  const [collName, client, coll] = getCollFrom(this)
+  fdlog('in update_multi_records gort collName ', { collName })
   if (updateMultiple) {
     coll.updateMany(idOrQuery, { $set: updatesToEntity }, { safe: true })
       .then(response => {
         return callback(null, { success: true, nModified: response?.modifiedCount })
       })
       .catch(err => {
-        console.warn('got err in write db ', { dbName, err })
+        console.warn('got err in write db ', { collName, err })
         return callback(err)
       })
       .finally(() => {
@@ -106,7 +103,7 @@ MONGO_FOR_FREEZR.prototype.update_multi_records = function (idOrQuery, updatesTo
         return callback(null, { success: true, nModified: response?.modifiedCount })
       })
       .catch(err => {
-        console.warn('got err in write in mongo db ', { dbName, err })
+        console.warn('got err in write in mongo db ', { collName, err })
         return callback(err)
       })
       .finally(() => {
@@ -115,14 +112,14 @@ MONGO_FOR_FREEZR.prototype.update_multi_records = function (idOrQuery, updatesTo
   }
 }
 MONGO_FOR_FREEZR.prototype.replace_record_by_id = function (id, updatedEntity, callback) {
-  const [dbName, client, coll] = getCollFrom(this)
-  fdlog('in replace_record_by_id gort dbName ', { dbName, updatedEntity })
+  const [collName, client, coll] = getCollFrom(this)
+  fdlog('in replace_record_by_id gort collName ', { collName, updatedEntity })
   coll.replaceOne({ _id: getRealObjectId(id) }, updatedEntity, { safe: true })
     .then(response => {
       return callback(null, { success: true, nModified: response?.modifiedCount })
     })
     .catch(err => {
-      console.warn('got err in replace_record_by_id in mongo db ', { dbName, err })
+      console.warn('got err in replace_record_by_id in mongo db ', { collName, err })
       return callback(err)
     })
     .finally(() => {
@@ -141,7 +138,7 @@ MONGO_FOR_FREEZR.prototype.query = function (idOrQuery, options = {}, callback) 
     if (typeof (idOrQuery._id) === 'string') idOrQuery._id = getRealObjectId(idOrQuery._id)
     findMultiple = false
   }
-  const [dbName, client, coll] = getCollFrom(this)
+  const [collName, client, coll] = getCollFrom(this)
   if (findMultiple) {
     coll.find(idOrQuery, options).sort(options.sort || null).limit(options.count || ARBITRARY_FIND_COUNT_DEFAULT).skip(options.skip || 0).toArray()
       .then(response => {
@@ -152,7 +149,7 @@ MONGO_FOR_FREEZR.prototype.query = function (idOrQuery, options = {}, callback) 
         }
       })
       .catch(err => {
-        console.warn('got err in query in mongodb db ', { dbName, err })
+        console.warn('got err in query in mongodb db ', { collName, err })
         return callback(err)
       })
       .finally(() => {
@@ -164,7 +161,7 @@ MONGO_FOR_FREEZR.prototype.query = function (idOrQuery, options = {}, callback) 
         return callback(null, (response ? [response] : []))
       })
       .catch(err => {
-        console.warn('got err in query in mongodb db ', { dbName, err })
+        console.warn('got err in query in mongodb db ', { collName, err })
         return callback(err)
       })
       .finally(() => {
@@ -181,15 +178,15 @@ MONGO_FOR_FREEZR.prototype.delete_record = function (idOrQuery, options = {}, ca
     idOrQuery._id = getRealObjectId(idOrQuery._id)
     deleteMultiple = false
   }
-  const [dbName, client, coll] = getCollFrom(this)
-  fdlog('in delete_record got dbName ', { dbName })
+  const [collName, client, coll] = getCollFrom(this)
+  fdlog('in delete_record got collName ', { collName })
   if (deleteMultiple) {
     coll.deleteMany(idOrQuery, { })
       .then(response => {
         return callback(null, { success: true, nModified: response?.deletedCount })
       })
       .catch(err => {
-        console.warn('got err in delete in mongo db ', { dbName, err })
+        console.warn('got err in delete in mongo db ', { collName, err })
         return callback(err)
       })
       .finally(() => {
@@ -201,7 +198,7 @@ MONGO_FOR_FREEZR.prototype.delete_record = function (idOrQuery, options = {}, ca
         return callback(null, { success: true, nModified: response?.deletedCount })
       })
       .catch(err => {
-        console.warn('got err in delete in mongo db ', { dbName, err })
+        console.warn('got err in delete in mongo db ', { collName, err })
         return callback(err)
       })
       .finally(() => {
@@ -215,7 +212,8 @@ MONGO_FOR_FREEZR.prototype.getAllAppTableNames = function (appOrTableNameOrNames
 
   const uri = dbConnectionString(this.env)
   const client = new MongoClient(uri)
-  const database = client.db(this.env?.dbParams?.unifiedDbName || DEFAULT_UNIFIED_DB_NAME)
+  const dbName = uri.slice(uri.lastIndexOf('/') + 1, (uri.indexOf('?') >= 0 ? uri.indexOf('?') : uri.length)) || this.oat.owner
+  const database = client.db(dbName)
   const userId = this.oat.owner
 
   fdlog('getAllAppTableNames mongo ', { userId, appOrTableNameOrNames})
@@ -227,15 +225,15 @@ MONGO_FOR_FREEZR.prototype.getAllAppTableNames = function (appOrTableNameOrNames
       let list = []
       fdlog(' got db objects ' + JSON.stringify(dbObjects))
       dbObjects.forEach(dbObject => {
-        let dbName = dbObject.name.replace(/\_/g, '.')
-        if (helpers.startsWith(dbName, userId)) {
-          dbName = dbName.slice(userId.length + 2)
+        let collName = dbObject.name.replace(/\_/g, '.')
+        if (helpers.startsWith(collName, userId)) {
+          collName = collName.slice(userId.length + 2)
           if (appOrTableNameOrNames) {
             appOrTableNameOrNames.forEach(requiredName => {
-              if (helpers.startsWith(dbName, requiredName)) list.push(dbName)
+              if (helpers.startsWith(collName, requiredName)) list.push(collName)
             })
           } else {
-            list.push(dbName)
+            list.push(collName)
           }
         }
       })
@@ -252,7 +250,7 @@ MONGO_FOR_FREEZR.prototype.getAllAppTableNames = function (appOrTableNameOrNames
 }
 MONGO_FOR_FREEZR.prototype.stats = function (callback) {
   fdlog('mongo for freezr - stats ')
-  const [dbName, client, coll] = getCollFrom(this)
+  const [collName, client, coll] = getCollFrom(this)
   coll.stats()
     .then(response => {
       // return callback(null, response)
@@ -260,7 +258,7 @@ MONGO_FOR_FREEZR.prototype.stats = function (callback) {
       return callback(null, { size: response.storageSize, originalStats: response })
     })
     .catch(err => {
-      console.warn('got err in stats for mongo db ', { dbName, err })
+      console.warn('got err in stats for mongo db ', { collName, err })
       return callback(err)
     })
     .finally(() => {
@@ -272,13 +270,13 @@ MONGO_FOR_FREEZR.prototype.persistCachedDatabase = function (cb) {
   cb(null)
 }
 
-const fullOACName = function (ownerAppTable) {
+const fullOACName = function (ownerAppTable, unifiedDb) {
   fdlog('mongo - fullOACName ownerAppTable ', ownerAppTable)
 
   if (!ownerAppTable) throw felog('fullOACName', 'NEDB collection failure - need ownerAppTable')
   const appTable = ownerAppTable.app_table || (ownerAppTable.app_name + (ownerAppTable.collection_name ? ('_' + ownerAppTable.collection_name) : ''))
   if (!appTable || !ownerAppTable.owner) throw helpers.error('NEDB collection failure - need app name and an owner for ' + ownerAppTable.owner + '__' + ownerAppTable.app_name + '_' + ownerAppTable.collection_name)
-  return (ownerAppTable.owner + '__' + appTable).replace(/\./g, '_')
+  return ((unifiedDb ? (ownerAppTable.owner + '__') : '') + appTable).replace(/\./g, '_')
 }
 
 const dbConnectionString = function (envParams) {
@@ -294,6 +292,9 @@ const dbConnectionString = function (envParams) {
       unifiedDbName: null
     }
   }
+
+  // const DEFAULT_UNIFIED_DB_NAME = 'freezrdb'
+  // const unfiedDbName = envParams.dbParams.unifiedDbName || DEFAULT_UNIFIED_DB_NAME
 
   // console.log('NEED TO Check maxIdleTimeMS todo?')
   if (envParams.dbParams.connectionString) {
@@ -311,10 +312,10 @@ const dbConnectionString = function (envParams) {
 }
 const getRealObjectId = function (objectId) {
   // called after initiation for some systems. neb doesnt need This
-  var realId = objectId
+  let realId = objectId
   if (typeof objectId === 'string') {
     try {
-      realId = new ObjectID(objectId)
+      realId = new ObjectId(objectId)
     } catch (e) {
       fdlog('getRealObjectId', 'Could not get mongo real_id - using text id for ' + objectId)
     }
@@ -322,11 +323,14 @@ const getRealObjectId = function (objectId) {
   return realId
 }
 const getCollFrom = function (self) {
-  const dbName = fullOACName(self.oat)
   const uri = dbConnectionString(self.env)
   const client = new MongoClient(uri)
-  const database = client.db(self.env?.dbParams?.unifiedDbName || DEFAULT_UNIFIED_DB_NAME)
-  return [dbName, client, database.collection(dbName)]
+  const forceNonUnifiedDbName = self.env?.dbParams?.useIdsAsDbName
+  const unifiedDbName = forceNonUnifiedDbName ? null : uri.slice(uri.lastIndexOf('/') + 1, (uri.indexOf('?') >= 0 ? uri.indexOf('?') : uri.length))
+  const dbName = unifiedDbName || self.oat.owner
+  const database = client.db(dbName)
+  const collName = fullOACName(self.oat, unifiedDbName)
+  return [collName, client, database.collection(collName)]
 }
 // Logger
 const LOG_ERRORS = true

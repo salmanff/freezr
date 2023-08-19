@@ -33,6 +33,7 @@ exports.DEFAULT_PREFS = {
   public_landing_page: '',
   public_landing_app: '',
   allowSelfReg: false,
+  useIdsAsDbName: false,
   allowAccessToSysFsDb: false,
   selfRegDefaultMBStorageLimit: null,
   blockMsgsFromNonContacts: false
@@ -105,6 +106,8 @@ exports.generateAdminPage = function (req, res) {
   let pageTitle = null
   let initialQuery = null
   let initialQueryFunc = null
+  let otherVariables = null
+  let modules = null
   if (!req.params.sub_page) req.params.sub_page = 'home'
   // Note adminLoggedInAPI rechecks user credentials as admin, so should not use intiial queries on adminLoggedInUserPage
   switch (req.params.sub_page) {
@@ -136,6 +139,13 @@ exports.generateAdminPage = function (req, res) {
       scriptFiles = ['oauth_serve_setup.js']
       initialQueryFunc = listAllOauths
       break
+    case 'visits':
+      // scriptFiles = ['./info.freezr.admin/visits.js']
+      modules = ['./info.freezr.admin/visits.js']
+      pageTitle = 'freezr.info - Visit View'
+      cssFiles = './public/info.freezr.public/public/freezr_style.css'
+      // initialQueryFunc = getMainPrefsToShow
+      break
     /*
     case 'hack':
       pageTitle = 'Hack (Freezr)'
@@ -148,6 +158,12 @@ exports.generateAdminPage = function (req, res) {
       break
   }
 
+  fdlog('admin req.params.sub_page ' + req.params.sub_page + ' req.freezrVisitLogs ' + req.freezrVisitLogs)
+
+  let otherVarsScript = ' var freezrServerStatus = ' + JSON.stringify(req.freezrStatus) + ';'
+  otherVarsScript += (req.params.userid ? ('var userid="' + req.params.userid + '";') : '')
+  otherVarsScript += req.freezrVisitLogs ? ('const currentVisits = ' + JSON.stringify(req.freezrVisitLogs) + ';') : ''
+
   const options = {
     page_title: pageTitle || ('Admin ' + req.params.sub_page.replace('_', ' ') + ' (Freezr)'),
     css_files: cssFiles,
@@ -157,7 +173,8 @@ exports.generateAdminPage = function (req, res) {
     user_id: req.session.logged_in_user_id,
     user_is_admin: req.session.logged_in_as_admin,
     script_files: scriptFiles,
-    other_variables: ' var freezrServerStatus = ' + JSON.stringify(req.freezrStatus) + ';' + (req.params.userid ? ('var userid="' + req.params.userid + '";') : ''),
+    other_variables: otherVarsScript,
+    modules: modules,
     freezr_server_version: req.freezr_server_version,
     server_name: (helpers.startsWith(req.get('host'), 'localhost') ? 'http' : 'https') + '://' + req.get('host')
   }
@@ -400,8 +417,16 @@ const firstSetUp = function (req, res) {
   fdlog('firstSetUp - first time register (or resetting of parameters) for body:', req.body, ' req.freezrInitialEnvCopy: ', req.freezrInitialEnvCopy)
   const uid = helpers.user_id_from_user_input(req.body.userId)
   const { userId, password } = req.body
-  const fsParams = (req.body && req.body.env && req.body.env.fsParams) ? environmentDefaults.checkAndCleanFs(req.body.env.fsParams, req.freezrInitialEnvCopy) : null
-  const dbParams = (req.body && req.body.env && req.body.env.fsParams) ? environmentDefaults.checkAndCleanDb(req.body.env.dbParams, req.freezrInitialEnvCopy) : null
+  const fsParams = req.body?.env?.fsParams ? 
+    (req.body.env.fsParams.choice === 'sysDefault' ? 
+      req.freezrInitialEnvCopy.fsParams : 
+      environmentDefaults.checkAndCleanFs(req.body.env.fsParams, req.freezrInitialEnvCopy)) : 
+    null
+  const dbParams = (req.body?.env?.fsParams ?
+    (req.body.env.dbParams.choice === 'sysDefault' ? 
+      req.freezrInitialEnvCopy.dbParams : 
+      environmentDefaults.checkAndCleanDb(req.body.env.dbParams, req.freezrInitialEnvCopy)) :
+    null)
 
   function regAuthFail (message, errCode) { helpers.auth_failure('admin_handler', exports.version, 'firstSetUp', message, errCode) }
 
@@ -434,6 +459,13 @@ const firstSetUp = function (req, res) {
       }
     },
     // check the FS and DB work
+    function (cb) {
+      if (fsParams.choice === 'sysDefault') {
+        fsParams = req.freezrInitialEnvCopy.fsParams
+      } else {
+        cb(null)
+      }
+    },
     function (cb) {
       environmentDefaults.checkFS({ fsParams, dbParams }, null, cb)
     },
@@ -655,6 +687,9 @@ const setupNewUserParams = function (req, res) {
       if (!fsPassed) {
         cb(new Error('File system parameters did NOT pass checkup'))
       } else if (dbParams.type === 'system') {
+        if (req.freezrSelfRegOptions.useIdsAsDbName) {
+          dbParams.useIdsAsDbName = true
+        }
         if (req.freezrSelfRegOptions.allow) {
           userLimits.storage = req.freezrSelfRegOptions.defaultMBStorageLimit
           cb(null, true)

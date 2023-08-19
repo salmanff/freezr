@@ -386,7 +386,6 @@ exports.removeFromFreezr = function (req, res) {
       } else if (u.check_passwordSync(req.body.oldPassword)) {
         cb(null)
       } else {
-        // console.log => todo need to limit number of wrong passwords - set a file in the datastore
         fdlog('need to limit number of wrong passwords - set a file in the datastore ;) ')
         cb(helpers.auth_failure('account_handler.js', exports.version, 'removeFromFreezr', 'Wrong password'))
       }
@@ -658,7 +657,7 @@ exports.install_blank_app = function (req, res) {
         cb(helpers.missing_data('user_id'))
       } else if (!appName || appName.length < 1) {
         cb(helpers.invalid_data('app name missing - that is the name of the app zip file name before any spaces.', 'account_handler', exports.version, 'install_blank_app'))
-      } else if (helpers.system_apps.indexOf(appName) > -1 || !helpers.valid_app_name(appName)) {
+      } else if (helpers.system_apps.indexOf(appName) > -1 || !helpers.valid_appName(appName)) {
         cb(helpers.invalid_data('app name not allowed: ' + appName, 'account_handler', exports.version, 'install_blank_app'))
       } else if (servedUrl && !validUrl(servedUrl)) {
         cb(helpers.invalid_data('url invalid: ' + servedUrl, 'account_handler', exports.version, 'install_blank_app'))
@@ -762,7 +761,7 @@ exports.install_app = function (req, res) {
           if (err) felog('install_app', 'error deleting local folder after app name missing ')
           cb(helpers.invalid_data('app name missing - that is the name of the app zip file name before any spaces.', 'account_handler', exports.version, 'install_app'))
         })
-      } else if (helpers.system_apps.indexOf(realAppName) > -1 || !helpers.valid_app_name(realAppName)) {
+      } else if (helpers.system_apps.indexOf(realAppName) > -1 || !helpers.valid_appName(realAppName)) {
         fileHandler.deleteLocalFolderAndContents(tempFolderPath, function (err) {
           if (err) felog('install_app', 'error deleting local folder 2 after app name not allowed ')
           cb(helpers.invalid_data('app name not allowed: ' + tempAppName, 'account_handler', exports.version, 'install_app'))
@@ -841,16 +840,15 @@ exports.install_app = function (req, res) {
     }
     // todo later (may be) - also check manifest permissions (as per changeNamedPermissions) to warn of any issues
   ],
-  function (err, dummy) {
+  function (error, dummy) {
     // todo: if there is an error in a new manifest the previous one gets wied out but the ap still runs (as it was instaled before successfully), so it should be marked with an error.
     // todo: also better to wipe out old files so old files dont linger if they dont exist in new version
     flags.meta.app_name = realAppName
-    if (err) {
-      if (!err.code) err.code = 'err_unknown'
-      flags.add('errors', err.code, { function: 'install_app', text: err.message })
+    if (error) {
+      flags.add('errors', error.code, { function: 'install_app', text: error.message })
     }
     // onsole.log(flags.sentencify())
-    helpers.send_success(res, { err, flags: flags.sentencify() })
+    helpers.send_success(res, { error: (error?.message), flags: flags.sentencify() })
 
     // preload databases
     if (!manifest) {
@@ -858,7 +856,7 @@ exports.install_app = function (req, res) {
       manifest = { app_tables: {} }
       manifest.app_tables[realAppName] = {}
     }
-    if (!err && manifest.app_tables && Object.keys(manifest.app_tables).length > 0 && manifest.app_tables.constructor === Object) {
+    if (!error && manifest.app_tables && Object.keys(manifest.app_tables).length > 0 && manifest.app_tables.constructor === Object) {
       for (const appTable in manifest.app_tables) {
         const oac = {
           owner: req.session.logged_in_user_id,
@@ -1053,7 +1051,7 @@ exports.appMgmtActions = function (req, res) /* deleteApp updateApp */ {
       },
       function (appFS, cb) {
         appFS.removeAllAppFiles(null, function (err) {
-          if (helpers.startsWith(err.message, 'ENOENT: no such file or directory')) {
+          if (!err || helpers.startsWith(err?.message, 'ENOENT: no such file or directory')) { // !err || added 2023008 - creates new errs? todo review
             cb(null)
           } else {
             cb(err)
@@ -1084,11 +1082,11 @@ exports.appMgmtActions = function (req, res) /* deleteApp updateApp */ {
       function (cb) {
         if (!req.session.logged_in_user_id) {
           cb(helpers.missing_data('user_id'))
-        } else if (!helpers.valid_app_name(realAppName)) {
+        } else if (!helpers.valid_appName(realAppName)) {
           cb(helpers.invalid_data('app name: ' + realAppName, 'account_handler', exports.version, 'appMgmtActions'))
         } else if (!realAppName || realAppName.length < 1) {
           cb(helpers.invalid_data('app name missing - ', '', exports.version, 'install_app'))
-        } else if (helpers.system_apps.indexOf(realAppName) > -1 || !helpers.valid_app_name(realAppName)) {
+        } else if (helpers.system_apps.indexOf(realAppName) > -1 || !helpers.valid_appName(realAppName)) {
           cb(helpers.invalid_data('app name not allowed: ' + appName, 'account_handler', exports.version, 'install_app'))
         } else if (!userDS) {
           cb(helpers.missing_data('userDS'))
@@ -1649,7 +1647,7 @@ const createOrUpdateUserAppList = function (userAppListDb, manifest, env, callba
     function (cb) {
       if (!appName) {
         cb(helpers.missing_data('app_name', 'account_handler', exports.version, 'add_app'))
-      } else if (!helpers.valid_app_name(appName)) {
+      } else if (!helpers.valid_appName(appName)) {
         cb(helpers.invalid_data('app_name: ' + appName, 'account_handler', exports.version, 'createOrUpdateUserAppList'))
       } else {
         userAppListDb.read_by_id(appName, cb)
@@ -2073,27 +2071,6 @@ const accountPageManifest = function (params) { // manifest parameters for accou
       page_url: 'contacts.html',
       css_files: ['contacts.css'],
       script_files: ['contacts.js']
-    },
-
-    // console.log - Old versions - to remove
-    appdata_view: {
-      page_title: 'View all my data ',
-      page_url: 'account_appdata_view.html',
-      css_files: ['account_appdata_view.css'],
-      script_files: ['account_appdata_view.js', 'FileSaver.js']
-    },
-    app_management: {
-      page_title: 'Apps (freezr)',
-      css_files: ['./public/info.freezr.public/public/freezr_style.css', 'account_app_management.css'],
-      page_url: 'account_app_manage.html',
-      // initial_query_func: exports.list_all_user_apps,
-      script_files: ['account_app_manage.js', './public/info.freezr.public/public/mustache.js']
-    },
-    appdata_backup: {
-      page_title: 'Backup and Restore data',
-      page_url: 'account_appdata_backup.html',
-      css_files: ['account_appdata_backup.css'],
-      script_files: ['account_appdata_backup.js', 'FileSaver.js']
     }
   }
   return manifests[params.page]

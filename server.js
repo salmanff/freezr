@@ -50,12 +50,14 @@ const freezrSelfRegPrefs = function () {
   return {
     allow: freezrPrefs.allowSelfReg,
     allowAccessToSysFsDb: freezrPrefs.allowAccessToSysFsDb,
-    defaultMBStorageLimit: freezrPrefs.selfRegDefaultMBStorageLimit
+    defaultMBStorageLimit: freezrPrefs.selfRegDefaultMBStorageLimit,
+    useIdsAsDbName: freezrPrefs.useIdsAsDbName
   }
 }
 // ACCESS AND PERMISSION FUNCTIONS
 function uploadFile (req, res) {
   felog('server.js', 'uploadFile needs to be updated with dsManager')
+  console.log('server.js', 'uploadFile needs to be updated with dsManager ', req.params)
   upload(req, res, function (err) {
     if (err) {
       helpers.send_failure(res, err, 'server.js', VERSION, 'uploadFile')
@@ -112,11 +114,22 @@ const loggedInUserPage = function (req, res, next) {
     accessHandler.loggedInUserPage(req, res, dsManager, next)
   }
 }
+const loggedInUserAppFile = function (req, res, next) {
+  req.freezrVisitType = 'files'
+  if (req.params.app_name === 'info.freezr.public') {
+    // fdlog('loggedInUserPage public ' + req.originalUrl)
+    accessHandler.publicUserPage(req, res, dsManager, next)
+  } else {
+    // fdlog('loggedInUserPage private ' + req.originalUrl)
+    accessHandler.loggedInUserPage(req, res, dsManager, next)
+  }
+}
 const validatedOutsideUserAppPage = function (req, res, next) {
   req.freezrStatus = freezrStatus
   accessHandler.validatedOutsideUserAppPage(req, res, dsManager, next)
 }
-const loggedInOrValidatedUserPage = function (req, res, next) {
+const loggedInOrValidatedUserAppFile = function (req, res, next) {
+  req.freezrVisitType = 'files'
   if (req.session && req.session.logged_in_user_id && req.params.user_id && req.params.user_id !== 'public' && req.session.logged_in_user_id !== req.params.user_id) {
     accessHandler.validatedOutsideUserAppPage(req, res, dsManager, next)
   } else {
@@ -131,6 +144,12 @@ const loggedInOrNotForSetUp = function (req, res, next) {
   // delete above
   req.freezrSelfRegOptions = freezrSelfRegPrefs()
   accessHandler.loggedInOrNotForSetUp(req, res, dsManager, next)
+}
+const publicAppFile = function (req, res, next) {
+  req.freezrVisitType = 'files'
+  if (!req.params.app_name) req.params.app_name = 'info.freezr.public' // todo - where is this used
+  // add req.freezrAppFS
+  accessHandler.publicUserPage(req, res, dsManager, next)
 }
 const publicUserPage = function (req, res, next) {
   if (!req.params.app_name) req.params.app_name = 'info.freezr.public' // todo - where is this used
@@ -260,6 +279,7 @@ const addUserDs = function (req, res, next) {
 }
 const addFradminDs = function (req, res, next) {
   req.freezrPrefs = freezrPrefs
+  req.freezrVisitLogs = dsManager.visitLogs
   permHandler.addFradminDs(req, res, dsManager, next)
 }
 const addUserFilesDb = function (req, res, next) {
@@ -321,17 +341,17 @@ const addAppUses = function (cookieSecrets) {
   // todo - to redo
   app.get('/favicon.ico', publicUserPage, servePublicAppFile)
 
-  app.get('/app_files/:user_id/:app_name/public/static/:file', publicUserPage, servePublicAppFile)
-  app.get('/app_files/:user_id/:app_name/public/:file', publicUserPage, servePublicAppFile)
-  app.get('/app_files/:user_id/:app_name/public/static/:file', publicUserPage, servePublicAppFile)
-  app.get('/app_files/:app_name/public/static/:file', loggedInUserPage, servePublicAppFile) // since there is no user id, iser must be logged in
+  app.get('/app_files/:user_id/:app_name/public/static/:file', publicAppFile, servePublicAppFile)
+  app.get('/app_files/:user_id/:app_name/public/:file', publicAppFile, servePublicAppFile)
+  app.get('/app_files/:user_id/:app_name/public/static/:file', publicAppFile, servePublicAppFile)
+  app.get('/app_files/:app_name/public/static/:file', loggedInUserAppFile, servePublicAppFile) // since there is no user id, iser must be logged in
   // console.log todo review - why .use and not .get on below
-  app.use('/app_files/:app_name/static/:file', loggedInUserPage, serveAppFile)
-  app.use('/app_files/:user_id/:app_name/:file', loggedInOrValidatedUserPage, serveAppFile)
-  app.use('/app_files/:app_name/:file', loggedInUserPage, serveAppFile)
-  app.get('/apps/:user_id/:app_name/public/static/:file', publicUserPage, serveAppFile)
-  app.get('/apps/:app_name/static/:file', loggedInUserPage, serveAppFile)
-  app.get('/apps/:user_id/:app_name/static/:file', loggedInUserPage, serveAppFile)
+  app.use('/app_files/:app_name/static/:file', loggedInUserAppFile, serveAppFile)
+  app.use('/app_files/:user_id/:app_name/:file', loggedInOrValidatedUserAppFile, serveAppFile)
+  app.use('/app_files/:app_name/:file', loggedInUserAppFile, serveAppFile)
+  app.get('/apps/:user_id/:app_name/public/static/:file', publicAppFile, serveAppFile)
+  app.get('/apps/:app_name/static/:file', loggedInUserAppFile, serveAppFile)
+  app.get('/apps/:user_id/:app_name/static/:file', loggedInUserAppFile, serveAppFile)
 
   // Outside user App
   app.get('/oapp/:user_id/:app_name', redirectToIndex) // user_id is of the owner
@@ -355,7 +375,7 @@ const addAppUses = function (cookieSecrets) {
   app.post('/v1/pdbq', addPublicRecordsDB, publicHandler.dbp_query)
   app.get('/v1/pobject/:user_id/:requestee_app_table/:data_object_id', addPublicRecordsDB, publicHandler.generatePublicPage)
 
-  app.get('/v1/publicfiles/:user_id/:app_name/*', addPublicRecordsDB, addUserFilesDb, addPublicUserFs, publicHandler.old_get_public_file) // legacy
+  // app.get('/v1/publicfiles/:user_id/:app_name/*', addPublicRecordsDB, addUserFilesDb, addPublicUserFs, publicHandler.old_get_public_file) // legacy
   app.get('/publicfiles/:app_name/:user_id/*', addPublicRecordsDB, addUserFilesDb, addPublicUserFs, publicHandler.get_public_file)
 
   // UPLOADED PUBLIC PAGES ... gets them from the personal page // publicpages
@@ -397,6 +417,7 @@ const addAppUses = function (cookieSecrets) {
   app.get('/admin/SimpleSelfregister', loggedInOrNotForSetUp, publicUserPage, adminHandler.generate_UserSelfRegistrationPage)
   app.get('/admin/public/:sub_page', publicUserPage, adminHandler.generatePublicAdminPage)
   app.get('/admin/:sub_page', adminLoggedInUserPage, addFradminDs, adminHandler.generateAdminPage)
+  app.get('/admin', adminLoggedInUserPage, addFradminDs, adminHandler.generateAdminPage)
   app.get('/admin', adminLoggedInUserPage, addFradminDs, adminHandler.generateAdminPage)
 
   app.post('/v1/admin/self_register', selfRegisterChecks, addSelfRegOptions, selfRegAdds, adminHandler.self_register)
@@ -718,6 +739,7 @@ async.waterfall([
   },
 
   function (cb) {
+    fdlog('Initial Params   : ' + JSON.stringify(dsManager.initialEnvironment))
     if (dsManager.freezrIsSetup) {
       dsManager.systemEnvironment = dsManager.initialEnvironment
       console.log('Set up on Database   : ' + dsManager.initialEnvironment.dbParams.type)
@@ -744,9 +766,9 @@ async.waterfall([
   if (err) helpers.warning('startup_waterfall', 'STARTUP ERR ' + JSON.stringify(err))
 
   // todo move to environment_defaults (short term fix in case of change in port (eg heroku)
-  const theport = (process && process.env && process.env.PORT) ? process.env.PORT : dsManager.initialEnvironment.port
-  app.listen(theport)
+  const theport = (process && process.env && process.env.PORT) ? process.env.PORT : dsManager.initialEnvironment?.port
 
   console.log('Going to listen on port ' + theport)
+  app.listen(theport)
   fdlog('initialEnvironment', dsManager.initialEnvironment)
 })

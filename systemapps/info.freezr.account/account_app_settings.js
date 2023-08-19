@@ -115,8 +115,7 @@ const drawStandAloneApps = async function (manifest) {
             console.warn(err)
             messages.innerHTL = 'Error trying to get password.'
           } else {
-            console.log({ manifest })
-            console.log('opening ' + manifest.standAloneApps.ios.link + '?url=' + resp.full_url)
+            // onsole.log({ manifest })
             window.open(manifest.standAloneApps.ios.link + '?url=' + resp.full_url, '_self')
           }
         })

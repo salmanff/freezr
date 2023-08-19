@@ -15,15 +15,14 @@
 
 exports.version = '0.0.200'
 
-/* test / debugging parameters
+/* / test / debugging parameters
   console.error('FOR DEBUGGING ON LOCALHOST - REMOVE THESE')
   if (!process.env) process.env = {}
   process.env.FREEZR_DB = 'mongodb' // 'nedb'
   process.env.MONGO_STR = ''
   process.env.FREEZR_FS = 'dropbox'
-  process.env.FS_TOKEN = '-'
-*/
-/* global process */
+  process.env.FS_TOKEN = ''
+// */
 
 const PARAMS_OAC = {
   owner: 'fradmin',
@@ -41,15 +40,15 @@ const fileHandler = require('../file_handler.js')
 // DEFAULTS
 exports.ENV_PARAMS = {
   FS: {
-    local: {
-      type: 'local',
-      label: "Server's file system",
-      msg: 'You are using your local file system.',
-      warning: 'Note that most cloud servers delete their local file system when they restart - ie periodically. Make sure you know what you are doing when you choose this option.',
-      forPages: ['firstSetUp']
-    },
+    // local: {
+    //   type: 'local',
+    //   label: "Server's file system",
+    //   msg: 'You are using your local file system.',
+    //   warning: 'Note that most cloud servers delete their local file system when they restart - ie periodically. Make sure you know what you are doing when you choose this option.',
+    //   forPages: []
+    // },
     sysDefault: {
-      type: 'system',
+      type: 'local',
       label: 'Host Server Storage',
       msg: 'The admin has offered to use the default system settings to store your files.',
       forPages: ['firstSetUp', 'newParams', 'unRegisteredUser']
@@ -251,7 +250,7 @@ exports.FS_getRefreshToken = {
 }
 
 exports.checkAndCleanDb = function (dbParams, freezrInitialEnvCopy) {
-  console.log('todo - TO IMPLEMENT checkAndCleanDb ', dbParams)
+  // console.log('todo - TO IMPLEMENT checkAndCleanDb ', dbParams)
   if (!dbParams) return null
   if (fsParams.choice === 'sysDefault') return { type: 'system', choice: 'sysDefault' }
   return dbParams
@@ -381,7 +380,7 @@ exports.checkDB = function (env, options, callback) {
               callback(err2, { checkpassed: (!err2), resource: 'DB' })
             })
           } else {
-            testDB.create('test_write_id', { foo: 'bar' }, null, (err3, results) => {
+            testDB.create('test_write_id', { foo: 'first bar' }, null, (err3, results) => {
               if (err3) felog('checkDB', 'got err in checkDB - testDb 3 ', err3)
               callback(err3, { checkpassed: (!err2), resource: 'DB' })
             })
@@ -486,6 +485,7 @@ exports.tryGettingEnvFromautoConfig = function (callback) {
     function (cb) {
       // 0 Read freezr_environment from file and use that if it exists - if not read ther autoConfig
       r.envOnFile = fileHandler.getEnvParamsFromLocalFileSystem()
+
       if (!r.envOnFile) {
         getAutoConfigParams(cb)
       } else {
@@ -494,6 +494,7 @@ exports.tryGettingEnvFromautoConfig = function (callback) {
     },
     // 1 if envOnFile doesnt exist, use autogonfigs to create a temporary ds_manager and read the file on the fs
     function (autoConfig, cb) {
+      fdlog(' tryGettingEnvFromautoConfig 1b ', { autoConfig })
       r.autoConfig = autoConfig
       if ((!r.envOnFile || !r.envOnFile.freezrIsSetup /* in case a temp file had been written */) && autoConfig && autoConfig.fsParams) {
         // note tempting to also add && autoConfig.fsParams.type!='local' but then glitch wouldnt work
@@ -537,7 +538,6 @@ exports.tryGettingEnvFromautoConfig = function (callback) {
       const fsParams = (r.envOnFile && r.envOnFile.fsParams) ? r.envOnFile.fsParams : r.autoConfig.fsParams
       const dbParams = (r.envOnFile && r.envOnFile.dbParams) ? r.envOnFile.dbParams : r.autoConfig.dbParams
       fdlog('using autoconfig dbparmams is', dbParams)
-      fdlog('using autoconfig fsParams is', fsParams)
       const fradminOwner = tempDsManager.setSystemUserDS('fradmin', { fsParams, dbParams })
       fradminOwner.initOacDB(PARAMS_OAC, null, cb)
     },
@@ -545,7 +545,6 @@ exports.tryGettingEnvFromautoConfig = function (callback) {
       fradminDb.read_by_id('freezr_environment', cb)
     },
     function (envOnDb, cb) {
-      // onsole.log('envOnDb ', envOnDb)
       if (r.envOnFile && r.envOnFile.freezrIsSetup) { // if there was an env on file, use that
         if (!envOnDb) {
           felog('tryGettingEnvFromautoConfig', '2 - WARNING -  freezr_environment is NOT stored on DB')
@@ -566,6 +565,7 @@ exports.tryGettingEnvFromautoConfig = function (callback) {
       cb(null)
     }
   ], function (err) {
+    console.warn({ err, r })
     fdlog('end of startup waterfall envOnFile', r.envOnFile)
     callback(err, r)
   })
@@ -817,6 +817,18 @@ const fsParams = function () {
       codeChallenge: process.env.FS_C_CHALL,
       codeVerifier: process.env.FS_C_VER
     }
+  } else if (process && process.env && process.env.FREEZR_FS && process.env.FREEZR_FS === 'aws') {
+    return {
+      type: process.env.FREEZR_FS,
+      accessKeyId: process.env.FS_ACCESS_KEY_ID,
+      secretAccessKey: process.env.FS_SECRET_ACCESS_KEY,
+      bucket: process.env.FS_BUCKET
+    }
+  } else if (isReplit()) {
+    return {
+      type: 'local',
+      choice: 'replit'
+    }
   } else if (isGlitch()) {
     return {
       type: 'local',
@@ -826,14 +838,18 @@ const fsParams = function () {
   } else {
     return {
       type: 'local',
+      choice: 'localFileSystem',
       userRoot: null
     }
   }
 }
 function isGlitch () {
-  return (process && process.env && process.env.API_SERVER_EXTERNAL && process.env.API_SERVER_EXTERNAL.indexOf('glitch') > 0)
+  return (process?.env?.API_SERVER_EXTERNAL?.indexOf('glitch') > 0)
 }
 const GLITCH_USER_ROOT = '.data/users_freezr'
+function isReplit () {
+  return (process?.env && process.env.REPL_ID)
+}
 
 // Loggers
 const LOG_ERRORS = true

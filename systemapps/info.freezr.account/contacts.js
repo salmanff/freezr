@@ -30,7 +30,6 @@ freezr.initPageScripts = function () {
     if (evt.target.id && freezr.utils.startsWith(evt.target.id, 'button_')) {
       const parts = evt.target.id.split('_')
       const args = evt.target.id.split('_')
-      console.log(evt.target.id, { parts, args })
       args.splice(0, 2).join('_')
       if (buttons[parts[1]]) buttons[parts[1]](args, evt.target)
     }
@@ -74,12 +73,11 @@ freezr.initPageScripts = function () {
   })
 
   getPrivateFeedToken(function (err, appToken) {
-    console.log('getPrivateFeedToken ', { err, appToken })
     if (err) {
       showWarning(err.message)
     } else {
       freezr.ceps.getquery({ appToken, app_table: 'dev.ceps.privatefeeds.codes' }, function (err, resp) {
-        console.log('getPrivateFeedToken intial query ', { resp })
+        // onsole.log('getPrivateFeedToken intial query ', { resp })
         if (err) {
           showWarning(err)
         } else if (!resp || resp.length === 0) {
@@ -95,7 +93,6 @@ freezr.initPageScripts = function () {
 
 // Draw contacts, groups and feeds based on state
 const redrawContacts = function (editableGroup, sortByKey) {
-  console.log('redrawign contact')
   document.getElementById('titleForContacts').innerText = editableGroup ? ('Choose Contacts for Group: ' + editableGroup.name) : 'Your Contacts'
   document.getElementById('button_exitEditMode').style.display = editableGroup ? 'block' : 'none'
   contactsTable.innerHTML = ''
@@ -110,9 +107,7 @@ const redrawContacts = function (editableGroup, sortByKey) {
       if (field.title) {
         const label = document.createElement('label')
         label.innerHTML = field.title
-        console.log('creating ', { label })
         if (field.sortable) {
-          console.log('dsdsd')
           label.onclick = function () {
             redrawContacts(editableGroup, field.key)
           }
@@ -368,7 +363,6 @@ const getPrivateFeedToken = function (callback) {
       permission: 'privateCodes',
       app_id: 'info.freezr.account' // requestor app
     }
-    console.log('sdsd 1')
     freezr.perms.validateDataOwner(data, function (ret) {
       console.log({ ret })
       if (!ret || ret.error || !ret['access-token']) {
@@ -558,7 +552,6 @@ const buttons = {
       console.warn(' rrivatfeeddelete - back from deleting indivudal ones', results)
       if (results && results.success) {
         const deleteResults = await freepr.ceps.delete(theId, { appToken: state.privateFeedToken, app_table: 'dev.ceps.privatefeeds.codes' })
-        console.log({ deleteResults })
         if (!deleteResults || deleteResults.error) {
           showWarning('there was a problem deleting')
         } else {
@@ -606,24 +599,22 @@ const buttons = {
 
 const deleteAllFeedElements = async function (feed, numTry) {
   const items = await freepr.feps.publicquery({ feed: feed.name, code: feed.code })
-  console.log('deleteAllFeedElements', {numTry, items})
+  // onsole.log('deleteAllFeedElements', {numTry, items})
   if (!items || items.error || !items.results) {
     return { success: false, error: (items?.error ? items.error : 'Coiuld not delete items') }
   } else if (items.results.length === 0) {
-    console.log('No More left')
     return { success: true }
   } else if (!numTry || numTry < 2) {
     for (const record of items.results) {
-      // console.log({ grantees: [('_privatefeed:' + feed.name)], name: record._permission_name, action: 'deny', table_id: record._app_table, requestor_app: record._app_name })
       console.log('unsharing record ', { record })
       const deleteResults = await freepr.perms.shareRecords(record._original_id, { grantees: [('_privatefeed:' + feed.name)], name: record._permission_name, action: 'deny', table_id: record._app_table, requestor_app: record._app_name })
       console.log({ deleteResults })
     }
     numTry = numTry ? (numTry + 1) : 1
-    console.log('get the next batch')
+    // onsole.log('get the next batch')
     return deleteAllFeedElements(feed, numTry)
   } else {
-    console.log('too many tries')
+    console.warn('too many tries')
   }
 }
 // Other ...

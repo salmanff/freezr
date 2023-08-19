@@ -3,11 +3,18 @@
 exports.version = '0.0.122'
 
 const async = require('async')
-const flags_obj = require("./flags_obj.js")
 const path = require('path')
 
-exports.RESERVED_FIELD_LIST = ["_id", "_date_created", "_date_modified","_accessible","_publicid","_date_accessibility_mod"];
-// ,"_date_published" removed as need to trust apps to set it
+exports.RESERVED_FIELD_LIST = ['_id', '_date_created', '_date_modified','_accessible','_publicid','_date_accessibility_mod'];
+// ,'_date_published' removed as need to trust apps to set it
+const RESERVED_IDS = ['fradmin', 'admin', 'public', 'test', 'freezr', 'freezrdb']
+const MAX_USER_NAME_LEN = 25
+const RESERVED_COLLECTION_NAMES = ['field_permissions', 'accessible_objects'] // 'files' s also reserved but can write to it
+const MAX_PP_NAME_LEN = 30
+
+exports.system_apps = ['info.freezr.account', 'info.freezr.admin', 'info.freezr.public', 'info.freezr.permissions', 'info.freezr.posts', 'info.freezr.logs']
+exports.SYSTEM_ADMIN_COLLS = ['users', 'permissions', 'visitAuthFailures', 'visitLogs', 'params', 'oauth_permissions', 'app_tokens']
+exports.SYSTEM_ADMIN_APPTABLES = exports.SYSTEM_ADMIN_COLLS.map(coll => { return ('info_freezr_admin_' + coll) })
 
 exports.log = function (...messages) {
   console.log(new Date(), ...messages)
@@ -18,20 +25,15 @@ exports.FREEZR_USER_FILES_DIR = 'users_freezr'
 
 // Valid names
 // OTHER FUNCS TO REVIEW
-    exports.user_id_from_user_input = function (user_id_input) {
-      //
-      return user_id_input? user_id_input.trim().toLowerCase().replace(/ /g, "_"): null;
-    };
-    exports.system_apps = ["info.freezr.account","info.freezr.admin","info.freezr.public","info.freezr.permissions","info.freezr.posts","info.freezr.logs"];
-    exports.SYSTEM_ADMIN_COLLS = ['users','permissions','visit_log_daysum','params','oauth_permissions','app_tokens']
-    exports.SYSTEM_ADMIN_APPTABLES = exports.SYSTEM_ADMIN_COLLS.map(coll => {return ('info_freezr_admin_'+coll)})
+exports.user_id_from_user_input = function (userIdInput) {
+  //
+  return userIdInput ? decodeURIComponent(userIdInput.trim().toLowerCase()) : null
+}
     exports.permitted_types = {
-        groups_for_objects: ["user","logged_in","public"],
-        //groups_for_fields: ["user","logged_in"],
-        type_names: ["object_delegate", "db_query"], // used in getDataObject
+        groups_for_objects: ['user','logged_in','public'],
+        //groups_for_fields: ['user','logged_in'],
+        type_names: ['object_delegate', 'db_query'] // used in getDataObject
     }
-    var reserved_collection_names = ["field_permissions", "accessible_objects"]; // "files" s also reserved but can write to it
-    const RESERVED_IDS =['fradmin', 'public', 'test']
 
 exports.is_system_app = function (appName) {
     if (!appName) console.warn('Asking is_system_app for NULL APP')
@@ -44,68 +46,61 @@ exports.is_system_app = function (appName) {
   })
   return ret
 }
-    // note - App_name and user_id etc could have spaces but need to deCodeUri when in url
-    exports.valid_app_name = function(app_name) {
-        if (!app_name) return false;
-        if (app_name.length<1) return false;
-        if (!exports.valid_filename(app_name)) return false;
-        if (exports.starts_with_one_of(app_name, ['.','-','\\','system'] )) return false;
-        if (exports.system_apps.indexOf(app_name)>-1) return false;
-        if (app_name.indexOf("_") >-1) return false;
-        if (app_name.indexOf(" ") >-1) return false;
-        if (app_name.indexOf("$") >-1) return false;
-        if (app_name.indexOf('"') >-1) return false;
-        if (app_name.indexOf("/") >-1) return false;
-        if (app_name.indexOf("@") >-1) return false;
-        if (app_name.indexOf("\\") >-1) return false;
-        if (app_name.indexOf("{") >-1) return false;
-        if (app_name.indexOf("}") >-1) return false;
-        if (app_name.indexOf("..") >-1) return false;
-        var app_segements = app_name.split('.');
-        if (app_segements.length <3) return false;
-        return true;
+// note - App_name and user_id etc could have spaces but need to deCodeUri when in url
+exports.valid_appName = function (appName) {
+  if (!appName) return false
+  if (appName.length < 1) return false
+  if (appName.length > MAX_USER_NAME_LEN) return false
+  if (!exports.valid_filename(appName)) return false
+  if (exports.starts_with_one_of(appName, ['.', '-', '\\', 'system'])) return false
+  if (exports.system_apps.indexOf(appName) > -1) return false
+  if (appName.indexOf('_') > -1) return false
+  if (appName.indexOf(' ') > -1) return false
+  if (appName.indexOf('$') > -1) return false
+  if (appName.indexOf('"') > -1) return false
+  if (appName.indexOf('/') > -1) return false
+  if (appName.indexOf('@') > -1) return false
+  if (appName.indexOf('\\') > -1) return false
+  if (appName.indexOf('{') > -1) return false
+  if (appName.indexOf('}') > -1) return false
+  if (appName.indexOf('..') > -1) return false
+  const appSegements = appName.split('.')
+  if (appSegements.length < 3) return false
+  return true
+}
+exports.user_id_is_valid = function(uid) {
+  uid = decodeURIComponent(uid)
+  return (uid.length < MAX_USER_NAME_LEN && RESERVED_IDS.indexOf(uid) < 0 && !exports.startsWith(uid, 'freezr') && uid.indexOf('@') < 0 && uid.indexOf('_') < 0 && uid.indexOf('"') < 0 && uid.indexOf("'") < 0 && uid.indexOf(' ') < 0 && uid.indexOf('/') < 0 && uid.indexOf('{') < 0 && uid.indexOf('}') < 0 && uid.indexOf('(') < 0 && uid.indexOf(')') < 0)
+}
+
+exports.valid_filename = function (fn) {
+    var re = /[^\.a-zA-Z0-9-_ ]/;
+    // @"^[\w\-. ]+$" http://stackoverflow.com/questions/11794144/regular-expression-for-valid-filename
+    return typeof fn == 'string' && fn.length > 0 && !(fn.match(re) );
+};
+exports.valid_dir_name = function(dir) {
+    var re = /[^\a-zA-Z_0-9-.]/;
+    return typeof dir == 'string' && dir.length > 0 && !(dir.match(re));
+}
+exports.valid_permission_name = function(name) {
+  return (name.indexOf(" ") < 0 && name.indexOf("/") < 0  && name.indexOf(" ") < 0 )
+}
+exports.valid_collection_name = function(collection_name,is_file_record)  {
+    if (!collection_name) {
+      return true
+    } else if (collection_name.indexOf("_")>-1 || collection_name.indexOf("/")>-1 || collection_name.indexOf(" ")>-1  ||collection_name.indexOf("@")>-1   || (exports.starts_with_one_of(collection_name, ['.','-','\\'] )) ) {
+        return false
+    } else if (RESERVED_COLLECTION_NAMES.indexOf(collection_name)>-1){
+        return false;
     }
-    exports.valid_unify_db_name = function(db_name) {
-        if (!db_name) return false;
-        if (db_name.indexOf("$") >-1) return false;
-        if (db_name.indexOf('"') >-1) return false;
-        if (db_name.indexOf("@") >-1) return false;
-        if (db_name.indexOf("/") >-1) return false;
-        if (db_name.indexOf("\\") >-1) return false;
-        if (db_name.indexOf(" ") >-1) return false;
-        return true;
-    }
-    exports.valid_filename = function (fn) {
-        var re = /[^\.a-zA-Z0-9-_ ]/;
-        // @"^[\w\-. ]+$" http://stackoverflow.com/questions/11794144/regular-expression-for-valid-filename
-        return typeof fn == 'string' && fn.length > 0 && !(fn.match(re) );
-    };
-    exports.valid_dir_name = function(dir) {
-        var re = /[^\a-zA-Z_0-9-.]/;
-        return typeof dir == 'string' && dir.length > 0 && !(dir.match(re));
-    }
-    exports.user_id_is_valid = function(uid) {
-      return (RESERVED_IDS.indexOf(uid)<0 && uid.indexOf("@") < 0 && uid.indexOf("_") < 0 && uid.indexOf(" ") < 0 && uid.indexOf("/") < 0 && uid.indexOf("{") < 0 && uid.indexOf("}") < 0 )
-    }
-    exports.valid_permission_name = function(name) {
-      return (name.indexOf(" ") < 0 && name.indexOf("/") < 0  && name.indexOf(" ") < 0 )
-    }
-    exports.valid_collection_name = function(collection_name,is_file_record)  {
-        if (!collection_name) {
-          return true
-        } else if (collection_name.indexOf("_")>-1 || collection_name.indexOf("/")>-1 || collection_name.indexOf(" ")>-1  ||collection_name.indexOf("@")>-1   || (exports.starts_with_one_of(collection_name, ['.','-','\\'] )) ) {
-            return false
-        } else if (reserved_collection_names.indexOf(collection_name)>-1){
-            return false;
-        }
-        return true;
-    }
+    return true;
+}
 
 // SEND SUCCESS / FAILURE
     exports.send_success = function(res, data) {
         //onsole.log("onto send success")
         if (!data) data = {};
-        data.error = null;
+        // data.error = null;
         //var output = { error: null, data: data };
         // console.log('helpers sending ', JSON.stringify(data) )
         res.end(JSON.stringify(data) + "\n");

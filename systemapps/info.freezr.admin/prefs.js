@@ -42,6 +42,7 @@ freezr.initPageScripts = function () {
     } else {
       const theInfo = {
         allowSelfReg: document.getElementById('allowSelfRegId').checked,
+        useIdsAsDbName: document.getElementById('useIdsAsDbNameId').checked,
         selfRegDefaultMBStorageLimit: (document.getElementById('selfRegDefaultMBStorageLimit').value ? parseInt(document.getElementById('selfRegDefaultMBStorageLimit').value) : null),
         allowAccessToSysFsDb: document.getElementById('allowAccessToSysFsDbId').checked,
         log_visits: document.getElementById('logVisitsId').checked,

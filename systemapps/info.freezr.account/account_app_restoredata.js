@@ -147,7 +147,7 @@ const processNextRecord = function () {
     delete record._id
 
     const url = '/feps/restore/' + appTable
-    freezerRestricted.connect.send(url, JSON.stringify({ record, options }), restoreRecCallBack, 'POST', 'application/json')
+    freezerRestricted.connect.send(url, { record, options }, restoreRecCallBack, 'POST', 'application/json')
   } else {
     processNextFile()
   }

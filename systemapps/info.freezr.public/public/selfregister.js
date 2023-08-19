@@ -4,12 +4,12 @@
 // thisPage is passed as 'firstSetUp' or unRegisteredUser (when self-registering) or newParams when registered but user doesnt have fs  and db params defined
 
 freezr.initPageScripts = function () {
-  if (!document.location.host.includes('localhost')) delete ENV_PARAMS.FS.local
+  // if (!document.location.host.includes('localhost')) delete ENV_PARAMS.FS.local
   // onsole.log(isSimpleRegPage(), { thisPage })
 
   if (!isSimpleRegPage()) {
-    const fstype = (freezrEnvironment && freezrEnvironment.fsParams) ? (freezrEnvironment.fsParams.choice || freezrEnvironment.fsParams.type) : null
-    const dbtype = (freezrEnvironment && freezrEnvironment.dbParams) ? (freezrEnvironment.dbParams.choice || freezrEnvironment.dbParams.type) : null
+    const fstype = thisPage === 'firstSetUp' ? 'sysDefault' :  ((freezrEnvironment && freezrEnvironment.fsParams) ? (freezrEnvironment.fsParams.choice || freezrEnvironment.fsParams.type) : null)
+    const dbtype = thisPage === 'firstSetUp' ? 'sysDefault' :  ((freezrEnvironment && freezrEnvironment.dbParams) ? (freezrEnvironment.dbParams.choice || freezrEnvironment.dbParams.type) : null)
     createSelector('FS', fstype)
     createSelector('DB', dbtype)
     hideDivs(['click_goAuthFS', 'click_showOauthOptions', 'oauth_elements_FS'])
@@ -124,7 +124,10 @@ const changeSelector = function (resource) {
     const params = ENV_PARAMS[resource][choice]
     document.getElementById('msg_' + resource).innerHTML = params.msg || ''
     document.getElementById('warning_' + resource).innerHTML = params.warning || ''
-    if (resource === 'FS' && choice === 'local' && document.location.host.includes('localhost')) document.getElementById('warning_' + resource).innerHTML = ''
+    if (resource === 'FS' && choice === 'sysDefault' && thisPage === 'firstSetUp') {
+      document.getElementById('msg_FS').innerHTML = 'The system will be using the file system from ' + (freezrEnvironment?.fsParams?.choice || (freezrEnvironment?.fsParams?.type || '(error reading choice)')) 
+      document.getElementById('warning_FS').innerHTML = (freezrEnvironment?.fsParams?.choice === 'localFileSystem' && !document.location.host.includes('localhost')) ? 'Note that most cloud servers delete their local file system when they restart - ie periodically. Make sure you know what you are doing when you choose this option.' : ''
+    }
     const tabletop = document.getElementById('table_elements_' + resource)
     tabletop.innerHTML = ''
     const lowcapres = resource.toLowerCase()
@@ -136,8 +139,8 @@ const changeSelector = function (resource) {
       hideDiv('table_elements_' + resource)
       hideDiv('oauth_elements_' + resource)
     } else {
-      document.getElementById('warning_' + resource).innerText = ''
       if (params.fields && params.fields.length > 0) {
+        document.getElementById('warning_' + resource).innerText = ''
         const table = document.createElement('table')
         params.fields.forEach(item => {
           const row = document.createElement('tr')
@@ -274,14 +277,17 @@ const checkResource = function (resource, options, callback) {
   } else {
     const toSend = { resource, env: {}, action: 'checkresource' }
     toSend.env[(resource === 'FS' ? 'fsParams' : 'dbParams')] = params
-    if (resource === 'DB' && params.type === 'nedb') {
+      if (params.choice === 'sysDefault' && thisPage === 'firstSetUp') {
+        toSend.env.fsParams = freezrEnvironment.fsParams
+        toSend.env.dbParams = freezrEnvironment.dbParams
+      } else if (resource === 'DB' && params.type === 'nedb') {
       const [, , fsParams] = getFormData('FS')
       toSend.env.fsParams = fsParams
     }
 
     if (options && options.getRefreshToken) toSend.getRefreshToken = true
 
-    freezerRestricted.connect.send('/v1/admin/self_register', JSON.stringify(toSend), callback, 'POST', 'application/json')
+    freezerRestricted.connect.send('/v1/admin/self_register', toSend, callback, 'POST', 'application/json')
   }
 }
 
@@ -339,7 +345,7 @@ const launch = function () {
     sects.forEach(sect => { if (document.getElementById(sect)) document.getElementById(sect).style.display = 'none' })
     document.getElementById('launch_spinner').style.display = 'block'
     window.scrollTo({ top: 0, behavior: 'smooth' })
-    freezerRestricted.connect.send('/v1/admin/self_register', JSON.stringify(theInfo), gotRegisterStatus, 'POST', 'application/json')
+    freezerRestricted.connect.send('/v1/admin/self_register', theInfo, gotRegisterStatus, 'POST', 'application/json')
   }
 }
 const isValidEmail = function (aText) {

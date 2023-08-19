@@ -21,10 +21,9 @@ freezr.initPageScripts = async function () {
   //   console.log({ errors, resourceData })
   // })
   freezr.utils.getAppResourceUsage(null, (error, useageData) => {
-    console.log('ret from getting all resources  ', { error, useageData })
+    // console.log('ret from getting all resources  ', { error, useageData })
     const appListDiv = document.getElementById('app_list')
     if (useageData && useageData.resources && useageData.resources.length > 0) {
-      console.log('hereerh  ')
       appListDiv.appendChild(makeEl('h3', null, ('Total size: ' + showSize(useageData.totalSize))))
       appListDiv.appendChild(makeEl('br'))
       const gridContainer = makeDiv({ display: 'grid', 'grid-template-columns': '250px 80px 80px 280px 80px', padding: '10px', 'row-gap': '5px' })

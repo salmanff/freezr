@@ -40,7 +40,11 @@ exports.readWriteUserData = function (req, res, dsManager, next) {
   if (!freezrAttributes.owner_user_id) freezrAttributes.owner_user_id = freezrAttributes.requestor_user_id
 
   // for admin
-  if (req.body.appName === 'info.freezr.admin' && req.session.logged_in_as_admin && helpers.SYSTEM_ADMIN_APPTABLES.indexOf(req.params.app_table) > -1) freezrAttributes.requestor_user_id = 'fradmin'
+  if (req.body.appName === 'info.freezr.admin' && req.session.logged_in_as_admin && helpers.SYSTEM_ADMIN_APPTABLES.indexOf(req.params.app_table.replace(/\./g, '_')) > -1) freezrAttributes.requestor_user_id = 'fradmin'
+  // todo - clean up so the permissions are more structures (2023) - also on readpremissions in app_handler
+  if (req.session.logged_in_as_admin && helpers.SYSTEM_ADMIN_APPTABLES.indexOf(req.params.app_table.replace(/\./g, '_')) > -1) freezrAttributes.owner_user_id = 'fradmin'
+
+  fdlog(' req.session.logged_in_as_admin ', req.session.logged_in_as_admin, 'req.params.app_table ', req.params.app_table, { freezrAttributes })
 
   const getDbTobeRead = function () {
     fdlog('getDbTobeRead ', { freezrAttributes })
@@ -707,6 +711,7 @@ exports.addPublicRecordAndIfFileFileFS = function (req, res, dsManager, next) {
             if (err) {
               cb(err)
             } else if (!items || items.length === 0) {
+              console.warn('error getting path ', req.path)
               cb(new Error('Public id not found'))
             } else {
               req.freezrPublicObject = items[0]
@@ -714,7 +719,7 @@ exports.addPublicRecordAndIfFileFileFS = function (req, res, dsManager, next) {
             }
           })
         } else {
-          cb(new Error('Public id not found'))
+          cb(new Error('Public id not found', req.path))
         }
       } else {
         req.freezrPublicObject = items[0]
@@ -786,7 +791,7 @@ exports.addPublicFs = function (req, res, dsManager, next) {
 exports.addPublicUserFs = function (req, res, dsManager, next) {
   fdlog('addPublicUserFs ', req.params)
   req.freezrPublicManifestsDb.query({ user_id: req.params.user_id, app_name: req.params.app_name }, null, (err, results) => {
-    if (req.params.app_name === 'info.freezr.account' && req.path === '/publicfiles/' + req.params.user_id + '/' + req.params.app_name + '/profilePict.jpg') {
+    if (req.params.app_name === 'info.freezr.account' && req.path === '/publicfiles/' + req.params.app_name + '/' + req.params.user_id + '/profilePict.jpg') {
       results = [{
         fakeManifest: true,
         todo: 'need to make this exception into a public manifest of exceptions'
@@ -850,6 +855,7 @@ exports.addUserFilesDb = function (req, res, dsManager, next) {
     owner: req.params.user_id,
     app_table: req.params.app_name + '.files'
   }
+  console.log('addUserFilesDb', { oat })
   dsManager.getorInitDb(oat, {}, function (err, userFilesDb) {
     if (err) {
       res.sendStatus(401)

@@ -79,8 +79,9 @@ const buttons = {
 
       appUrl = normliseGithubUrl(appUrl)
       freezerRestricted.connect.ask('/v1/account/app_install_from_url.json', { app_url: appUrl, app_name: appName }, function (error, returndata) {
-        if (error || returndata.err) {
-          showError(error || returndata.err)
+        if (error || returndata.error) {
+          console.warn({ error, returndata })
+          showError((error ? (error.message || 'error installing 3.') : returndata.error))
           document.getElementById('tabDownloadInner').style.display = 'block'
           document.getElementById('installingAppViaUrl').style.display = 'none'
         } else {
@@ -123,13 +124,15 @@ const buttons = {
 
         if (file.size > 1000000) showError('You are uploading a large file. This might take a little while. Please be patient.')
         freezerRestricted.connect.send(url, uploadData, function (error, returndata) {
-          if (error || returndata.err) {
+          if (error) {
             console.warn({ error, returndata })
-            showError(error, returndata.err)
+            showError(error.message || error.code || 'Error installing 1.')
+          } else if (returndata?.error) {
+            showError(returndata.error || 'Error installing 2.')
           } else {
             installSuccessProcess(returndata)
           }
-        }, 'PUT', null)
+        }, 'PUT', null, { uploadFile: true })
       }
     }
   },
@@ -145,9 +148,9 @@ const buttons = {
       showError('Invalid app url - please correct the app url or leave blank if not needed')
     } else {
       freezerRestricted.connect.ask('/v1/account/app_install_blank', { app_name: appName, served_url: servedUrl, app_display_name: displayName }, function (error, returndata) {
-        if (error || returndata.err) {
+        if (error || returndata.error) {
           console.warn({ error, returndata })
-          showError('Error updating app!')
+          showError('Error updating app!' + (error ? error.message : returndata.error))
         } else {
           installSuccessProcess(returndata)
         }
@@ -164,7 +167,7 @@ const buttons = {
       freezerRestricted.connect.ask('/v1/account/appMgmtActions.json', { action: 'updateApp', app_name: appName }, function (error, returndata) {
         if (error || returndata.error || returndata.errors) {
           console.warn({ error, returndata })
-          showError('Error updating app!')
+          showError('Error updating app!' + (error ? error.message : returndata.error))
         } else {
           installSuccessProcess(returndata)
         }
@@ -274,13 +277,13 @@ const handleDrop = function (e) {
     freezerRestricted.menu.resetDialogueBox(true)
     if (file.size > 1000000) showError('You are uploading a large file. This might take a little while. Please be patient.')
     freezerRestricted.connect.send(url, uploadData, function (error, returndata) {
-      if (error || returndata.err) {
+      if (error || returndata.error) {
         console.warn({ error, returndata })
-        showError(error, returndata.err)
+        showError((error ? error.message : returndata.error))
       } else {
         installSuccessProcess(returndata)
       }
-    }, 'PUT', null)
+    }, 'PUT', null, { uploadFile: true })
   }
 }
 const preventDefaults = function (e) {
@@ -307,6 +310,7 @@ let timer = null
 const showError = function (errorText) {
   clearTimeout(timer)
   const errorBox = document.getElementById('errorBox')
+  errorBox.style['font-size'] = '24px'
   errorBox.innerHTML = errorText || ' &nbsp '
   if (errorText) {
     timer = setTimeout(function () {

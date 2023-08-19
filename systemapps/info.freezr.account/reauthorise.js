@@ -69,7 +69,6 @@ const populateFormsFromParams = function () {
       }
     })
     receivedParams = storedParams
-    // console.log(receivedParams)
     window.localStorage.removeItem('params')
     return true
   } else if (regcode) {
@@ -89,7 +88,7 @@ const checkResource = function (options, callback) {
   const typesCorrect = checkFsInputs()
   if (typesCorrect) {
     var toSend = { resource, env: { fsParams: receivedParams }, action: 'checkresource' }
-    freezerRestricted.connect.send('/v1/admin/self_register', JSON.stringify(toSend), callback, 'POST', 'application/json')
+    freezerRestricted.connect.send('/v1/admin/self_register', toSend, callback, 'POST', 'application/json')
   }
 }
 
@@ -128,7 +127,7 @@ const recordAuthParams = function () {
   } else {
     hideDivs(['passEnterDiv', 'click_goAuthFS'])
     var theInfo = { action: 'updateReAuthorisedFsParams', userId, password, env: { fsParams: receivedParams } }
-    freezerRestricted.connect.send('/v1/admin/self_register', JSON.stringify(theInfo), gotRegisterStatus, 'POST', 'application/json')
+    freezerRestricted.connect.send('/v1/admin/self_register', theInfo, gotRegisterStatus, 'POST', 'application/json')
   }
 }
 

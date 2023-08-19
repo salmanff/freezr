@@ -203,7 +203,7 @@ const updateRecord = function (record, cb) {
   delete record._id
 
   const url = '/feps/restore/' + dl.current_collection.name
-  freezerRestricted.connect.send(url, JSON.stringify({ record, options }), function (err, ret) {
+  freezerRestricted.connect.send(url, { record, options }, function (err, ret) {
     cb(err, ret)
   }, 'POST', 'application/json')
 }

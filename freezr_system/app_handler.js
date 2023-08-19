@@ -152,12 +152,12 @@ exports.write_record = function (req, res) { // create update or upsert
   // app.post('/feps/write/:app_table/:data_object_id', userDataAccessRights, app_handler.write_record);
   // app.post('/feps/upsert/:app_table', userDataAccessRights, app_handler.write_record);
 
-  fdlog('write_record', 'ceps writeData at ' + req.url) // req.query , req.body
+  fdlog('write_record', 'ceps writeData at ' + req.url, req.query) // req.query , req.body
 
   const isUpsert = (req.query.upsert === 'true')
   fdlog('req.query ', req.query, { isUpsert })
   const isUpdate = helpers.startsWith(req.url, '/ceps/update') || helpers.startsWith(req.url, '/feps/update') || (helpers.startsWith(req.url, '/feps/write') && req.query.upsert === 'true')
-  const replaceAllFields = isUpdate && (req.query.replaceAllFields || helpers.startsWith(req.url, '/ceps/update'))
+  const replaceAllFields = isUpdate && (req.query?.replaceAllFields === 'true' || helpers.startsWith(req.url, '/ceps/update'))
   const isCeps = helpers.startsWith(req.url, '/ceps/')
   const isQueryBasedUpdate = (!isCeps && isUpdate && !req.params.data_object_id && req.body.q && req.body.keys)
   if (req.params.data_object_start) {
@@ -165,6 +165,8 @@ exports.write_record = function (req, res) { // create update or upsert
     req.params.data_object_id = parts.join('/')
   }
 
+
+  fdlog('write rec ', { isUpdate, replaceAllFields }, 'query: ', req.body, 'body', req.query)
   const write = req.body || {}
   const dataObjectId = (isUpsert || isUpdate) ? req.params.data_object_id : (req.body._id ? (req.body._id + '') : null)
 
@@ -217,19 +219,20 @@ exports.write_record = function (req, res) { // create update or upsert
             write._created_by_user = req.freezrAttributes.requestor_user_id
             write._created_by_app = req.freezrAttributes.requestor_app
           }
-          req.freezrRequesteeDB.update(dataObjectId, write, { replaceAllFields, old_entity: results }, cb)
+          req.freezrRequesteeDB.update(dataObjectId.toString(), write, { replaceAllFields, old_entity: results }, cb)
         } else {
           const errmsg = isUpsert ? 'internal err in old record' : 'Record exists - use "update" to update existing records'
           cb(helpers.auth_failure('app_handler', exports.version, 'write_record', req.freezrAttributes.requestor_app, errmsg))
         }
       } else if (isUpdate && !isUpsert) { // should have gotten results
+        console.warn('; no record found err for update in  write_rec ', { write, results, dataObjectId, isUpsert, isUpdate })
         cb(appErr('record not found'))
       } else { // upsert / create - new document - should not have gotten results
         if (req.freezrAttributes.owner_user_id !== req.freezrAttributes.requestor_user_id) {
           write._created_by_user = req.freezrAttributes.requestor_user_id
           write._created_by_app = req.freezrAttributes.requestor_app
         }
-        req.freezrRequesteeDB.create(dataObjectId, write, { restoreRecord: false }, cb)
+        req.freezrRequesteeDB.create(dataObjectId?.toString(), write, { restoreRecord: false }, cb)
       }
     }
   ],
@@ -634,7 +637,7 @@ exports.restore_record = function (req, res) {
     // 4. write
     function (results, cb) {
       if (results && isUpdate && results._date_created /* ie is non empty record */) {
-        req.freezrRequesteeDB.update(dataObjectId, write, { old_entity: results, restoreRecord: true, replaceAllFields: true }, cb)
+        req.freezrRequesteeDB.update(dataObjectId.toString(), write, { old_entity: results, restoreRecord: true, replaceAllFields: true }, cb)
       } else if (results && !isUpdate && !isUpsert) { // should have gotten results
         cb(appErr('Existing record found when this should not be an update '))
       } else if (isUpdate) { // should have gotten results
@@ -896,7 +899,7 @@ exports.shareRecords = function (req, res) {
               if (!accessible[granteeKey][fullPermName]) accessible[granteeKey][fullPermName] = { granted: true }
 
               if (grantee === '_public' || grantee === '_privatelink' || helpers.startsWith(grantee, '_privatefeed:')) {
-                publicid = ((grantee === '_public' && req.body.publicid) ? req.body.publicid : ('@' + userId + '/' + req.body.table_id + '/' + rec._id))
+                publicid = ((grantee === '_public' && req.body.publicid) ? req.body.publicid : ('@' + userId + '/' + req.body.table_id + '/' + rec._id.toString()))
                 accessible[granteeKey][fullPermName].public_id = publicid
                 accessible[granteeKey][fullPermName]._date_published = datePublished
                 accessible[granteeKey][fullPermName]._date_modified = new Date().getTime
@@ -948,13 +951,13 @@ exports.shareRecords = function (req, res) {
                 console.warn('req.body.publicid used - to recheck this ' + req.body.publicid + ' req.body.table_id', req.body.table_id, 'rec._id ', rec._id, results)
                 cb2(new Error('Another entity already has the id requested.'))
               } else {
-                req.freezrRequesteeDB.update(rec._id, updates, { newSystemParams: true }, function (err, results) {
+                req.freezrRequesteeDB.update(rec._id.toString(), updates, { newSystemParams: true }, function (err, results) {
                   cb2(err)
                 })
               }
             })
           } else {
-            req.freezrRequesteeDB.update(rec._id, updates, { newSystemParams: true }, function (err, results) {
+            req.freezrRequesteeDB.update(rec._id.toString(), updates, { newSystemParams: true }, function (err, results) {
               fdlog('sharing - updated ', { rec, updates })
               cb2(err)
             })
@@ -971,7 +974,7 @@ exports.shareRecords = function (req, res) {
           grantee = grantee.replace(/\./g, '_')
           granteeList = helpers.addToListAsUnique(granteeList, grantee)
         })
-        req.freezrUserPermsDB.update(grantedPermission._id, { grantees: granteeList }, { replaceAllFields: false }, function (err, results) {
+        req.freezrUserPermsDB.update(grantedPermission._id.toString(), { grantees: granteeList }, { replaceAllFields: false }, function (err, results) {
           cb(err)
         })
         // note that the above live is cumulative.. it could be cleaned if it bloats
@@ -986,7 +989,7 @@ exports.shareRecords = function (req, res) {
     function (cb) {
       if (hasPublicLink || hasPrivateFeed || hasPrivateLink) {
         async.forEach(recordsToChange, function (rec, cb2) {
-          const publicid = (hasPublicLink && req.body.publicid) ? req.body.publicid : ('@' + userId + '/' + req.body.table_id + '/' + rec._id)
+          const publicid = (hasPublicLink && req.body.publicid) ? req.body.publicid : ('@' + userId + '/' + req.body.table_id + '/' + rec._id.toString())
           let searchWords = []
           if (grantedPermission.searchFields && grantedPermission.searchFields.length > 0) {
             searchWords = helpers.getUniqueWords(rec, grantedPermission.searchFields)
@@ -1166,7 +1169,10 @@ const checkWritePermission = function (req, forcePermName) {
 const checkReadPermission = function (req, forcePermName) {
   if (req.freezrAttributes.own_record) return [true, true, []]
   if (req.freezrAttributes.owner_user_id === req.freezrAttributes.requestor_user_id && ['dev.ceps.contacts', 'dev.ceps.groups'].indexOf(req.freezrRequesteeDB.oac.app_table) > -1 && req.freezrAttributes.requestor_app === 'info.freezr.account') return [true, true, [{ type: 'db_query' }]]
+  // if (req.session.logged_in_as_admin && ['dev.ceps.contacts', 'dev.ceps.groups'].indexOf(req.freezrRequesteeDB.oac.app_table) > -1 && req.freezrAttributes.requestor_app === 'info.freezr.account') return [true, true, [{ type: 'db_query' }]]
+  if (req.session.logged_in_as_admin && ['info.freezr.admin.visitAuthFailures', 'info.freezr.admin.visitLogs'].indexOf(req.freezrRequesteeDB.oac.app_table) > -1 && req.freezrAttributes.requestor_app === 'info.freezr.admin') return [true, true, [{ type: 'db_query' }]]
   // console.log - todo - all system manifests and permissions should be separated out and created in config files and populated upom initiation
+
 
   let granted = false
   let readAll = false
@@ -1457,7 +1463,7 @@ NEW     message:
               if (!recordAccessibleField[member].messaged) recordAccessibleField[member].messaged = []
               recordAccessibleField[member].messaged.push(new Date().getTime()) // newd -> list of dates??
             })
-            req.freezrRequesteeDB.update(params.record_id, { _accessible: recordAccessibleField }, { replaceAllFields: false, newSystemParams: true }, cb)
+            req.freezrRequesteeDB.update(params.record_id.toString(), { _accessible: recordAccessibleField }, { replaceAllFields: false, newSystemParams: true }, cb)
           }
         }
 
@@ -1532,7 +1538,7 @@ NEW     message:
           // confirm message receipt
           function (confirmed, cb) {
             status++ // = 2
-            storedmessageId = confirmed._id
+            storedmessageId = confirmed._id.toString()
             // helpers.send_success(res, { success: true })
             cb(null)
           },
@@ -1636,7 +1642,7 @@ NEW     message:
               // res.sendStatus(401)
             } else {
               // todo - discard old nonces???
-              req.freezrSentMessages.update(results[0]._id, { status: 'verified', nonce: null }, { replaceAllFields: false }, function (err) {
+              req.freezrSentMessages.update(results[0]._id.toString(), { status: 'verified', nonce: null }, { replaceAllFields: false }, function (err) {
                 if (err) felog('error updating sent messages')
                 helpers.send_success(res, { record: results[0].record, message: results[0].message, success: true })
               })
@@ -1824,7 +1830,7 @@ const PUBLIC_PROFILE_PICT_EXCEPTIONS = {
 
 exports.create_file_record = function (req, res) {
   fdlog(req, ' create_file_record at ' + req.url + 'body:' + JSON.stringify((req.body && req.body.options) ? req.body.options : ' none'))
-
+  
   if (req.body.options && (typeof req.body.options === 'string')) req.body.options = JSON.parse(req.body.options) // needed when upload file
   if (req.body.data && (typeof req.body.data === 'string')) req.body.data = JSON.parse(req.body.data) // needed when upload file
 
@@ -1893,9 +1899,9 @@ exports.create_file_record = function (req, res) {
       const write = (req.body.options && req.body.options.data) ? req.body.options.data : {}
       write._UploadStatus = 'wip'
       if (isUpdate) {
-        req.freezruserFilesDb.update(dataObjectId, write, { newSystemParams: isAProfilePict }, cb)
+        req.freezruserFilesDb.update(dataObjectId.toString(), write, { newSystemParams: isAProfilePict }, cb)
       } else {
-        req.freezruserFilesDb.create(dataObjectId, write, { newSystemParams: isAProfilePict }, cb)
+        req.freezruserFilesDb.create(dataObjectId.toString(), write, { newSystemParams: isAProfilePict }, cb)
       }
     },
 
@@ -1917,7 +1923,7 @@ exports.create_file_record = function (req, res) {
 
     // re-dupate record
     function (wrote, cb) {
-      req.freezruserFilesDb.update(dataObjectId, { _UploadStatus: 'complete' }, { replaceAllFields: false }, cb)
+      req.freezruserFilesDb.update(dataObjectId.toString(), { _UploadStatus: 'complete' }, { replaceAllFields: false }, cb)
     }
   ],
   function (err, writeConfirm) {
@@ -2008,7 +2014,7 @@ exports.sendUserFileWithAppToken = function (req, res) {
 exports.getManifest = function (req, res) {
   // app.get('/v1/developer/manifest/:app_name'
   // getAllAppTableNames
-  felog('NOT TESTED - NOT WROKING - REVIEW')
+  felog('NOT TESTED - REVIEW')
   function endCB (err, manifest = null, appTables = []) {
     if (err) felog('got err in getting manifest ', err)
     if (manifest) {

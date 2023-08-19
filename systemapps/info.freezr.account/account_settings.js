@@ -77,7 +77,7 @@ freezr.initPageScripts = function () {
     document.getElementById('profilePictPathMsg').style.display = 'none'
     document.getElementById('outerGrid').style['grid-template-columns'] = '1fr'
   }
-  document.getElementById('profilePictInner').src = '/publicfiles/' + freezrMeta.userId + '/info.freezr.account/profilePict.jpg?timestamp=' + new Date().getTime()
+  document.getElementById('profilePictInner').src = '/publicfiles/info.freezr.account/' + freezrMeta.userId + '/profilePict.jpg?timestamp=' + new Date().getTime()
   if (isIos()) {
     document.getElementById('upload_area').style.display = 'none'
     document.getElementById('choosePict').innerHTML = 'Choose a Picture'
@@ -188,7 +188,7 @@ const targetDropArea = function (e) {
   if (!target.className.includes('drop-area')) {
     target = target.parentElement
   }
-  if (!target.className.includes('drop-area')) console.log('akkkhhh - should iterate')
+  if (!target.className.includes('drop-area')) console.warn('akkkhhh - todo - should iterate')
   return target
 }
 const choosePict = function (evt) {
@@ -213,14 +213,14 @@ const uploadPictNow = function (file) {
       document.getElementById('profilePictOuter').style.display = 'block'
       document.getElementById('profilePictPathMsg').style.display = 'block'
       document.getElementById('outerGrid').style['grid-template-columns'] = '2fr 2fr 1fr'
-      document.getElementById('profilePictInner').src = '/publicfiles/' + freezrMeta.userId + '/info.freezr.account/profilePict.jpg?timestamp=' + new Date().getTime()
+      document.getElementById('profilePictInner').src = '/publicfiles/info.freezr.account/' + freezrMeta.userId + '/profilePict.jpg?timestamp=' + new Date().getTime()
       showError('new profile picture uploaded')
     }
-  }, 'PUT', null)
+  }, 'PUT', null, { uploadFile: true })
 }
 const deletePict = async function () {
   const delInfo = await freepr.feps.delete('profilePict.jpg', { app_table: 'info.freezr.account.files' })
-  document.getElementById('profilePictInner').src = '/publicfiles/' + freezrMeta.userId + '/info.freezr.account/profilePict.jpg?timestamp=' + new Date().getTime()
+  document.getElementById('profilePictInner').src = '/publicfiles/info.freezr.account/' + freezrMeta.userId + '/profilePict.jpg?timestamp=' + new Date().getTime()
   showError('Profile picture removed')
 }
 

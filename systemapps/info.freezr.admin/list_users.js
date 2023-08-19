@@ -4,7 +4,7 @@
 
 freezr.initPageScripts = function () {
   document.onclick = function (e) {
-    console.log('click')
+    // onsole.log('click')
     if (e.target.id.indexOf('click') === 0) {
       getUsage(e.target)
     }

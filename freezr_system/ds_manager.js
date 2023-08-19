@@ -111,7 +111,7 @@ DATA_STORE_MANAGER.prototype.getOrSetUserDS = function (owner, callback) {
               ? self.systemEnvironment.fsParams
               : ownerEntries[0].fsParams)
           : null
-
+        if (dbParams && ownerEntries[0].dbParams?.type === 'system') dbParams.useIdsAsDbName = ownerEntries[0].dbParams.useIdsAsDbName
         // fdlog('nowdec30 - todo if system and not nedb, pass unified db')
 
         if (fsParams && fsParams.type && dbParams && dbParams.type) {
@@ -133,15 +133,15 @@ DATA_STORE_MANAGER.prototype.getOrSetUserDS = function (owner, callback) {
 const RECALCUATE_STORAGE_INNER_LIMIT = (6 * 1000)
 USER_DS.prototype.getUseageWarning = function () {
   if (!this.useage || !this.useage.storageLimit) return { ok: true }
-  if (this.useage.errorInCalculating) console.warn('this.useage.errorInCalculating', this.useage.errorInCalculating)
+  if (this.useage.errorInCalculating) console.warn('ERRR this.useage.errorInCalculating', this.useage.errorInCalculating)
   const isNotOk = this.useage.errorInCalculating ||
-    (this.useage.lastStorageCalcs?.totalSize !== null && this.useage.lastStorageCalcs?.totalSize !== undefined && (this.useage.storageLimit * 1000000 > this.useage.lastStorageCalcs?.totalSize))
+    (this.useage.lastStorageCalcs?.totalSize !== null && this.useage.lastStorageCalcs?.totalSize !== undefined && (this.useage.storageLimit * 1000000 < this.useage.lastStorageCalcs?.totalSize))
   const w = {
     ok: !isNotOk,
     storageLimit: this.useage.storageLimit,
     storageUse: this.useage.lastStorageCalcs?.totalSize
   }
-  if (!w.ok) console.warn('not okay this.useage.errorInCalculating ', this.useage.errorInCalculating, 'this.useage.storageLimit ', this.useage.storageLimit, 'this.useage.lastStorageCalcs?.totalSize ', this.useage.lastStorageCalcs?.totalSize)
+  if (!w.ok) console.warn('not okay this.useage.errorInCalculating ', this.useage.errorInCalculating, 'this.useage.storageLimit ', this.useage.storageLimit, 'this.useage.lastStorageCalcs?.totalSize ', this.useage.lastStorageCalcs?.totalSize, { isNotOk })
   return w
 }
 USER_DS.prototype.setTimerToRecalcStorage = function (force) {
@@ -610,9 +610,10 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
           updatesToEntity._date_modified = new Date().getTime()
           // note todo - keeping default mongo return params pendign ceps definition
           ds.db.update_multi_records(idOrQuery, updatesToEntity, function (err, ret) {
-            if (!err && typeof idOrQuery === 'string' && ret.nModified === 0) {
+            if (!err && typeof idOrQuery === 'string' && ret?.nModified === 0) {
               cb(new Error('no record found to update'))
             } else {
+              if (!ret) ret = {}
               ret.useage = userDs.getUseageWarning()
               cb(err, ret)
             }

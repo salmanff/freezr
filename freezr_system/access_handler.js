@@ -48,6 +48,7 @@ exports.loggedInUserPage = function (req, res, dsManager, next) {
     if (dsManager.freezrIsSetup) helpers.auth_warning('server.js', exports.version, 'accountLoggedIn', 'accountLoggedIn- Unauthorized attempt to access data ' + req.url + ' without login ')
     sendFailureOrRedirect(res, req, '/account/login?fwdTo=' + req.url)
   } else if (req.params.app_name === 'info.freezr.admin' && !req.session.logged_in_as_admin) {
+    visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: 'cred', accessPt: 'token' })
     sendFailureOrRedirect(res, req, '/account/home?redirect=adminOnly')
   } else {
     req.freezr_server_version = exports.version
@@ -56,9 +57,11 @@ exports.loggedInUserPage = function (req, res, dsManager, next) {
       fdlog('loggedInUserPage ', { err, tokenInfo })
       if (!tokenInfo || !tokenInfo.app_token || !owner || err) {
         // fdlog('didnt get appToken ')
+        visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: 'cred', accessPt: 'token' })
         sendFailureOrRedirect(res, req, '/account/login?redirect=missing_token')
       } else if (!tokenInfo.logged_in || tokenInfo.requestor_id !== req.session.logged_in_user_id) {
         felog('loggedInUserPage ', 'auth error - trying to access user account with wrong user', req.session.logged_in_user_id, { tokenInfo })
+        visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: 'cred', accessPt: 'token' })
         sendFailureOrRedirect(res, req, '/account/home?redirect=access_mismatch')
       } else {
         req.freezrTokenInfo = tokenInfo
@@ -77,9 +80,11 @@ exports.loggedInUserPage = function (req, res, dsManager, next) {
             theDs.getorInitAppFS(req.params.app_name, {}, function (err, appFS) {
               if (err) {
                 felog('loggedInUserPage ', 'err get-setting app-fs')
+                visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: 'internal', accessPt: 'other' })
                 res.sendStatus(401)
               } else {
                 req.freezrAppFS = appFS
+                visitLogger.recordLoggedInVisit(dsManager, req, { visitType: (req.freezrVisitType || 'pages') })
                 next()
               }
             })
@@ -91,8 +96,8 @@ exports.loggedInUserPage = function (req, res, dsManager, next) {
 }
 exports.validatedOutsideUserAppPage = function (req, res, dsManager, next) {
   // todo - only works for others logged into the same app right noew
-  fdlog('loggedInUserPage dsManager.freezrIsSetup', dsManager.freezrIsSetup, 'user', req.session.logged_in_user_id)
-  
+  fdlog('validatedOutsideUserAppPage user', req.session.logged_in_user_id, ' app ', req.params.app_name)
+
   const deviceCode = req.session.device_code
   const userId = req.session.logged_in_user_id
   const appName = req.params.app_name
@@ -113,6 +118,7 @@ exports.validatedOutsideUserAppPage = function (req, res, dsManager, next) {
           fdlog('validatedOutsideUserAppPage got token info ', tokenInfo)
           // check freezrTokenInfo for app_name owner_id requestor_id
           req.freezrTokenInfo = recordWithOldestExpiry(tokenInfo)
+          visitLogger.recordLoggedInVisit(dsManager, req, { visitType: 'pages' })
           addAppFs(req, res, dsManager, next)
         } else {
           if (req.session.logged_in_user_id) {
@@ -121,7 +127,7 @@ exports.validatedOutsideUserAppPage = function (req, res, dsManager, next) {
             }
             validateLoggedInUserOutsideAppAccessAndAddAppFs(req, res, dsManager, next)
           } else {
-            console.log('Cannot validate outside users yet - this is coming')
+            console.warn('Cannot validate outside users yet - this is todo')
           }
         }
       })
@@ -132,13 +138,19 @@ const validateLoggedInUserOutsideAppAccessAndAddAppFs = function (req, res, dsMa
   const requestor = req.session.logged_in_user_id
   const owner = req.params.user_id
   const appToken = helpers.generateAppToken(requestor, req.params.app_name, req.session.deviceCode)
+  fdlog('validateLoggedInUserOutsideAppAccessAndAddAppFs user ', req.originalUrl,  req.freezrTokenInfo)
 
   req.freezr_server_version = exports.version
 
   async.waterfall([
     // 1 make sure requestor has app installed
     function (cb) {
-      dsManager.getorInitDb({ app_table: 'info.freezr.account.app_list', owner: req.session.logged_in_user_id }, {}, cb)
+      if (visitLogger.tooManyFailedAuthAttempts(dsManager.visitLogs, req, 'outsideAccessToken')) {
+        // get list of amdin users and allow them in gradually
+        cb(new Error('authentication'))
+      } else {
+        dsManager.getorInitDb({ app_table: 'info.freezr.account.app_list', owner: req.session.logged_in_user_id }, {}, cb)
+      }
     },
     function (requestorAppDb, cb) {
       requestorAppDb.query({ app_name: req.params.app_name }, {}, cb) // todonow -> add "outside app"
@@ -148,7 +160,6 @@ const validateLoggedInUserOutsideAppAccessAndAddAppFs = function (req, res, dsMa
       // todo  - make sure it exists (other wise could be used as an attack vector??)
       cb()
     },
-
 
     // 2 Make sure owner has granted permission
     function (cb) {
@@ -206,8 +217,11 @@ const validateLoggedInUserOutsideAppAccessAndAddAppFs = function (req, res, dsMa
     }
   ], function (err) {
     if (err) {
+      console.warn('err getting page ' + req.originalUrl, { err })
+      visitLogger.addNewFailedAuthAttempt(dsManager, req, { accessPt: 'outsideAccessToken', source: 'todo-creds or too many?' })
       res.redirect('/')
     } else {
+      visitLogger.recordLoggedInVisit(dsManager, req, { visitType: 'pages' })
       addAppFs(req, res, dsManager, next)
     }
   })
@@ -265,15 +279,18 @@ exports.loggedInOrNotForSetUp = function (req, res, dsManager, next) {
     const owner = req.session.logged_in_user_id
     getOrSetAppTokenForLoggedInUser(dsManager.getDB(APP_TOKEN_OAC), req, function (err, tokenInfo) {
       if (!tokenInfo || !tokenInfo.app_token || !owner || err) {
+        visitLogger.addNewFailedAuthAttempt(dsManager, req, { accessPt: 'token', source: 'creds' })
         felog('loggedInOrNotForSetUp', { err, tokenInfo })
         sendFailureOrRedirect(res, req, '/account/login?redirect=missing_token')
       } else if (!tokenInfo.logged_in || tokenInfo.requestor_id !== req.session.logged_in_user_id) {
+        visitLogger.addNewFailedAuthAttempt(dsManager, req, { accessPt: 'token', source: 'creds' })
         felog('loggedInOrNotForSetUp', 'auth error - trying to access user account with wrong user', req.session.logged_in_user_id, { tokenInfo })
         sendFailureOrRedirect(res, req, '/account/home?redirect=access_mismatch')
       } else {
         req.freezrTokenInfo = tokenInfo
         dsManager.getOrSetUserDS(owner, function (err, userDS) {
           fdlog('getOrSetUserDS get err type here', (err ? err.message : ''))
+          visitLogger.recordLoggedInVisit(dsManager, req, { visitType: 'pages' })
           if (err && err.message === 'user incomplete') {
             req.freezrSetUpStatus = 'newParams'
             next()
@@ -296,6 +313,8 @@ exports.publicUserPage = function (req, res, dsManager, next) {
   req.freezr_server_version = exports.version
   // visitLogger.record(req, freezr_environment, freezr_prefs, {source:'userLoggedInRights'});
   fdlog('publicUserPage', 'access_handler.publicUserPage for ' + req.originalUrl)
+  visitLogger.recordLoggedInVisit(dsManager, req, { userId: 'public', visitType: (req.freezrVisitType || 'pages') })
+
   if (!dsManager.freezrIsSetup &&
     !helpers.startsWith(req.originalUrl, '/app_files/info.freezr.public/public/') &&
     !helpers.startsWith(req.originalUrl, '/app_files/info.freezr.admin/public/') &&
@@ -366,11 +385,17 @@ exports.accountLoggedInAPI = function (req, res, dsManager, next) {
   fdlog('accountLoggedInAPI  ' + req.originalUrl)
 
   const owner = req.session.logged_in_user_id
-  if (!dsManager.freezrIsSetup || !req.session || !req.session.logged_in_user_id) {
+  if (visitLogger.tooManyFailedAuthAttempts(dsManager.visitLogs, req, 'login')) {
+    // get list of amdin users and allow them in gradually
+    visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: 'tooMany', accessPt: 'api' })
+    res.sendStatus(401)
+  } else if (!dsManager.freezrIsSetup || !req.session || !req.session.logged_in_user_id) {
     felog('accountLoggedInAPI', 'unauthorised access to logged in API')
+    visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: 'cred', accessPt: 'token' })
     res.sendStatus(401)
   } else if (req.params.app_name === 'info.freezr.admin' && !req.session.logged_in_as_admin) {
     felog('accountLoggedInAPI', 'unauthorised access to admin API')
+    visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: 'cred', accessPt: 'token' })
     res.sendStatus(401)
   } else if (owner && dsManager.freezrIsSetup && req.session && req.header('Authorization')) {
     fdlog('accountLoggedInAPI', owner, dsManager.freezrIsSetup)
@@ -380,12 +405,15 @@ exports.accountLoggedInAPI = function (req, res, dsManager, next) {
       // onsole.log('here ', { err, tokenInfo })
       if (!tokenInfo || !owner || err) {
         felog('accountLoggedInAPI', 'err in getAppTokenParams', err)
+        visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: 'cred', accessPt: 'token' })
         console.warn('error with token : ', { err })
         res.sendStatus(401)
       } else if (!['info.freezr.account', 'info.freezr.admin'].includes(tokenInfo.app_name) && !['info.freezr.account', 'info.freezr.admin'].includes(req.params.app_name)) {
+        visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: 'cred', accessPt: 'token' })
         felog('accountLoggedInAPI', 'auth error - trying to access account with non account token')
         res.sendStatus(401)
       } else if (!tokenInfo.logged_in || tokenInfo.requestor_id !== req.session.logged_in_user_id) {
+        visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: 'cred', accessPt: 'token' })
         felog('accountLoggedInAPI', 'auth error 1 - trying to access user account with wrong user', req.session.logged_in_user_id, { tokenInfo })
         res.sendStatus(401)
       } else {
@@ -394,12 +422,14 @@ exports.accountLoggedInAPI = function (req, res, dsManager, next) {
         dsManager.getOrSetUserDS(owner, function (err, userDS) {
           if (err) felog('accountLoggedInAPI', 'err getting user ', owner)
           req.freezrUserDS = userDS
+          visitLogger.recordLoggedInVisit(dsManager, req, { visitType: 'apis' })
           next()
         })
       }
     })
   } else {
     felog('accountLoggedInAPI', 'reject accountLoggedInAPI')
+    visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: 'cred', accessPt: 'token' })
     // visitLogger.record(req, freezr_environment, freezr_prefs, {source:'userDataAccessRights', auth_error:true});
     res.sendStatus(401)
   }
@@ -412,16 +442,17 @@ exports.userLoginHandler = function (req, res, dsManager, next) {
   // addAccountDS and perms ds
   // add user status
   fdlog('userLoginHandler')
+  const userId = (req.body && req.body.user_id) ? userIdFromUserInput(req.body.user_id) : null
 
   if (!dsManager.freezrIsSetup) {
     felog('userLoginHandler', 'Unauthorized attempt to server without being set up')
     res.sendStatus(401)
-  } else if (visitLogger.tooManyLogInAttempts(dsManager.visitLogs, req)) {
+  } else if (visitLogger.tooManyFailedAuthAttempts(dsManager.visitLogs, req, 'login')) {
     // get list of amdin users and allow them in gradually
+    visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: 'tooMany', accessPt: 'login', userId })
     res.sendStatus(401)
   } else {
     req.freezr_server_version = exports.version
-    const userId = (req.body && req.body.user_id) ? userIdFromUserInput(req.body.user_id) : null
     const userDb = dsManager.getDB(USER_DB_OAC)
 
     async.waterfall([
@@ -446,7 +477,11 @@ exports.userLoginHandler = function (req, res, dsManager, next) {
       function (results, cb) {
         const u = new User(results[0])
         if (!results || results.length === 0) {
-          cb(helpers.auth_failure('access_handler.js', exports.version, 'userLoginHandler', 'Wrong credentials'))
+          console.warn(' no such user ', userId)
+          userDb.query({ }, null, function(err, res) {
+            console.log(' all users ', { err, res, userDb })
+            cb(helpers.auth_failure('access_handler.js', exports.version, 'userLoginHandler', 'Wrong credentials 1'))
+          })
         } else if (results.length > 1) {
           cb(helpers.auth_failure('access_handler.js', exports.version, 'userLoginHandler', 'funky error getting too many users'))
         } else if (u.check_passwordSync(req.body.password)) {
@@ -457,7 +492,7 @@ exports.userLoginHandler = function (req, res, dsManager, next) {
           cb(null)
         } else {
           felog('userLoginHandler', 'wrong password - need to limit number of wring passwords - set a file in the datastore ;) ')
-          cb(helpers.auth_failure('access_handler.js', exports.version, 'userLoginHandler', 'Wrong credentials'))
+          cb(helpers.auth_failure('access_handler.js', exports.version, 'userLoginHandler', 'Wrong credentials 3'))
         }
       },
 
@@ -477,21 +512,22 @@ exports.userLoginHandler = function (req, res, dsManager, next) {
       }
     ],
     function (err) {
-      if (err) console.log('msg -> ', err.message)
+      if (err) console.warn('msg -> ', err.message)
       if (!err) {
+        visitLogger.recordLoggedInVisit(dsManager, req, { userId, visitType: 'apis' })
         helpers.send_success(res, { logged_in: true, user_id: userId })
-      } else if (err.message === 'Authentication error: Wrong credentials') {
-        console.log('nned to go to visit logger')
-        const tooManyLogins = visitLogger.tooManyLogInAttempts(dsManager.visitLogs, req)
-        visitLogger.addNewFailedLogin(dsManager, req, { tooManyLogins })
+      } else if (err.message === 'Authentication error: Wrong credentials 4') {
+        const tooManyLogins = visitLogger.tooManyFailedAuthAttempts(dsManager.visitLogs, req, 'login')
+        visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: (tooManyLogins ? 'tooMany' : 'creds'), accessPt: 'login', userId })
         if (tooManyLogins) {
-          console.warn('too many logins attempted')
-          helpers.send_failure(res, helpers.auth_failure('access_handler.js', exports.version, 'userLoginHandler', 'Wrong credentials'), 'access_handler', exports.version, 'login')
+          console.warn('userLoginHandler: too many logins attempted ', { userId })
+          helpers.send_failure(res, helpers.auth_failure('access_handler.js', exports.version, 'userLoginHandler', 'Wrong credentials 2'), 'access_handler', exports.version, 'login')
         } else {
           helpers.send_failure(res, err, 'access_handler', exports.version, 'login')
         }
         // res.redirect('/ppage')
       } else {
+        visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: 'other', accessPt: 'login', userId })
         helpers.send_failure(res, err, 'access_handler', exports.version, 'login')
       }
     })
@@ -506,7 +542,6 @@ exports.appTokenLoginHandler = function (req, res, dsManager, next) {
   } else {
     req.freezr_server_version = exports.version
   }
-
   // onsole.log('appTokenLoginHandler req.body', req.body)
 
   const password = req.body.password
@@ -523,6 +558,10 @@ exports.appTokenLoginHandler = function (req, res, dsManager, next) {
     function (cb) {
       if (!dsManager.freezrIsSetup) {
         cb(helpers.auth_failure('account_handler.js', exports.version, 'appTokenLoginHandler', 'Unauthorized attempt to server without being set up'))
+      } else if (visitLogger.tooManyFailedAuthAttempts(dsManager.visitLogs, req, 'appTokenLogin')) {
+        // get list of amdin users and allow them in gradually
+        cb(helpers.auth_failure('account_handler.js', exports.version, 'appTokenLoginHandler', 'Auth failure'))
+        res.sendStatus(401)
       } else if (!userId) {
         cb(helpers.auth_failure('account_handler.js', exports.version, 'appTokenLoginHandler', 'Missing user id'))
       } else if (!appName) {
@@ -593,10 +632,12 @@ exports.appTokenLoginHandler = function (req, res, dsManager, next) {
     // onsole.log("end of appTokenLoginHandler - got token",app_token)
     if (err) {
       felog('appTokenLoginHandler', err)
+      visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: (visitLogger.tooManyFailedAuthAttempts(dsManager.visitLogs, req, 'appTokenLogin') ? 'too many' : 'creds'), accessPt: 'appTokenLogin', userId })
       helpers.send_failure(res, err, 'account_handler', exports.version, 'appTokenLoginHandler')
     } else if (!appToken) {
       helpers.send_failure(res, helpers.error('Could not get app token for ' + appName), 'account_handler', exports.version, 'appTokenLoginHandler')
     } else {
+      visitLogger.recordLoggedInVisit(dsManager, req, { userId, visitType: 'apis' })
       helpers.send_success(res, { access_token: appToken, user_id: userId, app_name: appName, expires_in: expiresIn })
     }
   })
@@ -605,7 +646,6 @@ exports.appTokenLoginHandler = function (req, res, dsManager, next) {
 exports.userAPIRights = function (req, res, dsManager, next) {
   // onsole.log("userDataAccessRights sess "+(req.session?"Y":"N")+"  loggin in? "+req.session.logged_in_user_id+" param id"+req.params.userid);
   if (dsManager.freezrIsSetup && req.session && req.header('Authorization')) {
-    // visitLogger.record(req, freezr_environment, freezr_prefs, {source:'userDataAccessRights'});
     fdlog('userPAI rights appToken', getAppTokenFromHeader(req))
     getAppTokenParams(dsManager.getDB(APP_TOKEN_OAC), req, function (err, tokenInfo) {
       // {userId, appName, loggedIn}
@@ -614,19 +654,23 @@ exports.userAPIRights = function (req, res, dsManager, next) {
       if (err) {
         if (err.message === 'Token has expired.') {
           fdlog('expired token in userAPI rights ', tokenInfo)
+          visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: 'expired', accessPt: 'userApi', userId: tokenInfo.userId })
           helpers.send_failure(res, err, 'access_handler', exports.version, 'userAPIRights')
         } else {
+          visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: 'creds', accessPt: 'userApi' })
           felog(' userAPIRights', 'err in getAppTokenParams', err)
           res.sendStatus(401)
         }
       } else {
         fdlog('got token info ', tokenInfo)
         req.freezrTokenInfo = tokenInfo
+        visitLogger.recordLoggedInVisit(dsManager, req, { visitType: 'apis' })
         next()
       }
     })
   } else {
     felog('userAPIRights', 'rejected ')
+    visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: 'creds', accessPt: 'userApi' })
     // visitLogger.record(req, freezr_environment, freezr_prefs, {source:'userDataAccessRights', auth_error:true});
     res.sendStatus(401)
   }
@@ -638,6 +682,7 @@ exports.userAppLogOut = function (req, res, dsManager, next) {
     helpers.send_failure(res, err, 'access_handler', exports.version, 'userAppLogOut')
   } else if (!req.header('Authorization')) {
     const err = helpers.auth_failure('access_handler.js', exports.version, 'userAppLogOut', 'Unauthorized attempt to logout')
+    visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: 'creds', accessPt: 'appToken' })
     helpers.send_failure(res, err, 'access_handler', exports.version, 'userAppLogOut')
   } else {
     const appToken = getAppTokenFromHeader(req)
@@ -649,6 +694,7 @@ exports.userAppLogOut = function (req, res, dsManager, next) {
       delete tokendb.cache[appToken]
     }
     tokendb.update({ app_token: appToken }, { expiry: nowTime }, { replaceAllFields: false }, function (err) {
+      visitLogger.recordLoggedInVisit(dsManager, req, { visitType: 'apis' })
       helpers.send_success(res, { success: !err })
     })
   }
@@ -680,6 +726,7 @@ exports.userLogOut = function (req, res, dsManager, next) {
 
     const nowTime = new Date().getTime() - 1000
     const thequery = { user_device: req.session.device_code, requestor_id: req.session.logged_in_user_id }
+    visitLogger.recordLoggedInVisit(dsManager, req, { visitType: 'apis' })
     tokendb.update(thequery, { expiry: nowTime }, { replaceAllFields: false }, endLogout)
   }
 }

@@ -26,7 +26,7 @@
     "mustache": "^2.3.0",
     "nedb-asyncfs": "2.0.4",
     "request": "^2.88.0",
-    "sharp": "^0.31.3",
+    "sharp": "^0.32.6",
     "uuid": "^8.2.0",
 
     "@google-cloud/datastore": "^8.0.0",

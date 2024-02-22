@@ -222,7 +222,9 @@ exports.FS_getRefreshToken = {
   dropbox: function (options, callback) {
     fdlog('FS_getRefreshToken dropbox ', { options })
     const { Dropbox } = require('dropbox')
-    const fetch = require('node-fetch')
+    // mod.cjs temporary solution from https://stackoverflow.com/questions/57169793/error-err-require-esm-how-to-use-es6-modules-in-node-12 and https://stackoverflow.com/questions/69041454/error-require-of-es-modules-is-not-supported-when-importing-node-fetch
+    const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args))
+    // const fetch = require('node-fetch') //
     const dbx = new Dropbox({ fetch, clientId: options.clientId })
 
     try {

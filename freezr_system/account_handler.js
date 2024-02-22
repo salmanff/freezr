@@ -274,16 +274,16 @@ exports.changePassword = function (req, res) {
     }
 
   ],
-  function (err, returns) {
-    if (err) {
-      helpers.send_failure(res, err, 'account_handler', exports.version, 'changePassword')
-    } else if (!returns || !returns.nModified || returns.nModified === 0) {
-      helpers.send_failure(res, helpers.error('change error - was not able to change any passwords: ' + JSON.stringify(returns)), 'account_handler', exports.version, 'changePassword')
-    } else {
-      if (returns.nModified !== 1) felog('changePassword', 'error in changing user records - to investigate why more than 1 modified ', returns)
-      helpers.send_success(res, { user: u.response_obj() })
-    }
-  })
+    function (err, returns) {
+      if (err) {
+        helpers.send_failure(res, err, 'account_handler', exports.version, 'changePassword')
+      } else if (!returns || !returns.nModified || returns.nModified === 0) {
+        helpers.send_failure(res, helpers.error('change error - was not able to change any passwords: ' + JSON.stringify(returns)), 'account_handler', exports.version, 'changePassword')
+      } else {
+        if (returns.nModified !== 1) felog('changePassword', 'error in changing user records - to investigate why more than 1 modified ', returns)
+        helpers.send_success(res, { user: u.response_obj() })
+      }
+    })
 }
 exports.setPrefs = function (req, res) {
   // app.put('/v1/account/data/setPrefs.json', accountLoggedInAPI, addAllUsersDb, accountHandler.setPrefs)
@@ -334,18 +334,18 @@ exports.setPrefs = function (req, res) {
     }
 
   ],
-  function (err, returns) {
-    fdlog('userPrefs ', { err, returns })
-    if (err) {
-      helpers.send_failure(res, err, 'account_handler', exports.version, 'setPrefs')
-    } else if (!returns || !returns.nModified || returns.nModified === 0) {
-      helpers.send_failure(res, helpers.error('change error - was not able to change setPrefs: ' + JSON.stringify(returns)), 'account_handler', exports.version, 'setPrefs')
-    } else {
-      req.freezrUserDS.userPrefs = userPrefs
-      if (returns.nModified !== 1) felog('setPrefs', 'error in changing user records - to investigate why more than 1 modified ', returns)
-      helpers.send_success(res, { user: u.response_obj() })
-    }
-  })
+    function (err, returns) {
+      fdlog('userPrefs ', { err, returns })
+      if (err) {
+        helpers.send_failure(res, err, 'account_handler', exports.version, 'setPrefs')
+      } else if (!returns || !returns.nModified || returns.nModified === 0) {
+        helpers.send_failure(res, helpers.error('change error - was not able to change setPrefs: ' + JSON.stringify(returns)), 'account_handler', exports.version, 'setPrefs')
+      } else {
+        req.freezrUserDS.userPrefs = userPrefs
+        if (returns.nModified !== 1) felog('setPrefs', 'error in changing user records - to investigate why more than 1 modified ', returns)
+        helpers.send_success(res, { user: u.response_obj() })
+      }
+    })
 }
 exports.removeFromFreezr = function (req, res) {
   // app.put('/v1/account/changePassword.json', accountLoggedInAPI, addAllUsersDb, accountHandler.changePassword)
@@ -414,13 +414,13 @@ exports.removeFromFreezr = function (req, res) {
       }
     }
   ],
-  function (err) {
-    if (err) {
-      helpers.send_failure(res, err, 'account_handler', exports.version, 'removeFromFreezr')
-    } else {
-      helpers.send_success(res, { success: true })
-    }
-  })
+    function (err) {
+      if (err) {
+        helpers.send_failure(res, err, 'account_handler', exports.version, 'removeFromFreezr')
+      } else {
+        helpers.send_success(res, { success: true })
+      }
+    })
 }
 
 // Data retreival
@@ -483,7 +483,7 @@ exports.list_all_user_apps = function (req, res) {
             _date_modified: app._date_modified,
             _id: app._id,
             app_display_name:
-            app.app_display_name,
+              app.app_display_name,
             offThreadWip: ((app.offThreadStatus && app.offThreadStatus.offThreadWip) ? app.offThreadStatus.offThreadWip : false),
             offThreadParams: ((app.offThreadStatus && app.offThreadStatus.offThreadParams) ? app.offThreadStatus.offThreadParams : null)
           }
@@ -508,23 +508,23 @@ exports.list_all_user_apps = function (req, res) {
       cb(null)
     }
   ],
-  function (err) {
-    if (err) {
-      felog('list_all_user_apps', 'ERROR in list_all_user_apps ', err)
-      if (req.freezrInternalCallFwd) {
-        req.freezrInternalCallFwd(err, null)
+    function (err) {
+      if (err) {
+        felog('list_all_user_apps', 'ERROR in list_all_user_apps ', err)
+        if (req.freezrInternalCallFwd) {
+          req.freezrInternalCallFwd(err, null)
+        } else {
+          helpers.send_failure(res, err, 'account_handler', exports.version, 'list_all_user_apps')
+        }
       } else {
-        helpers.send_failure(res, err, 'account_handler', exports.version, 'list_all_user_apps')
+        // onsole.log(" results",{ removedApps, userApps })
+        if (req.freezrInternalCallFwd) {
+          req.freezrInternalCallFwd(null, { removed_apps: removedApps, user_apps: userApps })
+        } else {
+          helpers.send_success(res, { removed_apps: removedApps, user_apps: userApps })
+        }
       }
-    } else {
-      // onsole.log(" results",{ removedApps, userApps })
-      if (req.freezrInternalCallFwd) {
-        req.freezrInternalCallFwd(null, { removed_apps: removedApps, user_apps: userApps })
-      } else {
-        helpers.send_success(res, { removed_apps: removedApps, user_apps: userApps })
-      }
-    }
-  })
+    })
 }
 exports.get_app_resources = function (app, req, res) {
   // from get_account_data => app.get('/v1/account/data/:action', accountLoggedInAPI, accountHandler.get_account_data) // app_list.json, app_resource_use.json
@@ -651,7 +651,7 @@ exports.install_blank_app = function (req, res) {
   const flags = new Flags({ app_name: appName, didwhat: 'installed' })
 
   async.waterfall([
-  // 1. make sure data and file names exist and appName is valid
+    // 1. make sure data and file names exist and appName is valid
     function (cb) {
       if (!req.session.logged_in_user_id) {
         cb(helpers.missing_data('user_id'))
@@ -690,14 +690,14 @@ exports.install_blank_app = function (req, res) {
       }
     }
   ],
-  function (err) {
-    if (err) {
-      console.warn('install_blank_app', { err })
-      if (!err.code) err.code = 'err_unknown'
-      flags.add('errors', err.code, { function: 'install_blank_app', text: err.message })
-    }
-    helpers.send_success(res, { err, flags: flags.sentencify() })
-  })
+    function (err) {
+      if (err) {
+        console.warn('install_blank_app', { err })
+        if (!err.code) err.code = 'err_unknown'
+        flags.add('errors', err.code, { function: 'install_blank_app', text: err.message })
+      }
+      helpers.send_success(res, { err, flags: flags.sentencify() })
+    })
 }
 exports.install_app = function (req, res) {
   // installAppFromZipFile =>    app.put('/v1/account/app_install_from_zipfile.json', accountLoggedInUserPage, addUserAppsAndPermDBs, installAppFromZipFile)
@@ -718,7 +718,7 @@ exports.install_app = function (req, res) {
   let flags = new Flags({})
 
   async.waterfall([
-  // 1. make sure data and file names exist and tempAppName is correct
+    // 1. make sure data and file names exist and tempAppName is correct
     function (cb) {
       if (!req.session.logged_in_user_id) {
         cb(helpers.missing_data('user_id'))
@@ -840,46 +840,46 @@ exports.install_app = function (req, res) {
     }
     // todo later (may be) - also check manifest permissions (as per changeNamedPermissions) to warn of any issues
   ],
-  function (error, dummy) {
-    // todo: if there is an error in a new manifest the previous one gets wied out but the ap still runs (as it was instaled before successfully), so it should be marked with an error.
-    // todo: also better to wipe out old files so old files dont linger if they dont exist in new version
-    flags.meta.app_name = realAppName
-    if (error) {
-      flags.add('errors', error.code, { function: 'install_app', text: error.message })
-    }
-    // onsole.log(flags.sentencify())
-    helpers.send_success(res, { error: (error?.message), flags: flags.sentencify() })
-
-    // preload databases
-    if (!manifest) {
-      felog('No manifest for ' + realAppName + '- creating one - SNBH')
-      manifest = { app_tables: {} }
-      manifest.app_tables[realAppName] = {}
-    }
-    if (!error && manifest.app_tables && Object.keys(manifest.app_tables).length > 0 && manifest.app_tables.constructor === Object) {
-      for (const appTable in manifest.app_tables) {
-        const oac = {
-          owner: req.session.logged_in_user_id,
-          app_name: realAppName,
-          app_table: appTable
-        }
-        req.freezrUserDS.getorInitDb(oac, {}, function (err, aDb) {
-          if (err) {
-            felog('install_app - err in initiating installed app db ', err)
-          } else if (!aDb || !aDb.query) {
-            felog('install_app - err in initiating installed app db - no db present')
-          } else {
-            aDb.query(null, { count: 1 }, function (err, results) {
-              if (err) felog('install_app - err in querying installed app db ', err)
-              fdlog('db fake query for init - query results ', results)
-            })
-          }
-        })
+    function (error, dummy) {
+      // todo: if there is an error in a new manifest the previous one gets wied out but the ap still runs (as it was instaled before successfully), so it should be marked with an error.
+      // todo: also better to wipe out old files so old files dont linger if they dont exist in new version
+      flags.meta.app_name = realAppName
+      if (error) {
+        flags.add('errors', error.code, { function: 'install_app', text: error.message })
       }
-    } else {
-      fdlog('no pre-loading')
-    }
-  })
+      // onsole.log(flags.sentencify())
+      helpers.send_success(res, { error: (error?.message), flags: flags.sentencify() })
+
+      // preload databases
+      if (!manifest) {
+        felog('No manifest for ' + realAppName + '- creating one - SNBH')
+        manifest = { app_tables: {} }
+        manifest.app_tables[realAppName] = {}
+      }
+      if (!error && manifest.app_tables && Object.keys(manifest.app_tables).length > 0 && manifest.app_tables.constructor === Object) {
+        for (const appTable in manifest.app_tables) {
+          const oac = {
+            owner: req.session.logged_in_user_id,
+            app_name: realAppName,
+            app_table: appTable
+          }
+          req.freezrUserDS.getorInitDb(oac, {}, function (err, aDb) {
+            if (err) {
+              felog('install_app - err in initiating installed app db ', err)
+            } else if (!aDb || !aDb.query) {
+              felog('install_app - err in initiating installed app db - no db present')
+            } else {
+              aDb.query(null, { count: 1 }, function (err, results) {
+                if (err) felog('install_app - err in querying installed app db ', err)
+                fdlog('db fake query for init - query results ', results)
+              })
+            }
+          })
+        }
+      } else {
+        fdlog('no pre-loading')
+      }
+    })
 }
 const tempAppNameFromFileName = function (originalname) {
   let name = ''
@@ -1140,19 +1140,19 @@ exports.appMgmtActions = function (req, res) /* deleteApp updateApp */ {
         createOrUpdateUserAppList(req.freezrUserAppListDB, manifest, null, cb)
       }
     ],
-    function (err, info) {
-      // onsole.log({ err, info })
-      flags.meta.app_name = realAppName
-      if (err) {
-        flags.add('errors', 'err_unknown', { function: 'appMgmtActions update', text: JSON.stringify(err) })
-      } else if (info.isUpdate) {
-        flags.add('notes', 'app_updated_msg')
-        flags.meta.didwhat = 'updated'
-      } else {
-        flags.meta.didwhat = 'uploaded'
-      }
-      helpers.send_success(res, flags.sentencify())
-    })
+      function (err, info) {
+        // onsole.log({ err, info })
+        flags.meta.app_name = realAppName
+        if (err) {
+          flags.add('errors', 'err_unknown', { function: 'appMgmtActions update', text: JSON.stringify(err) })
+        } else if (info.isUpdate) {
+          flags.add('notes', 'app_updated_msg')
+          flags.meta.didwhat = 'updated'
+        } else {
+          flags.meta.didwhat = 'uploaded'
+        }
+        helpers.send_success(res, flags.sentencify())
+      })
   } else {
     helpers.send_failure(res, new Error('unknown action'), 'account_handler', exports.version, 'appMgmtActions')
   }
@@ -1216,7 +1216,7 @@ exports.allRequestorAppPermissions = function (req, res) {
     })
   }
 }
-function groupPermissions (returnPermissions, appName) {
+function groupPermissions(returnPermissions, appName) {
   const groupedPermissions = {
     thisAppToThisApp: [],
     thisAppToOtherApps: [],
@@ -1404,7 +1404,7 @@ exports.changeNamedPermissions = function (req, res) {
                   }, cb3)
                 })
               },
-              cb2)
+                cb2)
             }, function (err) {
               if (err) felog('changeNamedPermissions', 'if error, the perm update should be added to a clean up list')
               if (err) {
@@ -1610,13 +1610,13 @@ const updatePermissionRecordsFromManifest = function (freezrUserPermsDB, appName
             freezrUserPermsDB.update(existingPermFromDb._id, cleanedManifestPerm, {}, cb)
           }
         },
-        function (err) {
-          if (err) {
-            callback(err)
-          } else {
-            callback(null)
-          }
-        })
+          function (err) {
+            if (err) {
+              callback(err)
+            } else {
+              callback(null)
+            }
+          })
       })
     }
   }
@@ -1671,13 +1671,13 @@ const createOrUpdateUserAppList = function (userAppListDb, manifest, env, callba
       }
     }
   ],
-  function (err) {
-    if (err) {
-      callback(err, {})
-    } else {
-      callback(null, { isUpdate: appExists })
-    }
-  })
+    function (err) {
+      if (err) {
+        callback(err, {})
+      } else {
+        callback(null, { isUpdate: appExists })
+      }
+    })
 }
 const permissionsAreSame = function (p1, p2) {
   return objectsaresame(p1, p2, ['granted', 'status', 'grantees', 'previousGrantees'])
@@ -1735,7 +1735,7 @@ exports.CEPSValidator = function (req, res) {
       helpers.send_failure(res, helpers.error('incomplete request 1 '), 'account_handler', exports.version, 'CEPSValidator set')
     } else if (!req.body.data_owner_user) {
       felog('incomplete request 2 ', req.body, ' vs token ', req.freezrTokenInfo)
-      helpers.send_failure(res, helpers.error('incomplete request'), 'account_handler', exports.version, 'CEPSValidator set')
+      helpers.send_failure(res, helpers.error('incomplete request 2'), 'account_handler', exports.version, 'CEPSValidator set')
     } else {
       // if (!req.body.data_owner_host) req.body.data_owner_host = req.body.requestor_host // default
       const validationtoken = helpers.randomText(30)
@@ -1761,7 +1761,7 @@ exports.CEPSValidator = function (req, res) {
         fdlog('freezrValidationTokenDB.create ', { err, returns })
         if (err) {
           felog('error in freezrValidationTokenDB ', err)
-          helpers.send_failure(res, helpers.error('incomplete request'), 'account_handler', exports.version, 'CEPSValidator set')
+          helpers.send_failure(res, helpers.error('incomplete request 4'), 'account_handler', exports.version, 'CEPSValidator set')
         } else {
           helpers.send_success(res, { validation_token: validationtoken, requestor_host: requesterHost, expiration })
         }
@@ -1785,9 +1785,9 @@ exports.CEPSValidator = function (req, res) {
     async.waterfall([
       // 1. basic checks
       function (cb) {
-        if (!req.query.validation_token || !req.query.data_owner_user || !req.query.table_id || !req.query.permission || !req.query.requestor_user) { // || !req.query.requestor_host  new 2022-11
-          felog('incomplete request ', req.body)
-          cb(helpers.error('incomplete request'))
+        if (!req.query.validation_token || !req.query.data_owner_user || !req.query.table_id || !req.query.requestor_user || (!req.query.permission && req.query.requestor_host && req.freezrTokenInfo.app_name !== 'info.freezr.account')) { // || !req.query.requestor_host  new 2022-11
+          console.log('incomplete request 5 body ', req.bod, ' freezrTokenInfo ', req.freezrTokenInfo)
+          cb(helpers.error('incomplete request 5'))
         } else {
           cb(null)
         }
@@ -1856,6 +1856,7 @@ exports.CEPSValidator = function (req, res) {
             if (perm && perm.table_id === req.query.table_id && perm.granted === 'all_server_users') {
               cb(null, { verified: true })
             } else {
+              felog('req.query ',req.query, { perm })
               cb(helpers.error('not verifited for internal access 1'))
             }
           } else {
@@ -1930,16 +1931,16 @@ exports.CEPSValidator = function (req, res) {
         }
       }
     ],
-    function (err, results) {
-      fdlog('CEPSValidator validate 5 ', { results, err })
-      if (err) {
-        helpers.send_failure(res, err, 'account_handler', exports.version, 'CEPSValidator validate')
-      } else if (!results) {
-        helpers.send_failure(res, err, 'account_handler', exports.version, 'CEPSValidator validate')
-      } else {
-        helpers.send_success(res, { validated: true, 'access-token': appToken, expiry: accessTokenExpiry })
-      }
-    })
+      function (err, results) {
+        fdlog('CEPSValidator validate 5 ', { results, err })
+        if (err) {
+          helpers.send_failure(res, err, 'account_handler', exports.version, 'CEPSValidator validate')
+        } else if (!results) {
+          helpers.send_failure(res, err, 'account_handler', exports.version, 'CEPSValidator validate')
+        } else {
+          helpers.send_success(res, { validated: true, 'access-token': appToken, expiry: accessTokenExpiry })
+        }
+      })
   } else if (req.params.action === 'verify') {
     if (!req.query.validation_token || !req.query.data_owner_user || !req.query.data_owner_host || !req.query.table_id || !req.query.permission || !req.query.requestor_user || !req.query.requestor_host) {
       felog('Missing verification data query:', req.query, '   url:' + req.url)
@@ -1947,9 +1948,10 @@ exports.CEPSValidator = function (req, res) {
     } else {
       req.freezrValidationTokenDB.query(validationParamsFromQuery(req.query), null, function (err, returns) {
         if (err) {
-          helpers.send_failure(res, helpers.error('incomplete request'), 'account_handler', exports.version, 'CEPSValidator verify')
+          felog('incomplete req 6 7 ', { err })
+          helpers.send_failure(res, helpers.error('incomplete request 6'), 'account_handler', exports.version, 'CEPSValidator verify')
         } else if (!returns || returns.length === 0) {
-          helpers.send_failure(res, helpers.error('incomplete request'), 'account_handler', exports.version, 'CEPSValidator verify')
+          helpers.send_failure(res, helpers.error('incomplete request 7'), 'account_handler', exports.version, 'CEPSValidator verify')
         } else {
           helpers.send_success(res, { verified: true })
         }

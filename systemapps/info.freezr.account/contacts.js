@@ -363,9 +363,9 @@ const getPrivateFeedToken = function (callback) {
       permission: 'privateCodes',
       app_id: 'info.freezr.account' // requestor app
     }
-    freezr.perms.validateDataOwner(data, function (ret) {
+    freezr.perms.validateDataOwner(data, function (err, ret) {
       console.log({ ret })
-      if (!ret || ret.error || !ret['access-token']) {
+      if (err || !ret || ret.error || !ret['access-token']) {
         console.warn('error getting access tokens', { ret })
         callback(new Error('error getting access tokens'))
       } else {
@@ -675,7 +675,7 @@ const randomText = function (textlen) {
   }
   return text
 }
-function sortObjectsByField (property, order) {
+function sortObjectsByField(property, order) {
   // https://stackoverflow.com/questions/1129216/sort-array-of-objects-by-string-property-value
   if (!order) order = 1
   return function (a, b) {

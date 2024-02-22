@@ -86,6 +86,7 @@ DATA_STORE_MANAGER.prototype.getDB = function (OAC) {
   }
 }
 DATA_STORE_MANAGER.prototype.getOrSetUserDS = function (owner, callback) {
+  fdlog('getOrSetUserDS for ', { owner })
   if (this.users[owner]) {
     // fdlog('getOrSetUserDS userds exists - sending link to ', owner)
     callback(null, this.users[owner])
@@ -103,13 +104,13 @@ DATA_STORE_MANAGER.prototype.getOrSetUserDS = function (owner, callback) {
         fdlog('todonow need to make sure it has rights to use the default params', { ownerEntries })
         const dbParams = ownerEntries[0].dbParams
           ? (ownerEntries[0].dbParams.type === 'system'
-              ? self.systemEnvironment.dbParams
-              : ownerEntries[0].dbParams)
+            ? self.systemEnvironment.dbParams
+            : ownerEntries[0].dbParams)
           : null
         const fsParams = ownerEntries[0].fsParams
           ? (ownerEntries[0].fsParams.type === 'system'
-              ? self.systemEnvironment.fsParams
-              : ownerEntries[0].fsParams)
+            ? self.systemEnvironment.fsParams
+            : ownerEntries[0].fsParams)
           : null
         if (dbParams && ownerEntries[0].dbParams?.type === 'system') dbParams.useIdsAsDbName = ownerEntries[0].dbParams.useIdsAsDbName
         // fdlog('nowdec30 - todo if system and not nedb, pass unified db')
@@ -164,7 +165,7 @@ USER_DS.prototype.setTimerToRecalcStorage = function (force) {
       const RECALCUATE_STORAGE_OUTER_TIME_LIMIT = (60 * 60 * 1000)
       const RECALCUATE_STORAGE_OUTER_WRITE_LIMIT = 10
       return (self.useage?.lastStorageCalcs.time &&
-          new Date().getTime() - self.useage?.lastStorageCalcs.time > RECALCUATE_STORAGE_OUTER_TIME_LIMIT) ||
+        new Date().getTime() - self.useage?.lastStorageCalcs.time > RECALCUATE_STORAGE_OUTER_TIME_LIMIT) ||
         (self.useage?.dbWritesSinceLastCalc &&
           self.useage?.dbWritesSinceLastCalc > RECALCUATE_STORAGE_OUTER_WRITE_LIMIT) ||
         false
@@ -278,29 +279,29 @@ USER_DS.prototype.getStorageUse = function (app, callback) {
       }, cb)
     }
   ],
-  function (err) {
-    if (err) {
-      userDS.useage.calcerror = { error: err, time: new Date().getTime() }
-      callback(err)
-    } else {
-      // onsole.log(" results",{removedApps:removedApps, user_apps:userApps})
-      let totalSize = 0
-      const allTableSizes = { }
-      resources.forEach(resource => {
-        totalSize += resource.apps
-        totalSize += resource.files
-        for (const [dbName, size] of Object.entries(resource.dbs)) {
-          if (!allTableSizes[dbName]) {
-            allTableSizes[dbName] = size
-            totalSize += size
+    function (err) {
+      if (err) {
+        userDS.useage.calcerror = { error: err, time: new Date().getTime() }
+        callback(err)
+      } else {
+        // onsole.log(" results",{removedApps:removedApps, user_apps:userApps})
+        let totalSize = 0
+        const allTableSizes = {}
+        resources.forEach(resource => {
+          totalSize += resource.apps
+          totalSize += resource.files
+          for (const [dbName, size] of Object.entries(resource.dbs)) {
+            if (!allTableSizes[dbName]) {
+              allTableSizes[dbName] = size
+              totalSize += size
+            }
           }
-        }
-      })
-      // onsole.log('setting new storage size ', totalSize)
-      userDS.useage.lastStorageCalcs = { resources, totalSize, time: new Date().getTime() }
-      callback(null, { resources, totalSize })
-    }
-  })
+        })
+        // onsole.log('setting new storage size ', totalSize)
+        userDS.useage.lastStorageCalcs = { resources, totalSize, time: new Date().getTime() }
+        callback(null, { resources, totalSize })
+      }
+    })
 }
 
 DATA_STORE_MANAGER.prototype.getUserPerms = function (owner, callback) {
@@ -361,13 +362,13 @@ DATA_STORE_MANAGER.prototype.getorInitDbs = function (OAC, options, callback) {
             cb(err)
           })
         },
-        function (err) {
-          if (err) {
-            callback(err)
-          } else {
-            callback(null, list)
-          }
-        })
+          function (err) {
+            if (err) {
+              callback(err)
+            } else {
+              callback(null, list)
+            }
+          })
       } else {
         userDS.getorInitDb(OAC, options, callback)
       }
@@ -540,12 +541,12 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
               const returns = err
                 ? null
                 : {
-                    nModified,
-                    _id: options.old_entity._id,
-                    _date_created: options.old_entity._date_created,
-                    _date_modified: updatesToEntity._date_modified,
-                    useage: userDs.getUseageWarning()
-                  }
+                  nModified,
+                  _id: options.old_entity._id,
+                  _date_created: options.old_entity._date_created,
+                  _date_modified: updatesToEntity._date_modified,
+                  useage: userDs.getUseageWarning()
+                }
               fdlog('dsmanager update 1 ', { err, result, returns })
               cb(err, returns)
             })
@@ -583,12 +584,12 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
                   const returns = err
                     ? null
                     : {
-                        nModified,
-                        _id: entityId,
-                        _date_created: oldEntity._date_created,
-                        _date_modified: updatesToEntity._date_modified,
-                        useage: userDs.getUseageWarning()
-                      }
+                      nModified,
+                      _id: entityId,
+                      _date_created: oldEntity._date_created,
+                      _date_modified: updatesToEntity._date_modified,
+                      useage: userDs.getUseageWarning()
+                    }
                   fdlog('dsmanager update 2 ', { err, result, returns })
 
                   if (entities.length > 1) {
@@ -653,7 +654,7 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
       ds.upsert = function (idOrQuery, entity, cb) {
         fdlog('ds.upsert - todo - need to add checks - see "create"')
 
-        function callFwd (err, existingEntity) {
+        function callFwd(err, existingEntity) {
           // fdlog('In db_handler upsert callFwd', existingEntity, 'Will replace with new entity', entity)
           if (err) {
             helpers.state_error('ds_manager', exports.version, 'upsert', err, 'error reading db')
@@ -740,7 +741,7 @@ DATA_STORE_MANAGER.prototype.initAdminDBs = function (OACs, options = {}, callba
   async.forEach(OACs, function (oac, cb) {
     self.initOacDB(oac, options, cb)
   },
-  callback)
+    callback)
 }
 DATA_STORE_MANAGER.prototype.initUserAppFSToGetCredentials = function (user, appName, options = {}, callback) {
   // options: env - if want to use a special env for that ACO
@@ -1256,7 +1257,7 @@ const localCheckExistsOrCreateUserFolderSync = function (aPath, removeEndFile) {
 
   mkDir()
 
-  function mkDir () {
+  function mkDir() {
     const dir = dirs.shift()
     if (dir === '') { // If directory starts with a /, the first path will be th root user folder.
       root = path.normalize(ROOT_DIR) // 2022 rem + pathSep

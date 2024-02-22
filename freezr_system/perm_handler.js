@@ -1,7 +1,7 @@
 // freezr.info - nodejs system files - perm_handler
 
 exports.version = '0.0.200'
-
+ 
 /* global User */
 
 const helpers = require('./helpers.js')
@@ -12,7 +12,7 @@ const async = require('async')
 exports.readWriteUserData = function (req, res, dsManager, next) {
   // assume token info in in req.freezrTokenInfo => {userId, appName, loggedIn}
   fdlog('readWriteUserData ')
-
+  
   const freezrAttributes = {
     permission_name: null,
     owner_user_id: null,
@@ -76,6 +76,7 @@ exports.readWriteUserData = function (req, res, dsManager, next) {
     req.freezrTokenInfo.app_name === 'info.freezr.account' && req.session.logged_in_user_id === freezrAttributes.owner_user_id &&
     (req.body.appName || helpers.startsWith(req.params.app_table, 'dev.ceps'))) {
     // backuprequest: special case for query from accounts folder for "view or backup data"
+    freezrAttributes.actualRequester = 'info.freezr.account'
     freezrAttributes.requestor_app = req.body.appName || req.params.app_table // eithr query or aq ceps.dev
     freezrAttributes.own_record = true
     freezrAttributes.record_is_permitted = true
@@ -855,7 +856,7 @@ exports.addUserFilesDb = function (req, res, dsManager, next) {
     owner: req.params.user_id,
     app_table: req.params.app_name + '.files'
   }
-  console.log('addUserFilesDb', { oat })
+  fdlog('addUserFilesDb', { oat })
   dsManager.getorInitDb(oat, {}, function (err, userFilesDb) {
     if (err) {
       res.sendStatus(401)

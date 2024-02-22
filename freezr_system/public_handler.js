@@ -88,6 +88,7 @@ exports.generatePublicPage = function (req, res) {
 
   req.freezrPublicManifestsDb.query({ user_id: userId, app_name: appName }, null, (err, results) => {
     // note: this is not needed when have allApps so skip errors
+    fdlog('freezrPublicManifestsDb', { err, results, userId, appName })
     if (err || !results) {
       felog('todo - redirect to error page - freezrPublicPermDB ', { userId, appName }, err)
       res.sendStatus(401)
@@ -99,9 +100,9 @@ exports.generatePublicPage = function (req, res) {
       if (isRss) manifest = ALL_APPS_RSS_CONFIG
 
       if (err || !manifest || !manifest.public_pages ||
-          (isRss && !manifest.public_pages.allPublicRSS) ||
-          (!isRss && (!manifest.public_pages &&
-            !(manifest.public_pages.allPublicRecords ||
+        (isRss && !manifest.public_pages.allPublicRSS) ||
+        (!isRss && (!manifest.public_pages &&
+          !(manifest.public_pages.allPublicRecords ||
             (manifest.public_pages[pageName] && manifest.public_pages[pageName].html_file))))
       ) {
         if (err) { helpers.state_error('public_handler', exports.version, 'generatePublicPage', err, 'Problem getting Mankifest for ppage on ' + appName) }
@@ -245,7 +246,7 @@ const gotoShowInitialData = function (res, req, options) {
 
   if (!options.q) {
     req.freezrAppFS.readAppFile(('public' + fileHandler.sep() + options.page_url), null, function (err, htmlContent) {
-    // old: fileHandler.get_file_content(options.user_id, options.app_name, "public"+fileHandler.sep()+options.page_url , freezr_environment, function(err, htmlContent) {
+      // old: fileHandler.get_file_content(options.user_id, options.app_name, "public"+fileHandler.sep()+options.page_url , freezr_environment, function (err, htmlContent) {
       if (err) {
         helpers.send_failure(res, helpers.error('file missing', 'html file missing - cannot generate page without file page_url 4 (' + options.page_url + ')in app:' + options.app_name + ' public folder (no data).'), 'public_handler', exports.version, 'gotoShowInitialData')
       } else {
@@ -261,7 +262,7 @@ const gotoShowInitialData = function (res, req, options) {
       const rssRecords = []
       const renderStream = function () {
         req.freezrAppFS.readAppFile(('public' + fileHandler.sep() + options.xml_url), null, function (err, xmlContent) {
-        // old:  fileHandler.get_file_content(null, "info.freezr.public", "public"+fileHandler.sep()+options.xml_url , freezr_environment, function(err, xmlContent) {
+          // old:  fileHandler.get_file_content(null, "info.freezr.public", "public"+fileHandler.sep()+options.xml_url , freezr_environment, function (err, xmlContent) {
           if (err) {
             helpers.send_failure(res, helpers.error('file missing', 'html file missing - cannot generate page without file xml_url (' + options.xml_url + ')in app:' + options.app_name + ' publc folder.'), 'public_handler', exports.version, 'gotoShowInitialData')
           } else {
@@ -323,13 +324,13 @@ const gotoShowInitialData = function (res, req, options) {
           }
           cb2(null)
         },
-        function (err) {
-          if (err) {
-            helpers.send_failure(res, err, 'public_handler', exports.version, 'gotoShowInitialData:freezrInternalCallFwd')
-          } else {
-            renderStream()
-          }
-        })
+          function (err) {
+            if (err) {
+              helpers.send_failure(res, err, 'public_handler', exports.version, 'gotoShowInitialData:freezrInternalCallFwd')
+            } else {
+              renderStream()
+            }
+          })
       }
     }
     exports.dbp_query(req, res)
@@ -362,7 +363,7 @@ const gotoShowInitialData = function (res, req, options) {
       let recordsStream = []
       const renderStream = function () {
         req.freezrAppFS.readAppFile(('public' + fileHandler.sep() + options.page_url), null, function (err, htmlContent) {
-          // old: fileHandler.get_file_content(null, 'info.freezr.public', 'public' + fileHandler.sep() + options.page_url, freezr_environment, function(err, htmlContent) {
+          // old: fileHandler.get_file_content(null, 'info.freezr.public', 'public' + fileHandler.sep() + options.page_url, freezr_environment, function (err, htmlContent) {
           if (err) {
             helpers.send_failure(res, helpers.error('file missing', 'html file missing - cannot generate page without file page_url 1 (' + options.page_url + ')in app:' + options.app_name + ' publc folder.'), 'public_handler', exports.version, 'gotoShowInitialData')
           } else {
@@ -440,7 +441,7 @@ const gotoShowInitialData = function (res, req, options) {
               helpers.send_failure(res, helpers.error('file missing', 'html file missing - cannot generate page without file page_url 2 (' + htmlFile + ')in app:' + options.app_name + ' publc folder.'), 'public_handler', exports.version, 'gotoShowInitialData')
             } else {
               req.freezrAppFS.readAppFile(('public' + fileHandler.sep() + htmlFile), null, function (err, htmlContent) {
-              // old - fileHandler.get_file_content(req.query.user_id, req.query.app_name, 'public' + fileHandler.sep() + htmlFile , freezr_environment, function (err, htmlContent) {
+                // old - fileHandler.get_file_content(req.query.user_id, req.query.app_name, 'public' + fileHandler.sep() + htmlFile , freezr_environment, function (err, htmlContent) {
                 if (err) {
                   helpers.send_failure(res, helpers.error('file missing","html file missing - cannot generate page without file page_url 3f(' + options.page_url + ')in app:' + options.app_name + ' publc folder.'), 'public_handler', exports.version, 'gotoShowInitialData')
                 } else {
@@ -744,12 +745,12 @@ exports.dbp_query = function (req, res) {
             cb2(null)
           }
         },
-        function (err) {
-          if (err) {
-            errs.push({ error: err, permissionRecord: null })
-          }
-          cb(null)
-        })
+          function (err) {
+            if (err) {
+              errs.push({ error: err, permissionRecord: null })
+            }
+            cb(null)
+          })
       }
     },
 
@@ -794,16 +795,16 @@ exports.dbp_query = function (req, res) {
       cb(null)
     }
   ],
-  function (error) {
-    // onsole.log('end of pdquery ', { error, finalRecords })
-    const sortBylastPubDate = function (obj1, obj2) { return obj2._date_published - obj1._date_published }
-    finalRecords = finalRecords.sort(sortBylastPubDate)
-    if (req.freezrInternalCallFwd) {
-      req.freezrInternalCallFwd(null, { results: finalRecords, error, next_skip: (skip + count) })
-    } else {
-      helpers.send_success(res, { results: finalRecords, error, next_skip: (skip + count) })
-    }
-  })
+    function (error) {
+      // onsole.log('end of pdquery ', { error, finalRecords })
+      const sortBylastPubDate = function (obj1, obj2) { return obj2._date_published - obj1._date_published }
+      finalRecords = finalRecords.sort(sortBylastPubDate)
+      if (req.freezrInternalCallFwd) {
+        req.freezrInternalCallFwd(null, { results: finalRecords, error, next_skip: (skip + count) })
+      } else {
+        helpers.send_success(res, { results: finalRecords, error, next_skip: (skip + count) })
+      }
+    })
 }
 
 // file
@@ -836,7 +837,7 @@ exports.old_get_public_file = function (req, res) {
   let parts = req.originalUrl.split('/')
   parts = parts.slice(5) // remove '/v1/publicfiles/:user_id/:requestee_app',
   const dataObjectId = req.params.user_id + '/' + decodeURI(parts.join('/')).split('?')[0].split('#')[0]
-  
+
   req.freezruserFilesDb.read_by_id(dataObjectId, (err, resultingRecord) => {
     if (err || !resultingRecord) {
       felog('no related records getting old public file', dataObjectId, err)

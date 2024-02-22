@@ -225,7 +225,7 @@ exports.write_record = function (req, res) { // create update or upsert
           cb(helpers.auth_failure('app_handler', exports.version, 'write_record', req.freezrAttributes.requestor_app, errmsg))
         }
       } else if (isUpdate && !isUpsert) { // should have gotten results
-        console.log('; no record found err in  write_rec ', { write, results, dataObjectId, isUpsert, isUpdate })
+        console.warn('; no record found err in  write_rec ', { write, results, dataObjectId, isUpsert, isUpdate })
         cb(appErr('record not found'))
       } else { // upsert / create - new document - should not have gotten results
         if (req.freezrAttributes.owner_user_id !== req.freezrAttributes.requestor_user_id) {
@@ -236,23 +236,23 @@ exports.write_record = function (req, res) { // create update or upsert
       }
     }
   ],
-  function (err, writeConfirm) {
-    fdlog('write err', err, 'writeConfirm', { writeConfirm, isUpdate, isQueryBasedUpdate })
-    // onsole.log('isQueryBasedUpdate success ', { err, writeConfirm })
-    if (err) {
-      console.warn('err ', err)
-      helpers.send_failure(res, err, 'app_handler', exports.version, 'write_record')
-    } else if (isQueryBasedUpdate) {
-      helpers.send_success(res, writeConfirm)
-    } else if (!writeConfirm || (!writeConfirm.nModified && !writeConfirm._id)) {
-      felog('snbh - unknown error writing one record at a time ', { write, writeConfirm })
-      helpers.send_failure(res, new Error('unknown write error'), 'app_handler', exports.version, 'write_record')
-    } else if (isUpdate || isUpsert) {
-      helpers.send_success(res, writeConfirm)
-    } else { // write new (CEPS)
-      helpers.send_success(res, writeConfirm)
-    }
-  })
+    function (err, writeConfirm) {
+      fdlog('write err', err, 'writeConfirm', { writeConfirm, isUpdate, isQueryBasedUpdate })
+      // onsole.log('isQueryBasedUpdate success ', { err, writeConfirm })
+      if (err) {
+        console.warn('err ', err)
+        helpers.send_failure(res, err, 'app_handler', exports.version, 'write_record')
+      } else if (isQueryBasedUpdate) {
+        helpers.send_success(res, writeConfirm)
+      } else if (!writeConfirm || (!writeConfirm.nModified && !writeConfirm._id)) {
+        felog('snbh - unknown error writing one record at a time ', { write, writeConfirm })
+        helpers.send_failure(res, new Error('unknown write error'), 'app_handler', exports.version, 'write_record')
+      } else if (isUpdate || isUpsert) {
+        helpers.send_success(res, writeConfirm)
+      } else { // write new (CEPS)
+        helpers.send_success(res, writeConfirm)
+      }
+    })
 }
 exports.read_record_by_id = function (req, res) {
   // app.get('/ceps/read/:app_table/:data_object_id', userDataAccessRights, app_handler.read_record_by_id);
@@ -323,7 +323,7 @@ exports.read_record_by_id = function (req, res) {
           ) {
             accessToRecord = true
             if (fetchedRecord._accessible[requestee][aPerm.permission_name].granted &&
-               (!req.freezrAttributes.permission_name || aPerm.permission_name === req.freezrAttributes.permission_name)
+              (!req.freezrAttributes.permission_name || aPerm.permission_name === req.freezrAttributes.permission_name)
             ) {
               // nb treating permisiion_name as optional. If we want to force having a permission_name then expression should eb removed
               relevantPerm = aPerm
@@ -348,16 +348,16 @@ exports.read_record_by_id = function (req, res) {
       }
     }
   ],
-  function (err) {
-    // fdlog("got to end of read_record_by_id");
-    if (err) {
-      helpers.send_failure(res, err, 'app_handler', exports.version, 'read_record_by_id')
-    } else if (requestFile) {
-      helpers.send_success(res, { fileToken: getOrSetFileToken(req.freezrAttributes.owner_user_id, req.params.app_name, dataObjectId) })
-    } else {
-      helpers.send_success(res, permittedRecord)
-    }
-  })
+    function (err) {
+      // fdlog("got to end of read_record_by_id");
+      if (err) {
+        helpers.send_failure(res, err, 'app_handler', exports.version, 'read_record_by_id')
+      } else if (requestFile) {
+        helpers.send_success(res, { fileToken: getOrSetFileToken(req.freezrAttributes.owner_user_id, req.params.app_name, dataObjectId) })
+      } else {
+        helpers.send_success(res, permittedRecord)
+      }
+    })
 }
 const reduceToPermittedFields = function (record, returnFields) {
   if (record._accessible) delete record._accessible
@@ -391,6 +391,7 @@ exports.db_query = function (req, res) {
   const [granted, canReadAllTable, relevantAndGrantedPerms] = checkReadPermission(req)
   fdlog('checkReadPermission results for req.freezrAttributes: ', req.freezrAttributes, { granted, canReadAllTable, relevantAndGrantedPerms })
   const thePerm = relevantAndGrantedPerms[0]
+  fdlog({ relevantAndGrantedPerms, thePerm })
 
   if (relevantAndGrantedPerms.length > 1) fdlog('todo - deal with multiple permissions - forcePermName??')
   // if (!req.freezrAttributes.own_record && !permissionName) console.log("todo review - Need a persmission name to access others' apps and records? if so permissionName needs to be compulsory for perm_handler too")
@@ -402,7 +403,7 @@ exports.db_query = function (req, res) {
     // all good
   } else if (thePerm.type === 'write_own') {
     if (!req.body.q) req.body.q = {}
-    req.body.q._created_by_user = req.freezrAttributes.requestor_user_id
+    if (req.freezrAttributes.requestor_user_id !== req.freezrAttributes.owner_user_id) req.body.q._created_by_user = req.freezrAttributes.requestor_user_id
     // if (req.freezrAttributes.requestor_app !== 'info.freezr.account') req.body.q._created_by_app = req.freezrAttributes.requestor_app
   } else if (thePerm.type === 'db_query') {
     // for db_queries make sure query fits the intended schema
@@ -468,7 +469,8 @@ exports.db_query = function (req, res) {
       returnFields = thePerm.return_fields
     }
 
-    fdlog('will query ', req.body.q, { count, skip })
+    fdlog('will query ', req.freezrRequesteeDB.db.oat, req.body.q, { count, skip })
+
     req.freezrRequesteeDB.query(req.body.q,
       { sort, count, skip }, function (err, results) {
         if (err) {
@@ -593,7 +595,7 @@ exports.restore_record = function (req, res) {
   fdlog('feps restore_record at ' + req.url + ' body:' + JSON.stringify((req.body) ? req.body : ' none'))
 
   const write = req.body.record
-  const options = req.body.options || { }
+  const options = req.body.options || {}
   const dataObjectId = options.data_object_id
   const isUpdate = dataObjectId && options.updateRecord
   const isUpsert = dataObjectId && options.upsertRecord
@@ -606,7 +608,7 @@ exports.restore_record = function (req, res) {
   async.waterfall([
     // 1. check app token .. and set user_id based on record if not a param...
     function (cb) {
-      if (!req.session.logged_in_user_id || req.session.logged_in_user_id !== req.freezrAttributes.owner_user_id || req.freezrAttributes.requestor_app !== 'info.freezr.account') {
+      if (!req.session.logged_in_user_id || req.session.logged_in_user_id !== req.freezrAttributes.owner_user_id || (req.freezrAttributes.requestor_app !== 'info.freezr.account' && req.freezrAttributes.actualRequester !== 'info.freezr.account')) {
         cb(authErr('need to be logged in and requesting proper permissions ' + req.session.logged_in_user_id + ' vs ' + req.freezrAttributes.owner_user_id + ' app ' + req.freezrAttributes.requestor_app))
       } else if (Object.keys(write).length <= 0) {
         cb(appErr('No data to write'))
@@ -630,7 +632,7 @@ exports.restore_record = function (req, res) {
           cb(err, results)
         })
       } else {
-        cb(appErr('Malformed path body combo '))
+        cb(appErr('Malformed path body combo 2'))
       }
     },
 
@@ -648,22 +650,22 @@ exports.restore_record = function (req, res) {
       }
     }
   ],
-  function (err, writeConfirm) {
-    fdlog('end restore rec ', { err, writeConfirm })
-    if (err) {
-      helpers.send_failure(res, err, 'app_handler', exports.version, 'restore_record')
-    } else if (!writeConfirm) {
-      helpers.send_failure(res, new Error('unknown write error'), 'app_handler', exports.version, 'restore_record')
-    } else if (isUpdate) {
-      helpers.send_success(res, writeConfirm)
-    } else {
-      helpers.send_success(res, {
-        _id: writeConfirm._id,
-        _date_created: writeConfirm._date_created,
-        _date_modified: writeConfirm._date_modified
-      })
-    }
-  })
+    function (err, writeConfirm) {
+      fdlog('end restore rec ', { err, writeConfirm })
+      if (err) {
+        helpers.send_failure(res, err, 'app_handler', exports.version, 'restore_record')
+      } else if (!writeConfirm) {
+        helpers.send_failure(res, new Error('unknown write error'), 'app_handler', exports.version, 'restore_record')
+      } else if (isUpdate) {
+        helpers.send_success(res, writeConfirm)
+      } else {
+        helpers.send_success(res, {
+          _id: writeConfirm._id,
+          _date_created: writeConfirm._date_created,
+          _date_modified: writeConfirm._date_modified
+        })
+      }
+    })
 }
 
 // permission access operations
@@ -725,7 +727,7 @@ exports.shareRecords = function (req, res) {
   let permDoesntNeedTableId = false
 
   fdlog('shareRecords from ' + userId + 'for requestor app ' + requestorApp + ' query:' + JSON.stringify(recordQuery) + ' action' + JSON.stringify(req.body.grant) + ' perm: ' + req.body.name + ' action ' + req.params.action + ' req.freezrUserPrefs ' + req.freezrUserPrefs)
-  function appErr (message) {
+  function appErr(message) {
     return helpers.app_data_error(exports.version, 'shareRecords', req.freezrTokenInfo.app_name, message)
   }
 
@@ -743,8 +745,8 @@ exports.shareRecords = function (req, res) {
         cb(appErr('input error - cannot assign a file structure to more than one entity, and it has to be made public, and end with html'))
       } else if (!req.body.name) {
         cb(appErr('error - need permission name to set access'))
-      // } else if (!req.body.table_id) {
-      //   cb(appErr('error - need requested table_id to work on permission'))
+        // } else if (!req.body.table_id) {
+        //   cb(appErr('error - need requested table_id to work on permission'))
       } else if (!req.body.grantees || req.body.grantees.length < 1) {
         cb(appErr('error - need people or gorups to grant permissions to.'))
       } else if (!requestorApp) {
@@ -799,7 +801,7 @@ exports.shareRecords = function (req, res) {
           // todo-later conside grantedPermission.allowPublic to explicitly allow sharing with public
           allowedGrantees.push(grantee)
           cb2(null)
-        // } else if (helpers.startsWith(grantee, '_privatelink:')) {
+          // } else if (helpers.startsWith(grantee, '_privatelink:')) {
         } else if (grantee === '_privatelink') {
           if (hasPublicLink || hasPrivateLink || hasPrivateFeed) tooManyRequests = true
           hasPrivateLink = true
@@ -838,7 +840,7 @@ exports.shareRecords = function (req, res) {
             } else {
               fdlog('shareRecords - Considering grantee', grantee)
               req.freezrCepsContacts.query({ searchname: grantee }, null, function (err, results) {
-              // req.freezrCepsContacts.query({ username: granteeParts[0], serverurl: granteeParts[1] }, null, function (err, results) {
+                // req.freezrCepsContacts.query({ username: granteeParts[0], serverurl: granteeParts[1] }, null, function (err, results) {
                 if (results && results.length > 0) {
                   allowedGrantees.push(grantee)
                 } else {
@@ -1098,13 +1100,13 @@ exports.shareRecords = function (req, res) {
                   accessiblesObject.privateFeedNames = helpers.removeFromListIfExists(accessiblesObject.privateFeedNames, codeOrName)
                 } else if (hasPrivateLink) {
                   accessiblesObject.isPublic = (results && results.length > 0) ? results[0].isPublic : false
-                  accessiblesObject.privateFeedNames = (results && results.length > 0) ? results[0].privateFeedNames: null
+                  accessiblesObject.privateFeedNames = (results && results.length > 0) ? results[0].privateFeedNames : null
                   accessiblesObject.privateLinks = helpers.removeFromListIfExists(accessiblesObject.privateLinks, codeOrName)
                 } else {
                   accessiblesObject.privateLinks = (results && results[0] && results[0].privateLinks) ? results[0].privateLinks : null
                   accessiblesObject.privateFeedNames = (results && results[0] && results[0].privateFeedNames) ? results[0].privateFeedNames : null
                   accessiblesObject.isPublic = false
-                } 
+                }
                 if (!accessiblesObject.isPublic && (!accessiblesObject.privateFeedNames || accessiblesObject.privateFeedNames.length === 0) && (!accessiblesObject.privateLinks || accessiblesObject.privateLinks.length === 0)) {
                   req.freezrPublicRecordsDB.delete_record(publicid, {}, cb2)
                 } else {
@@ -1126,24 +1128,24 @@ exports.shareRecords = function (req, res) {
       }
     }
   ],
-  function (err, results) {
-    fdlog('end of share', { err, results }, 'publidcIds: ', req.body.publicid, 'vs ' + newRecordUniquePublicId)
-    if (err) {
-      felog(err, results)
-      helpers.send_failure(res, err, 'app_handler', exports.version, 'shareRecords')
-    } else if (req.body.publicid || newRecordUniquePublicId) { // added newRecordUniquePublicId 2022-12 - isHtmlMainPage affected? todo review?
-      helpers.send_success(res, { record_id: req.body.record_id, _publicid: newRecordUniquePublicId, code: codeOrName, _date_published: datePublished, grant: req.body.grant, recordsChanged: (recordsToChange.length) })
-    } else {
-      helpers.send_success(res, { success: true, recordsChanged: (recordsToChange.length) })
-    }
-  })
+    function (err, results) {
+      fdlog('end of share', { err, results }, 'publidcIds: ', req.body.publicid, 'vs ' + newRecordUniquePublicId)
+      if (err) {
+        felog(err, results)
+        helpers.send_failure(res, err, 'app_handler', exports.version, 'shareRecords')
+      } else if (req.body.publicid || newRecordUniquePublicId) { // added newRecordUniquePublicId 2022-12 - isHtmlMainPage affected? todo review?
+        helpers.send_success(res, { record_id: req.body.record_id, _publicid: newRecordUniquePublicId, code: codeOrName, _date_published: datePublished, grant: req.body.grant, recordsChanged: (recordsToChange.length) })
+      } else {
+        helpers.send_success(res, { success: true, recordsChanged: (recordsToChange.length) })
+      }
+    })
 }
 const checkWritePermission = function (req, forcePermName) {
   // console.log todo note using groups, we should also pass on all the groups user is part of and check them
   if (req.freezrAttributes.own_record && helpers.startsWith(req.params.app_table, req.freezrAttributes.requestor_app)) return [true, 'write_all', []]
   // to do - review above - 2nd expression redundant?
   if (req.freezrAttributes.requestor_app === 'info.freezr.account' && req.freezrAttributes.owner_user_id === req.freezrAttributes.requestor_user_id && req.freezrAttributes.requestor_user_id === req.session.logged_in_user_id) return [true, 'write_all', []]
-  function mostPowerfulOf (type1, type2) {
+  function mostPowerfulOf(type1, type2) {
     if (type1 === 'write_all' || type2 === 'write_all') return 'write_all'
     if (type1 === 'write_own' || type2 === 'write_own') return 'write_own'
     return null
@@ -1154,8 +1156,8 @@ const checkWritePermission = function (req, forcePermName) {
   const relevantAndGrantedPerms = []
   req.freezrAttributes.grantedPerms.forEach(perm => {
     if (['write_all', 'write_own'].includes(perm.type) &&
-        (perm.grantees.includes(req.freezrAttributes.requestor_user_id) ||
-         perm.grantees.includes('_allUsers'))
+      (perm.grantees.includes(req.freezrAttributes.requestor_user_id) ||
+        perm.grantees.includes('_allUsers'))
     ) {
       if (!forcePermName || perm.name === forcePermName) {
         granted = true
@@ -1167,6 +1169,7 @@ const checkWritePermission = function (req, forcePermName) {
   return [granted, grantType, relevantAndGrantedPerms]
 }
 const checkReadPermission = function (req, forcePermName) {
+  fdlog('checkReadPermission freezrAttributes', req.freezrAttributes)
   if (req.freezrAttributes.own_record) return [true, true, []]
   if (req.freezrAttributes.owner_user_id === req.freezrAttributes.requestor_user_id && ['dev.ceps.contacts', 'dev.ceps.groups'].indexOf(req.freezrRequesteeDB.oac.app_table) > -1 && req.freezrAttributes.requestor_app === 'info.freezr.account') return [true, true, [{ type: 'db_query' }]]
   // if (req.session.logged_in_as_admin && ['dev.ceps.contacts', 'dev.ceps.groups'].indexOf(req.freezrRequesteeDB.oac.app_table) > -1 && req.freezrAttributes.requestor_app === 'info.freezr.account') return [true, true, [{ type: 'db_query' }]]
@@ -1181,9 +1184,9 @@ const checkReadPermission = function (req, forcePermName) {
     if (['write_all', 'write_own', 'read_all', 'share_records'].includes(perm.type) &&
       // above is reduncant as only these threee types ar allowed, but future types may differ
       (req.freezrAttributes.requestor_user_id === req.freezrAttributes.owner_user_id ||
-       perm.grantees.includes(req.freezrAttributes.requestor_user_id) ||
-       perm.grantees.includes('_public') || // console.log: todo: || includes valid group names [2021 - groups]
-       perm.grantees.includes('_allUsers'))
+        perm.grantees.includes(req.freezrAttributes.requestor_user_id) ||
+        perm.grantees.includes('_public') || // console.log: todo: || includes valid group names [2021 - groups]
+        perm.grantees.includes('_allUsers'))
     ) {
       if (!forcePermName || perm.name === forcePermName) {
         granted = true
@@ -1194,6 +1197,7 @@ const checkReadPermission = function (req, forcePermName) {
     // moved up 2023-05
     // readAll = readAll || ['write_all', 'read_all'].includes(perm.type)
   })
+  fdlog({ granted, readAll, relevantAndGrantedPerms })
   return [granted, readAll, relevantAndGrantedPerms]
 }
 
@@ -1308,7 +1312,6 @@ NEW     message:
             if ((sharingPerm || messagingPerm) && (contactPerm || groupPerm)) {
               cb(null)
             } else {
-              felog('check error perm results', { results }, 'oac: ', req.freezrRequesteeDB.oac)
               cb(new Error('Permission type mismatch for messaging'))
             }
           }
@@ -1377,33 +1380,32 @@ NEW     message:
         },
 
         function (cb) {
-        //   if (params.recipient_id) {
-        //     const fullname = params.recipient_id + (params.recipient_host ? ('@' + params.recipient_host) : '')
-        //     cb(null, [fullname])
-        //   } else if (params.group_members) {
-        //     cb(null, params.group_members)
-        //   } else if (params.group_name && typeof params.group_name === 'string') {
-        //     req.freezrCepsGroups.query({ name: params.group_name }, null, function (err, groups) {
-        //       if (err) {
-        //         cb(err)
-        //       } else if (!groups || groups.length < 1) {
-        //         cb(new Error('No groups found'))
-        //       } else {
-        //         if (groups.length > 1) { console.warn('snbh - found 2 groups of same name') }
-        //         cb(null, groups[0].members)
-        //       }
-        //     })
-        //   }
-        // },
-        //
-        // function (members, cb) {
-        //   console.log(' sharign with ', { members })
+          //   if (params.recipient_id) {
+          //     const fullname = params.recipient_id + (params.recipient_host ? ('@' + params.recipient_host) : '')
+          //     cb(null, [fullname])
+          //   } else if (params.group_members) {
+          //     cb(null, params.group_members)
+          //   } else if (params.group_name && typeof params.group_name === 'string') {
+          //     req.freezrCepsGroups.query({ name: params.group_name }, null, function (err, groups) {
+          //       if (err) {
+          //         cb(err)
+          //       } else if (!groups || groups.length < 1) {
+          //         cb(new Error('No groups found'))
+          //       } else {
+          //         if (groups.length > 1) { console.warn('snbh - found 2 groups of same name') }
+          //         cb(null, groups[0].members)
+          //       }
+          //     })
+          //   }
+          // },
+          //
+          // function (members, cb) {
+          //   console.log(' sharign with ', { members })
           if (!req.freezrMessageToMembers || req.freezrMessageToMembers.length === 0) {
             console.warn('no members to share with')
             cb(new Error('No members to sharewith'))
           } else {
             async.forEach(req.freezrMessageToMembers, function (member, cb2) {
-              fdlog('going to share with ', member)
               const parts = member.split('@')
               const username = parts[0]
               const serverurl = parts.length > 1 ? parts[1] : null
@@ -1459,6 +1461,7 @@ NEW     message:
           } else {
             if (!recordAccessibleField) recordAccessibleField = {}
             recipientsSuccessfullysentTo.forEach(member => {
+              member = member.replace(/\./g, '_')
               if (!recordAccessibleField[member]) recordAccessibleField[member] = {}
               if (!recordAccessibleField[member].messaged) recordAccessibleField[member].messaged = []
               recordAccessibleField[member].messaged.push(new Date().getTime()) // newd -> list of dates??
@@ -1469,6 +1472,7 @@ NEW     message:
 
       ], function (err, ret) {
         if (err) {
+          console.warn({ err })
           helpers.send_failure(res, err, 'app_handler', exports.version, 'messageActions transmit')
         } else {
           helpers.send_success(res, { success: true, recipientsSuccessfullysentTo, recipientsWithErrorsSending })
@@ -1599,24 +1603,24 @@ NEW     message:
             }
           }
         ],
-        function (err) {
-          if (err) {
-            felog('internal error in transmit', err)
-            // todo customise error handling and whther response should be given, based on more refined preferences
-            if (status > 1 || receivedParams.senderIsAContact) helpers.send_failure(res, helpers.error('internal error in transmit'), 'app_handler', exports.version, 'messageActions')
-            // ie do not respond if the sender is not a contact
-          } else {
-            helpers.send_success(res, { success: true })
-          }
-        })
+          function (err) {
+            if (err) {
+              felog('internal error in transmit', err)
+              // todo customise error handling and whther response should be given, based on more refined preferences
+              if (status > 1 || receivedParams.senderIsAContact) helpers.send_failure(res, helpers.error('internal error in transmit'), 'app_handler', exports.version, 'messageActions')
+              // ie do not respond if the sender is not a contact
+            } else {
+              helpers.send_success(res, { success: true })
+            }
+          })
       }
       break
     case 'verify':
       {
-      // verify by pinging the sender server of the nonce and getting the info
-      // fetch record nonce - have a max time...
-      // check other parameters?
-      // responde with {record: xxxx}
+        // verify by pinging the sender server of the nonce and getting the info
+        // fetch record nonce - have a max time...
+        // check other parameters?
+        // responde with {record: xxxx}
         fdlog('share verify')
         const haveDifferentMessageFields = function (m1, m2) {
           const fields = ['app_id', 'sender_id', 'sender_host', 'recipient_host', 'recipient_id', 'contact_permission', 'table_id', 'record_id']
@@ -1746,7 +1750,7 @@ NEWDO?  message:
         })
       })
       verifyReq.on('error', (error) => {
-        felog('error in transmit ', error)
+        console.warn('error in transmit ', error)
         callback(helpers.error('message transmission error 2'))
       })
       verifyReq.write(JSON.stringify(checkedParams))
@@ -1830,7 +1834,7 @@ const PUBLIC_PROFILE_PICT_EXCEPTIONS = {
 
 exports.create_file_record = function (req, res) {
   fdlog(req, ' create_file_record at ' + req.url + 'body:' + JSON.stringify((req.body && req.body.options) ? req.body.options : ' none'))
-  
+
   if (req.body.options && (typeof req.body.options === 'string')) req.body.options = JSON.parse(req.body.options) // needed when upload file
   if (req.body.data && (typeof req.body.data === 'string')) req.body.data = JSON.parse(req.body.data) // needed when upload file
 
@@ -1926,14 +1930,14 @@ exports.create_file_record = function (req, res) {
       req.freezruserFilesDb.update(dataObjectId.toString(), { _UploadStatus: 'complete' }, { replaceAllFields: false }, cb)
     }
   ],
-  function (err, writeConfirm) {
-    fdlog({ err, writeConfirm })
-    if (err) {
-      helpers.send_failure(res, err, 'app_handler', exports.version, 'create_file_record')
-    } else {
-      helpers.send_success(res, { _id: dataObjectId })
-    }
-  })
+    function (err, writeConfirm) {
+      fdlog({ err, writeConfirm })
+      if (err) {
+        helpers.send_failure(res, err, 'app_handler', exports.version, 'create_file_record')
+      } else {
+        helpers.send_success(res, { _id: dataObjectId })
+      }
+    })
 }
 exports.getFileToken = exports.read_record_by_id
 
@@ -2015,7 +2019,7 @@ exports.getManifest = function (req, res) {
   // app.get('/v1/developer/manifest/:app_name'
   // getAllAppTableNames
   felog('NOT TESTED - REVIEW')
-  function endCB (err, manifest = null, appTables = []) {
+  function endCB(err, manifest = null, appTables = []) {
     if (err) felog('got err in getting manifest ', err)
     if (manifest) {
       helpers.send_success(res, { manifest, app_tables: appTables })
@@ -2029,7 +2033,7 @@ exports.getManifest = function (req, res) {
   if (!req.freezrRequestorManifest) {
     endCB(new Error('no manifest found'))
   } else {
-    if (appName === 'infor.freezr.admin') console.log('todo - neeed to separate our manifest of fradmin')
+    // if (appName === 'infor.freezr.admin') console.log('todo - neeed to separate our manifest of fradmin')
     req.freezrUserDS.getorInitDb({ owner: req.session.logged_in_user_id, app_table: appName }, null, function (err, topdb) {
       if (err) {
         endCB(err, req.freezrRequestorManifest)

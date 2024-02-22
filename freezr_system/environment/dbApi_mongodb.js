@@ -62,7 +62,7 @@ MONGO_FOR_FREEZR.prototype.create = function (id, entity, options, callback) {
       return callback(null, { success: true, _id: theId })
     })
     .catch(err => {
-      console.warn('got err in write db ', { collName, err })
+      console.warn('got err in write db 1 ', { collName, err, id, entity })
       return callback(err)
     })
     .finally(() => {
@@ -74,12 +74,18 @@ MONGO_FOR_FREEZR.prototype.update_multi_records = function (idOrQuery, updatesTo
   if (typeof idOrQuery === 'string') {
     updateMultiple = false
     idOrQuery = { _id: getRealObjectId(idOrQuery) }
-  // } else if (ObjectID.isValid(idOrQuery)) {
-  //   updateMultiple = false
-  //   idOrQuery = { _id: getRealObjectId(idOrQuery) }
-  } else if (idOrQuery._id && typeof idOrQuery._id === 'string') { // nb also ignores additional conditions in query
+  } else if (ObjectId.isValid(idOrQuery)) {
     updateMultiple = false
-    idOrQuery._id = getRealObjectId(idOrQuery._id)
+    idOrQuery = { _id: idOrQuery }
+  } else if (idOrQuery._id) { // nb also ignores additional conditions in query
+    updateMultiple = false
+    if (!ObjectId.isValid(idOrQuery._id)) {
+      if (typeof idOrQuery._id === 'string') {
+        idOrQuery._id = getRealObjectId(idOrQuery._id)
+      } else {
+        felog('Can only hjave objectids and strings when querying _id')
+      }
+    }
   } else if (idOrQuery.$and || idOrQuery.$or) {
     felog('currently cannot do $and and $or of _ids - need to add objectIds iteratively [???]')
   }
@@ -91,7 +97,7 @@ MONGO_FOR_FREEZR.prototype.update_multi_records = function (idOrQuery, updatesTo
         return callback(null, { success: true, nModified: response?.modifiedCount })
       })
       .catch(err => {
-        console.warn('got err in write db ', { collName, err })
+        felog('got err in write db 2  ', { collName, idOrQuery, err })
         return callback(err)
       })
       .finally(() => {

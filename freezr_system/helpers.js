@@ -2,7 +2,7 @@
 // THIS NEEDS TO BE CLEANED AND re-organised
 exports.version = '0.0.122'
 
-const async = require('async')
+// const async = require('async')
 const path = require('path')
 
 exports.RESERVED_FIELD_LIST = ['_id', '_date_created', '_date_modified','_accessible','_publicid','_date_accessibility_mod'];
@@ -10,7 +10,7 @@ exports.RESERVED_FIELD_LIST = ['_id', '_date_created', '_date_modified','_access
 const RESERVED_IDS = ['fradmin', 'admin', 'public', 'test', 'freezr', 'freezrdb']
 const MAX_USER_NAME_LEN = 25
 const RESERVED_COLLECTION_NAMES = ['field_permissions', 'accessible_objects'] // 'files' s also reserved but can write to it
-const MAX_PP_NAME_LEN = 30
+// const MAX_PP_NAME_LEN = 30
 
 exports.system_apps = ['info.freezr.account', 'info.freezr.admin', 'info.freezr.public', 'info.freezr.permissions', 'info.freezr.posts', 'info.freezr.logs']
 exports.SYSTEM_ADMIN_COLLS = ['users', 'permissions', 'visitAuthFailures', 'visitLogs', 'params', 'oauth_permissions', 'app_tokens']
@@ -26,14 +26,14 @@ exports.FREEZR_USER_FILES_DIR = 'users_freezr'
 // Valid names
 // OTHER FUNCS TO REVIEW
 exports.permitted_types = {
-    groups_for_objects: ['user','logged_in','public'],
-    //groups_for_fields: ['user','logged_in'],
-    type_names: ['object_delegate', 'db_query'] // used in getDataObject
+  groups_for_objects: ['user','logged_in','public'],
+  //groups_for_fields: ['user','logged_in'],
+  type_names: ['object_delegate', 'db_query'] // used in getDataObject
 }
 
 exports.is_system_app = function (appName) {
-    if (!appName) console.warn('Asking is_system_app for NULL APP')
-    if (!appName) return false
+  if (!appName) console.warn('Asking is_system_app for NULL APP')
+  if (!appName) return false
   let ret = false
   appName = appName.replace(/\./g, '_')
   exports.system_apps.forEach((item, i) => {

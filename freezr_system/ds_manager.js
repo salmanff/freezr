@@ -673,7 +673,7 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
               existingEntity = existingEntity[0]
             }
             delete entity._id
-            idOrQuery = existingEntity._id + ''
+            idOrQuery = existingEntity._id.toString() // + ''
             exports.update(idOrQuery, entity, { replaceAllFields: true, old_entity: existingEntity }, cb)
           }
         };

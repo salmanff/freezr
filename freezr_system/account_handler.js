@@ -1786,7 +1786,7 @@ exports.CEPSValidator = function (req, res) {
       // 1. basic checks
       function (cb) {
         if (!req.query.validation_token || !req.query.data_owner_user || !req.query.table_id || !req.query.requestor_user || (!req.query.permission && req.query.requestor_host && req.freezrTokenInfo.app_name !== 'info.freezr.account')) { // || !req.query.requestor_host  new 2022-11
-          console.log('incomplete request 5 body ', req.bod, ' freezrTokenInfo ', req.freezrTokenInfo)
+          console.warn('incomplete request 5 body ', req.bod, ' freezrTokenInfo ', req.freezrTokenInfo)
           cb(helpers.error('incomplete request 5'))
         } else {
           cb(null)

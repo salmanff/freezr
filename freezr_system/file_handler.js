@@ -546,6 +546,7 @@ exports.getEnvParamsFromLocalFileSystem = function () {
 
 // General Utilities
 exports.fileExt = function (fileName) {
+  if (typeof fileName !== 'string') return null
   let ext = path.extname(fileName)
   if (ext && ext.length > 0) ext = ext.slice(1)
   return ext

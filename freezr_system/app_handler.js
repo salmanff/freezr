@@ -469,12 +469,37 @@ exports.db_query = function (req, res) {
       returnFields = thePerm.return_fields
     }
 
-    fdlog('will query ', req.freezrRequesteeDB.db.oat, req.body.q, { count, skip })
+    const transformQueryRegexes = function (q) {
+      const ret = {}
+      for (const [key, value] of Object.entries(q)) {
+        if (key === '$regex' && typeof value === 'string') {
+          ret[key] = new RegExp(value)
+        } else if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || !value) {
+          ret[key] = value
+        } else if (Array.isArray(value)) {
+          ret[key] = value.map(inner => transformQueryRegexes(inner))
+        } else if (typeof value === 'object') {
+          ret[key] = transformQueryRegexes(value)
+        } else {
+          console.warn('FUNNY EXPRESSION PASSED', { key, value })
+          ret[key] = value
+        }
+      }
+      return ret
+    }
+
+    // transform regexes
+    try {
+      const transfedRegex = transformQueryRegexes(req.body.q)
+      req.body.q = transfedRegex
+    } catch (e) {
+      felog('Couldnot tranfrm query ', req.body.q)
+    }
 
     req.freezrRequesteeDB.query(req.body.q,
       { sort, count, skip }, function (err, results) {
         if (err) {
-          console.warn('got err for req.body.q ', req.body.q)
+          console.warn('got err for req.body.q ', req.body.q, { err })
           helpers.send_failure(res, err, 'app_handler', exports.version, 'do_db_query')
         } else {
           if (results && results.length > 0) {

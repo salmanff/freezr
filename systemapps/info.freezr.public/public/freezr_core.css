@@ -102,7 +102,7 @@ body {
 	font-weight: normal;
 	z-index: 99;
 	padding-left: 40px;
-	background-image:url(/app_files/public/info.freezr.public/public/static/freezer_log_top.png);
+	background-image:url(/app_files/@public/info.freezr.public/public/static/freezer_log_top.png);
 	background-size: 36px 36px;
   background-repeat: no-repeat;
 }
@@ -185,5 +185,5 @@ body {
 	padding:20px;
 	padding-top:0;
 	margin:0 auto;
-	background-image:url(/app_files/public/info.freezr.public/public/static/freezr_texture.png);
+	background-image:url(/app_files/@public/info.freezr.public/public/static/freezr_texture.png);
 	background-repeat: repeat;}

@@ -29,7 +29,7 @@ NEDB_FOR_FREEZR.prototype.initDB = function (callback) {
   const { dbParams, fsParams, extraCreds } = this.env
 
   const self = this
-  var customFS = null
+  let customFS = null
   // const type =
 
   if (fsParams.type !== 'local') {
@@ -37,27 +37,29 @@ NEDB_FOR_FREEZR.prototype.initDB = function (callback) {
     const CustomFS = require(envdir + 'dbfs_' + fsParams.type + '.js')
     customFS = new CustomFS(fsParams, { doNotPersistOnLoad: true, extraCreds })
   }
+
   if (fsParams.type !== 'local' && !customFS) {
     throw new Error('Error retrieving environment for nedb-asyncfs, using storage of type ' + fsParams.type)
   } else {
     const filename = (dbParams.db_path ? (dbParams.db_path + '/') : '') +
-      (fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/' +
-      this.oat.owner + '/db/' + fullName(this.oat) + '.db'
+    (fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/' +
+    self.oat.owner + '/db/' + fullName(self.oat) + '.db'
 
-    fdlog('NEDB_FOR_FREEZR ', { dbParams, fsParams, filename }, 'oat:', this.oat)
+    fdlog('NEDB_FOR_FREEZR ', { dbParams, fsParams, filename }, 'oat:', self.oat)
 
     self.db = new Datastore({ filename, customFS }, { doNotPersistOnLoad: true })
-    self.db.loadDatabase(function (err) {
-      if (err) {
-        return callback(err)
-      } else {
-        if (self.db.customFS.initFS) {
-          return self.db.customFS.initFS(callback)
+    if (self.db.customFS.initFS) {
+      self.db.customFS.initFS(function (err) {
+        if (err) {
+          console.error('Error initialising nedb-asyncfs - code: ', err?.code, ' - err.message:', err.message, ' - name ', err?.name )
+          callback(err)
         } else {
-          return callback(null)
+          return self.db.loadDatabase(callback)
         }
-      }
-    })
+      })
+    } else {
+      return self.db.loadDatabase(callback)
+    }
   }
 }
 NEDB_FOR_FREEZR.prototype.read_by_id = function (id, callback) {
@@ -92,6 +94,10 @@ NEDB_FOR_FREEZR.prototype.query = function (query, options = {}, cb) {
     .limit(options.count || ARBITRARY_FIND_COUNT_DEFAULT)
     .skip(options.skip || 0)
     .exec(cb)
+    // .exec(function (err, results) {
+    //   console.log('got nedb_for_frezr  ', { err, reslen: results.length })
+    //   cb(err, results)
+    // })
 }
 NEDB_FOR_FREEZR.prototype.update_multi_records = function (idOrQuery, updatesToEntity, cb) {
   if (typeof idOrQuery === 'string') idOrQuery = { _id: idOrQuery }
@@ -110,7 +116,10 @@ NEDB_FOR_FREEZR.prototype.delete_record = function (idOrQuery, options = {}, cb)
   // fdlog('nedb for freezr - delete record')
   this.db.remove(idOrQuery, { multi: true }, cb)
 }
-
+NEDB_FOR_FREEZR.prototype.createIndex = function (indexParams, indexOptions, callback) {
+  // FOR TESTIG ONLY
+  callback(null)
+}
 NEDB_FOR_FREEZR.prototype.getAllAppTableNames = function (appOrTableNameOrNames, callback) {
   fdlog('getAllAppTableNames nedb ', appOrTableNameOrNames)
   const userId = this.oat.owner

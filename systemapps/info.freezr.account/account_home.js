@@ -35,7 +35,11 @@ freezr.initPageScripts = function () {
   if (freezrMeta.adminUser) document.getElementById('button_tabs_dev').style.display = 'block'
 
   const searchParams = new URLSearchParams(window.location.search)
-  if (searchParams.get('show') === 'welcome') document.getElementById('welcomeMsg').style.display = 'block'
+  if (searchParams.get('show') === 'welcome') {
+    document.getElementById('welcomeMsg').style.display = 'block'
+    document.getElementById('app_list').firstElementChild.style.display = 'none'
+    window.history.pushState(null, 'Welcome to freezr', '/')
+  }
 }
 
 const buttons = {

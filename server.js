@@ -1,13 +1,8 @@
 // freezr.info - nodejs system files - main file: server.js
 const VERSION = '0.0.211'
 
-
-// testing that files do not have errors
-// console.log('dirname ' + __dirname)
-// const tester1 = require(__dirname + '/node_modules/nedb-asyncfs/env/dbfs_googleDrive.js')
-
 // INITALISATION / APP / EXPRESS
-console.log('=========================  VERSION May 2023  =======================')
+console.log('=========================  VERSION June 2024  =======================')
 const express = require('express')
 const bodyParser = require('body-parser')
 const multer = require('multer')
@@ -28,7 +23,17 @@ const permHandler = require('./freezr_system/perm_handler.js')
 const publicHandler = require('./freezr_system/public_handler.js')
 const DS_MANAGER = require('./freezr_system/ds_manager.js')
 
-// const visitLogger = require('./freezr_system/visit_logger.js')
+try { // for simualting env vars on localhost.
+  const envSimulatForLocalDev = require('./zProcessDotEnvSimulatorForLocalDev.js')
+  if (envSimulatForLocalDev && envSimulatForLocalDev.envParams) {
+    console.warn('\n\n =============================== USING SIMULATED ENV PARAMS ================================= \n\n')
+    for (const [key, value] of Object.entries(envSimulatForLocalDev.envParams)) {
+      process.env[key] = value
+    }
+  }
+} catch (e) {
+  // all good - no simulated params to use
+}
 
 // LOGGING
 const LOG_ERRORS = true
@@ -51,13 +56,15 @@ const freezrSelfRegPrefs = function () {
     allow: freezrPrefs.allowSelfReg,
     allowAccessToSysFsDb: freezrPrefs.allowAccessToSysFsDb,
     defaultMBStorageLimit: freezrPrefs.selfRegDefaultMBStorageLimit,
-    useIdsAsDbName: freezrPrefs.useIdsAsDbName
+    // useUserIdsAsDbName: freezrPrefs.useUserIdsAsDbName,
+    dbUnificationStrategy: freezrPrefs.dbUnificationStrategy,
+    useUnifiedCollection: freezrPrefs.useUnifiedCollection,
+    hasNotbeenSave: true
   }
 }
 // ACCESS AND PERMISSION FUNCTIONS
 function uploadFile (req, res) {
   felog('server.js', 'uploadFile needs to be updated with dsManager')
-  console.log('server.js', 'uploadFile needs to be updated with dsManager ', req.params)
   upload(req, res, function (err) {
     if (err) {
       helpers.send_failure(res, err, 'server.js', VERSION, 'uploadFile')
@@ -78,34 +85,52 @@ function installAppFromZipFile (req, res) {
 
 // perm_handler and  access_handler (Adding relevant dcManagers)
 const userLoginHandler = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unified
   accessHandler.userLoginHandler(req, res, dsManager, next)
 }
 const appTokenLoginHandler = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unified
   accessHandler.appTokenLoginHandler(req, res, dsManager, next)
 }
 const accountLoggedInUserPage = function (req, res, next) {
+  req.freezrVisitType = 'pages'
   req.params.app_name = 'info.freezr.account'
   req.freezrStatus = freezrStatus
+  req.freezrPrefs = freezrPrefs // needed for unified
   fdlog('todo - add freezrstatus to account main page and give status')
   accessHandler.loggedInUserPage(req, res, dsManager, next)
 }
 const accountLoggedInAPI = function (req, res, next) {
+  req.freezrVisitType = 'api'
+  req.freezrPrefs = freezrPrefs // needed for unified
+  req.freezrStatus = freezrStatus
   req.params.app_name = 'info.freezr.account'
   accessHandler.accountLoggedInAPI(req, res, dsManager, next)
 }
 const adminLoggedInUserPage = function (req, res, next) {
+  req.freezrVisitType = 'pages'
   req.params.app_name = 'info.freezr.admin'
+  req.freezrPrefs = freezrPrefs // needed for unified
+  req.freezrStatus = freezrStatus
   accessHandler.loggedInUserPage(req, res, dsManager, next)
 }
 const adminLoggedInAPI = function (req, res, next) {
   req.params.app_name = 'info.freezr.admin'
+  req.freezrPrefs = freezrPrefs // needed for unified
   req.freezrPrefsTempPw = dsManager.freezrPrefsTempPw
   accessHandler.accountLoggedInAPI(req, res, dsManager, next)
+}
+const addDsManager = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unified
+  req.freezrDsManager = dsManager
+  next()
 }
 const addAllUsersDb = function (req, res, next) {
   permHandler.addAllUsersDb(req, res, dsManager, next)
 }
 const loggedInUserPage = function (req, res, next) {
+  req.freezrVisitType = 'pages'
+  req.freezrPrefs = freezrPrefs // needed for unified
   if (req.params.app_name === 'info.freezr.public') {
     // fdlog('loggedInUserPage public ' + req.originalUrl)
     accessHandler.publicUserPage(req, res, dsManager, next)
@@ -116,6 +141,7 @@ const loggedInUserPage = function (req, res, next) {
 }
 const loggedInUserAppFile = function (req, res, next) {
   req.freezrVisitType = 'files'
+  req.freezrPrefs = freezrPrefs // needed for unified
   if (req.params.app_name === 'info.freezr.public') {
     // fdlog('loggedInUserPage public ' + req.originalUrl)
     accessHandler.publicUserPage(req, res, dsManager, next)
@@ -126,10 +152,12 @@ const loggedInUserAppFile = function (req, res, next) {
 }
 const validatedOutsideUserAppPage = function (req, res, next) {
   req.freezrStatus = freezrStatus
+  req.freezrPrefs = freezrPrefs // needed for unified
   accessHandler.validatedOutsideUserAppPage(req, res, dsManager, next)
 }
 const loggedInOrValidatedUserAppFile = function (req, res, next) {
   req.freezrVisitType = 'files'
+  req.freezrPrefs = freezrPrefs // needed for unified
   if (req.session && req.session.logged_in_user_id && req.params.user_id && req.params.user_id !== 'public' && req.session.logged_in_user_id !== req.params.user_id) {
     accessHandler.validatedOutsideUserAppPage(req, res, dsManager, next)
   } else {
@@ -139,6 +167,7 @@ const loggedInOrValidatedUserAppFile = function (req, res, next) {
 
 const loggedInOrNotForSetUp = function (req, res, next) {
   req.params.app_name = 'info.freezr.public'
+  req.freezrPrefs = freezrPrefs // needed for unified
   req.freezrAllowSelfReg = freezrPrefs.allowSelfReg
   req.freezrAllowAccessToSysFsDb = freezrPrefs.allowAccessToSysFsDb
   // delete above
@@ -147,12 +176,16 @@ const loggedInOrNotForSetUp = function (req, res, next) {
 }
 const publicAppFile = function (req, res, next) {
   req.freezrVisitType = 'files'
+  req.freezrPrefs = freezrPrefs // needed for unified
   if (!req.params.app_name) req.params.app_name = 'info.freezr.public' // todo - where is this used
   // add req.freezrAppFS
+  fdlog('public app file ', req.url)
   accessHandler.publicUserPage(req, res, dsManager, next)
 }
 const publicUserPage = function (req, res, next) {
-  if (!req.params.app_name) req.params.app_name = 'info.freezr.public' // todo - where is this used
+  fdlog('public user page ', { url: req.url })
+  req.freezrPrefs = freezrPrefs // needed for unified
+  if (!req.params.app_name) req.params.app_name = 'info.freezr.public' // nb used to be able pass perm handler
   // add req.freezrAppFS
   accessHandler.publicUserPage(req, res, dsManager, next)
 }
@@ -216,6 +249,7 @@ const redirectToIndex = function (req, res, next) {
   res.redirect(req.path + '/index.html')
 }
 const userAPIRights = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
   accessHandler.userAPIRights(req, res, dsManager, next)
 }
 const possibleUserAPIForMessaging = function (req, res, next) {
@@ -228,53 +262,96 @@ const possibleUserAPIForMessaging = function (req, res, next) {
 }
 const getTargetManifest = function (req, res, next) {
   // Gets manifest for itself unless it is logged in under account
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
   accessHandler.getManifest(req, res, dsManager, next)
+}
+const addUnifiedDb = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
+  next()
 }
 const getManifest = function (req, res, next) {
   // fdlog('getManifest')
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
   accessHandler.getManifest(req, res, dsManager, next)
 }
 const userAppLogOut = function (req, res, next) {
   // used to log out of apps
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
   accessHandler.userAppLogOut(req, res, dsManager, next)
 }
 const userLogOut = function (req, res, next) {
   // used to log out
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
   accessHandler.userLogOut(req, res, dsManager, next)
 }
-const readWriteUserData = function (req, res, next) {
+const readWriteUserData = function (req, res, next) { 
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
   permHandler.readWriteUserData(req, res, dsManager, next)
 }
 const addUserAppsAndPermDBs = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
   permHandler.addUserAppsAndPermDBs(req, res, dsManager, next)
 }
+const addPublicRecordsDBifNotSystemPublic = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
+  if (req.params.user_id === 'public') {
+    next()
+  } else {
+    permHandler.addPublicRecordsDB(req, res, dsManager, next)
+  }
+}
 const addPublicRecordsDB = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
   permHandler.addPublicRecordsDB(req, res, dsManager, next)
 }
 const addPublicRecordAndIfFileFileFS = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
   permHandler.addPublicRecordAndIfFileFileFS(req, res, dsManager, next)
+}
+const hasAtLeastOnePublicRecordifNotSystemPublic = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
+  if (req.params.user_id === 'public') {
+    next()
+  } else {
+    permHandler.hasAtLeastOnePublicRecord(req, res, dsManager, next)
+  }
+}
+const hasAtLeastOnePublicRecord = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
+  permHandler.hasAtLeastOnePublicRecord(req, res, dsManager, next)
 }
 
 const addUserFsFromTokenInfo = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
   permHandler.addUserFsFromTokenInfo(req, res, dsManager, next)
 }
 const addPublicUserFs = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb / even if only for files, added as usedds is initated
   permHandler.addPublicUserFs(req, res, dsManager, next)
 }
 const addUserFs = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
   permHandler.addUserFs(req, res, dsManager, next)
+}
+const loggedInPingInfo = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
+  accessHandler.loggedInPingInfo(req, res, dsManager, next)
 }
 
 const addUserPermsAndRequesteeDB = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
   permHandler.addUserPermsAndRequesteeDB(req, res, dsManager, next)
 }
 const addUserPermDBs = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
   permHandler.addUserPermDBs(req, res, dsManager, next)
 }
 const addAppTokenDB = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
   permHandler.addAppTokenDB(req, res, dsManager, next)
 }
 const addUserDs = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
   permHandler.addUserDs(req, res, dsManager, next)
 }
 const addFradminDs = function (req, res, next) {
@@ -284,16 +361,38 @@ const addFradminDs = function (req, res, next) {
 }
 const addUserFilesDb = function (req, res, next) {
   if (!req.params.user_id && req.session.logged_in_user_id) req.params.user_id = req.session.logged_in_user_id // for uploading
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
   permHandler.addUserFilesDb(req, res, dsManager, next)
 }
 const addValidationDBs = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
   permHandler.addValidationDBs(req, res, dsManager, next)
 }
 
 const addMessageDb = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
   permHandler.addMessageDb(req, res, dsManager, next)
 }
 const selfRegAdds = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
+  if (!req.freezrIsSetup && req.body.action === 'firstSetUp') {
+    const fsParams = req.body?.env?.fsParams
+      ? (req.body.env.fsParams.choice === 'sysDefault'
+          ? req.freezrInitialEnvCopy.fsParams
+          : environmentDefaults.checkAndCleanFs(req.body.env.fsParams, req.freezrInitialEnvCopy)
+        )
+      : null
+    const dbParams = (req.body?.env?.fsParams
+      ? (req.body.env.dbParams.choice === 'sysDefault'
+          ? req.freezrInitialEnvCopy.dbParams
+          : environmentDefaults.checkAndCleanDb(req.body.env.dbParams, req.freezrInitialEnvCopy)
+        )
+      : null)
+    freezrStatus.dbChoice = dbParams?.choice
+    freezrStatus.fsChoice = fsParams?.choice
+    freezrStatus.dbType = dbParams?.type
+    freezrStatus.fsType = fsParams?.type
+  }
   permHandler.selfRegAdds(req, res, dsManager, next)
 }
 
@@ -308,14 +407,41 @@ const addVersionNumber = function (req, res, next) {
   req.freezrIsSetup = dsManager.freezrIsSetup
   next()
 }
+function getPublicUrlFromPrefs (req) {
+  // fdlog('getPublicUrlFromPrefs dsManager.freezrIsSetup ' + dsManager.freezrIsSetup)
+  if (!dsManager.freezrIsSetup) return '/admin/firstSetUp'
+
+  if (!freezrPrefs?.redirect_public || (!freezrPrefs.public_landing_page && !freezrPrefs.public_landing_app)) return null
+  if (freezrPrefs.public_landing_page === 'public' || (req.query.noredirect === 'true' && req.baseUrl === '/public')) return null
+
+  if (freezrPrefs.public_landing_page) return '/' + freezrPrefs.public_landing_page
+  return '/papp/' + freezrPrefs.public_landing_app
+}
+const redirectOrMainPublic = function (req, res, next) {
+  const pubUrl = getPublicUrlFromPrefs(req)
+  if (pubUrl) {
+    res.redirect(pubUrl)
+  } else {
+    next()
+  }
+}
 const toReviewAndRedo = function (req, res, next) {
+  console.log('toReviewAndRedo GOT THIS', req.url)
   felog('server.js', 'This need to be redone')
   next()
 }
+if (toReviewAndRedo) console.warn('Use toReviewAndRedo to debug ')
 
 // APP PAGES AND FILE OPERATIONS
 const addAppUses = function (cookieSecrets) {
-  // headers and cookies
+  console.log('review cookie mgmt and regenerate regularly')
+  // TEST COOKIE ENHANCEMENETS - headers and cookies 2024 - to review and also create req.session.regenerate(function(err) { }) after logout and updates etc
+  // app.use(session({
+  //   cookie: {
+  //     secure: true,
+  //     httpOnly: true
+  //   }
+  // }))
   app.use(cookieSession(
     // fdlog ('todolater - move to a method (if possible) to be able to reset coookie secret programmatically?')
     {
@@ -341,54 +467,52 @@ const addAppUses = function (cookieSecrets) {
   // todo - to redo
   app.get('/favicon.ico', publicUserPage, servePublicAppFile)
 
-  app.get('/app_files/:user_id/:app_name/public/static/:file', publicAppFile, servePublicAppFile)
-  app.get('/app_files/:user_id/:app_name/public/:file', publicAppFile, servePublicAppFile)
-  app.get('/app_files/:user_id/:app_name/public/static/:file', publicAppFile, servePublicAppFile)
-  app.get('/app_files/:app_name/public/static/:file', loggedInUserAppFile, servePublicAppFile) // since there is no user id, iser must be logged in
-  // console.log todo review - why .use and not .get on below
-  app.use('/app_files/:app_name/static/:file', loggedInUserAppFile, serveAppFile)
-  app.use('/app_files/:user_id/:app_name/:file', loggedInOrValidatedUserAppFile, serveAppFile)
+  // app.get('/app_files/:user_id/:app_name/public/static/:file', publicAppFile, servePublicAppFile)
+  // app.get('/app_files/@:user_id/:app_name/public/static/:file', publicAppFile, servePublicAppFile)
+  // app.get('/app_files/:app_name/public/:file', loggedInUserAppFile, servePublicAppFile) // since there is no user id, iser must be logged in
+  app.use('/app_files/@:user_id/:app_name/public/:file', publicUserPage, addPublicRecordsDBifNotSystemPublic, hasAtLeastOnePublicRecordifNotSystemPublic, publicAppFile, servePublicAppFile) // first two are only ethere to help hasAtLeastOnePublicRecord
+  // app.use('/app_files/:app_name/static/:file', loggedInUserAppFile, serveAppFile)
+  app.use('/app_files/@:user_id/:app_name/:file', loggedInOrValidatedUserAppFile, serveAppFile)
   app.use('/app_files/:app_name/:file', loggedInUserAppFile, serveAppFile)
-  app.get('/apps/:user_id/:app_name/public/static/:file', publicAppFile, serveAppFile)
+
+  app.get('/apps/@:user_id/:app_name/public/static/:file', publicAppFile, serveAppFile)
   app.get('/apps/:app_name/static/:file', loggedInUserAppFile, serveAppFile)
-  app.get('/apps/:user_id/:app_name/static/:file', loggedInUserAppFile, serveAppFile)
+  // app.get('/apps/@:user_id/:app_name/static/:file', loggedInUserAppFile, serveAppFile)
 
   // Outside user App
-  app.get('/oapp/:user_id/:app_name', redirectToIndex) // user_id is of the owner
-  app.get('/oapp/:user_id/:app_name/:page', validatedOutsideUserAppPage, getManifest, appHandler.generatePage)
+  app.get('/oapp/@:user_id/:app_name', redirectToIndex) // user_id is of the owner
+  app.get('/oapp/@:user_id/:app_name/:page', validatedOutsideUserAppPage, getManifest, appHandler.generatePage)
 
+  // public todo fdlog('to review') - removed - replaced by pobject ?
+  // app.get('/pcard/:user_id/:requestor_app/:permission_name/:app_name/:collection_name/:data_object_id', publicUserPage, addPublicRecordsDB, addPublicUserFs, publicHandler.generatePublicPage)
+  // app.get('/pcard/:user_id/:app_name/:collection_name/:data_object_id', publicUserPage, addPublicRecordsDB, addPublicUserFs, publicHandler.generatePublicPage)
 
-  // public todo fdlog('to review')
-  app.get('/pcard/:user_id/:requestor_app/:permission_name/:app_name/:collection_name/:data_object_id', publicUserPage, addPublicRecordsDB, addPublicUserFs, publicHandler.generatePublicPage)
-  app.get('/pcard/:user_id/:app_name/:collection_name/:data_object_id', publicUserPage, addPublicRecordsDB, addPublicUserFs, publicHandler.generatePublicPage)
+  app.get('/papp/@:user_id/:app_name/:page', publicUserPage, addPublicRecordsDB, hasAtLeastOnePublicRecord, addPublicUserFs, publicHandler.generatePublicPage)
+  app.get('/papp/@:user_id/:app_name', publicUserPage, addPublicRecordsDB, hasAtLeastOnePublicRecord, addPublicUserFs, publicHandler.generatePublicPage)
 
-  app.get('/papp/:user_id/:app_name/:page', publicUserPage, addPublicRecordsDB, addPublicUserFs, publicHandler.generatePublicPage)
-  app.get('/papp/:user_id/:app_name', publicUserPage, addPublicRecordsDB, addPublicUserFs, publicHandler.generatePublicPage)
-  app.get('/ppage/:user_id/:app_table/:data_object_id', publicUserPage, addPublicRecordAndIfFileFileFS, publicHandler.generateSingleObjectPage)
-  // app.get('/ppage/:user_id/:partial_public_id', publicUserPage, addPublicRecordsDB, publicHandler.generatePublicObjectPage)
-  app.get('/ppage/:object_public_id', publicUserPage, addPublicRecordAndIfFileFileFS, publicHandler.generateSingleObjectPage)
-  app.get('/ppage', publicUserPage, addPublicRecordsDB, publicHandler.generatePublicPage)
+  app.use('/@:user_id/:app_table/:data_object_id(*)', publicUserPage, addPublicRecordAndIfFileFileFS, hasAtLeastOnePublicRecord, publicHandler.generateSingleObjectPageOrHtmlPageOrFile)
+  app.get('/public/@:user_id/:requestee_app', publicUserPage, addPublicRecordsDB, hasAtLeastOnePublicRecord, publicHandler.generatePublicPage)
+  app.get('/public/@:user_id', publicUserPage, addPublicRecordsDB, hasAtLeastOnePublicRecord, publicHandler.generatePublicPage)
+  app.use('/public', redirectOrMainPublic, publicUserPage, addPublicRecordsDB, publicHandler.generatePublicPage)
+
   app.get('/rss.xml', publicUserPage, addPublicRecordsDB, publicHandler.generatePublicPage)
-  app.get('/papp_files/:user_id/:app_name/public/static/:file', addPublicRecordsDB, addPublicUserFs, servePublicAppFile) // Note changed dec 2021 from "/apps",,, to review todo console.log
   app.get('/v1/pdbq', addPublicRecordsDB, publicHandler.dbp_query)
-  app.get('/v1/pdbq/:app_name', addPublicRecordsDB, publicHandler.dbp_query)
+  app.get('/v1/pdbq/@:user_id/:requestee_app', addPublicRecordsDB, publicHandler.dbp_query)
+  app.get('/v1/pdbq/:requestee_app', addPublicRecordsDB, publicHandler.dbp_query)
   app.post('/v1/pdbq', addPublicRecordsDB, publicHandler.dbp_query)
-  app.get('/v1/pobject/:user_id/:requestee_app_table/:data_object_id', addPublicRecordsDB, publicHandler.generatePublicPage)
-
+  // app.get('/papp_files/:user_id/:app_name/public/static/:file', addPublicRecordsDB, addPublicUserFs, servePublicAppFile) // Note changed dec 2021 from "/apps",,,
   // app.get('/v1/publicfiles/:user_id/:app_name/*', addPublicRecordsDB, addUserFilesDb, addPublicUserFs, publicHandler.old_get_public_file) // legacy
-  app.get('/publicfiles/:app_name/:user_id/*', addPublicRecordsDB, addUserFilesDb, addPublicUserFs, publicHandler.get_public_file)
-
-  // UPLOADED PUBLIC PAGES ... gets them from the personal page // publicpages
-  app.get('/papp/:user_id/:app_name/:page', publicUserPage, addPublicRecordsDB, addPublicUserFs, publicHandler.generatePublicPage)
+  app.get('/publicfiles/@:user_id/:app_name/*', addPublicRecordsDB, hasAtLeastOnePublicRecord, addUserFilesDb, addPublicUserFs, publicHandler.get_public_file)
+  app.get('/v1/pobject/@:user_id/:requestee_app_table/:data_object_id', addPublicRecordsDB, publicHandler.generatePublicPage)
 
   // developer utilities
-  app.get('/v1/developer/manifest', userAPIRights, getTargetManifest, addUserDs, appHandler.getManifest)
+  app.get('/v1/developer/manifest', userAPIRights, getTargetManifest, addUserDs, appHandler.getManifestAndAppTables)
 
   // account pages
   // app.get('/login', publicUserPage, accountHandler.generate_login_page)
   app.get('/account/login', checkSetUp, publicUserPage, accountHandler.generate_login_page)
   app.get('/account/logout', userLogOut)
-  app.get('/account/reauthorise', accountLoggedInUserPage, function (req, res, next) { req.params.page = 'reauthorise'; next() }, accountHandler.generateAccountPage)
+  app.get('/account/reauthorise', accountLoggedInUserPage, function (req, res, next) { req.params.page = 'reauthorise'; next() }, addUnifiedDb, accountHandler.generateAccountPage)
   app.get('/account/app/:sub_page/:target_app', accountLoggedInUserPage, addUserAppsAndPermDBs, (req, res, next) => { req.params.page = 'app'; next() }, accountHandler.generateAccountPage)
   app.get('/account/app/:sub_page', accountLoggedInUserPage, addUserAppsAndPermDBs, (req, res, next) => { req.params.page = 'app'; next() }, accountHandler.generateAccountPage)
   // todo recorg the below
@@ -396,7 +520,7 @@ const addAppUses = function (cookieSecrets) {
   app.get('/account/:page/:target_app', accountLoggedInUserPage, addUserAppsAndPermDBs, accountHandler.generateAccountPage) // for page = 'perms'
   app.get('/account/:page', accountLoggedInUserPage, addUserAppsAndPermDBs, accountHandler.generateAccountPage)
 
-  app.get('/v1/account/data/:action', accountLoggedInAPI, accountHandler.get_account_data) // app_list.json, app_resource_use.json
+  app.get('/v1/account/data/:action', accountLoggedInAPI, addUnifiedDb, accountHandler.get_account_data) // app_list.json, app_resource_use.json
   app.post('/v1/account/login', userLoginHandler)
   app.post('/v1/account/applogout', userAppLogOut)
 
@@ -416,25 +540,26 @@ const addAppUses = function (cookieSecrets) {
   app.get('/admin/selfregister', loggedInOrNotForSetUp, publicUserPage, adminHandler.generate_UserSelfRegistrationPage)
   app.get('/admin/SimpleSelfregister', loggedInOrNotForSetUp, publicUserPage, adminHandler.generate_UserSelfRegistrationPage)
   app.get('/admin/public/:sub_page', publicUserPage, adminHandler.generatePublicAdminPage)
-  app.get('/admin/:sub_page', adminLoggedInUserPage, addFradminDs, adminHandler.generateAdminPage)
+  app.get('/admin/:sub_page', adminLoggedInUserPage, addFradminDs, addDsManager, adminHandler.generateAdminPage)
   app.get('/admin', adminLoggedInUserPage, addFradminDs, adminHandler.generateAdminPage)
   app.get('/admin', adminLoggedInUserPage, addFradminDs, adminHandler.generateAdminPage)
 
   app.post('/v1/admin/self_register', selfRegisterChecks, addSelfRegOptions, selfRegAdds, adminHandler.self_register)
   app.put('/v1/admin/user_register', adminLoggedInAPI, addSelfRegOptions, addFradminDs, adminHandler.user_register)
-  app.put('/v1/admin/change_main_prefs', adminLoggedInAPI, addFradminDs, adminHandler.change_main_prefs, function (req, res) {
-    freezrPrefs = req.freezrPrefs
-    helpers.send_success(res, { success: true, newPrefs: req.freezrPrefs })
+  app.put('/v1/admin/change_main_prefs', adminLoggedInAPI, addFradminDs, addDsManager, function (req, res) {
+    adminHandler.change_main_prefs(req, res, function (newPrefs) {
+      freezrPrefs = newPrefs
+      helpers.send_success(res, { success: true, newPrefs })
+    })
   })
+  app.get('/v1/admin/data/:action', adminLoggedInAPI, addDsManager, adminHandler.data_actions)
 
   // admin pages - NOT UPDATED
-  app.post('/v1/admin/dbquery/:collection_name', toReviewAndRedo, adminLoggedInAPI) // old: adminHandler.dbquery)
+  app.post('/v1/admin/dbquery/:collection_name', adminLoggedInAPI) // old: adminHandler.dbquery)
 
-  // Auth
+  // o-Auth
   app.put('/v1/admin/oauth_perm', adminLoggedInAPI, addoAuthers, adminHandler.oauth_perm_make)
-
   app.get('/v1/admin/oauth/public/:dowhat', addoAuthers, adminHandler.oauth_do)
-
   app.post('/oauth/token', appTokenLoginHandler)
 
   // CEPS
@@ -443,7 +568,7 @@ const addAppUses = function (cookieSecrets) {
   app.get('/ceps/query/:app_table', userAPIRights, readWriteUserData, appHandler.db_query)
   app.put('/ceps/update/:app_table/:data_object_id', userAPIRights, readWriteUserData, appHandler.write_record)
   app.delete('/ceps/delete/:app_table/:data_object_id', userAPIRights, readWriteUserData, appHandler.delete_record)
-  app.get('/ceps/ping', addVersionNumber, accountHandler.ping)
+  app.get('/ceps/ping', addVersionNumber, loggedInPingInfo, accountHandler.ping)
 
   // Permissions
   app.get('/ceps/perms/view/:app_name', (req, res) => res.redirect('/account/perms/' + req.params.app_name +
@@ -478,8 +603,6 @@ const addAppUses = function (cookieSecrets) {
   app.get('/feps/getuserfiletoken/:permission_name/:app_name/:user_id/*', userAPIRights, readWriteUserData, addUserFilesDb, appHandler.read_record_by_id) // collection_name is files
   app.get('/feps/userfiles/:app_name/:user_id/*', addUserFs, appHandler.sendUserFileWithFileToken) // collection_name is files
   app.get('/feps/fetchuserfiles/:app_name/:user_id/*', userAPIRights, addUserFs, appHandler.sendUserFileWithAppToken) // collection_name is files
-  // app.get('/v1/developer/fileListUpdate/:app_name', toReviewAndRedo, userAPIRights, appHandler.updateFileList);
-  // app.get('/v1/developer/fileListUpdate/:app_name/:folder_name', toReviewAndRedo, userAPIRights, appHandler.updateFileList);
 
   // permissions
   app.get('/v1/permissions/gethtml/:app_name', userAPIRights, addUserPermDBs, accountHandler.generatePermissionHTML)
@@ -488,14 +611,6 @@ const addAppUses = function (cookieSecrets) {
   // app.put('/v1/permissions/change/:requestee_app_table', accountLoggedInAPI, getTargetManifest, addUserPermsAndRequesteeDB, addPublicRecordsDB, accountHandler.changeNamedPermissions)
 
   // default redirects
-  function getPublicUrlFromPrefs () {
-    // fdlog('getPublicUrlFromPrefs dsManager.freezrIsSetup ' + dsManager.freezrIsSetup)
-    if (!dsManager.freezrIsSetup) return '/admin/firstSetUp'
-    if (!freezrPrefs || !freezrPrefs.redirect_public) return '/account/login'
-    if (!freezrPrefs.public_landing_page && !freezrPrefs.public_landing_app) return '/ppage'
-    if (freezrPrefs.public_landing_page) return '/' + freezrPrefs.public_landing_page
-    return '/papp/' + freezrPrefs.public_landing_app
-  }
   app.get('/feps*', function (req, res) {
     fdlog('feps', 'unknown feps api url ' + req.url)
     helpers.send_failure(res, helpers.error('invalid api url: ', req.path), 'server.js', VERSION, 'server')
@@ -508,18 +623,20 @@ const addAppUses = function (cookieSecrets) {
     fdlog('/v1/*', 'unknown api url ' + req.url)
     helpers.send_failure(res, helpers.error('invalid api url:', req.path), 'server.js', VERSION, 'server')
   })
-  app.get('/public', function (req, res) {
-    res.redirect(getPublicUrlFromPrefs())
-    res.end()
-  })
+  // app.get('/public', function (req, res) {
+  //   const pubUrl = getPublicUrlFromPrefs(req)
+  //   res.redirect(getPublicUrlFromPrefs(req))
+  //   res.end()
+  // })
   app.get('/', function (req, res) {
     // if allows public people coming in, then move to public page
-    const redirectUrl = (req.session && req.session.logged_in_user_id) ? '/account/home' : getPublicUrlFromPrefs()
+    const redirectUrl = (req.session && req.session.logged_in_user_id) ? '/account/home' : (getPublicUrlFromPrefs(req) || '/public')
+    // fdlog(req, 'home url redirect', { params: req.params })
     fdlog(req, 'home url redirect')
     res.redirect(redirectUrl)
     res.end()
   })
-  app.get('*', publicUserPage, addPublicRecordAndIfFileFileFS, publicHandler.generateSingleObjectPage)
+  app.get('*', publicUserPage, addPublicRecordAndIfFileFileFS, publicHandler.generateSingleObjectPageOrHtmlPageOrFile) // redirects to public page if no object found
 }
 const serveAppFile = function (req, res, next) {
   fdlog((new Date()) + ' serveAppFile - url' + req.originalUrl + `for user ${req.params.user_id} and app ${req.params.app_name} - is logged in ${req.session.logged_in_user_id} - file is ${req.params.file}`)
@@ -586,32 +703,41 @@ let fradminAdminFs = null
 // setting up initialEnvironment
 // Checks file on server - if so, use that but check against the version of the db and mark error if they are different
 // But if file doesn't exist (it could be because of a restart in docker wiping it out) use the db. (Not an error - just warn)
+let lastStartupStep = null
 async.waterfall([
   // 1 Read initialEnvironment from file and initiate environment or use defaults
   function (cb) {
     fdlog('startup waterfall - set up part 1a - detect params')
-    environmentDefaults.tryGettingEnvFromautoConfig(cb)
+    lastStartupStep = 'detectparams'
+    environmentDefaults.tryGettingEnvFromautoConfig({ freezrPrefs: DEFAULT_PREFS }, cb)
   },
 
   // 2. SET FREEZR_ENV AND TRY INITIATING DB
   function (detectedParams, cb) {
     fdlog('startup waterfall - set up part 1b ', { detectedParams })
     if (detectedParams.envOnFile && detectedParams.envOnFile.freezrIsSetup) {
-      if (!detectedParams.envOnFile.fsParams || !detectedParams.envOnFile.dbParams) throw new Error('freezr was initiated but envOnFile not found')
-      dsManager.freezrIsSetup = true
       const systemEnv = {
         fsParams: detectedParams.envOnFile.fsParams,
         dbParams: detectedParams.envOnFile.dbParams
       }
+      console.log('got detected params ', { fs: detectedParams.envOnFile?.dbParams?.type, db: detectedParams.envOnFile?.dbParams?.type } )
       dsManager.setSystemUserDS('fradmin', systemEnv)
       dsManager.initialEnvironment = detectedParams.envOnFile
     } else {
+      console.log('setting up autoconfig')
       dsManager.initialEnvironment = detectedParams.autoConfig
     }
-    environmentDefaults.checkDB(dsManager.initialEnvironment, { okToCheckOnLocal: true }, cb)
+    dsManager.freezrIsSetup = dsManager.initialEnvironment?.freezrIsSetup
+    if (!dsManager.freezrIsSetup) console.log('freezr is NOT set up yet')
+    if (dsManager.freezrIsSetup && (!detectedParams.envOnFile.fsParams || !detectedParams.envOnFile.dbParams)) {
+      cb(new Error('freezr was initiated but envOnFile not found'))
+    } else {
+      environmentDefaults.checkDB(dsManager.initialEnvironment, { okToCheckOnLocal: true }, cb)
+    }
   },
   // See if db is working => freezrStatus.can_read_write_to_db
   function (dbWorks, cb) {
+    lastStartupStep = 'dbWorks'
     fdlog('startup waterfall - set up part 2 - dbworks ? ', dbWorks)
     if (dbWorks && dbWorks.checkpassed) freezrStatus.can_read_write_to_db = true
     if (dbWorks && dbWorks.checkpassed && dsManager.freezrIsSetup) {
@@ -623,23 +749,35 @@ async.waterfall([
       cb(null)
     }
   },
+  // init params db and get the freezrPrefs
   function (cb) {
+    lastStartupStep = 'iniitdb'
     fdlog('startup waterfall - set up part 2a - todo - this was added as a fix for dbx - to check if needed - to review todo')
     if (dsManager.freezrIsSetup && freezrStatus.can_read_write_to_db) {
       dsManager.initOacDB(USER_DB_OAC, null, (err, userDb) => {
         if (err) felog('server.js', 'could not get USER_DB_OAC - error writing to db after test has passed - this should not happen!!! - (todo: can_read_write_to_db to false?)', err)
-        cb(null)
+        adminHandler.get_or_set_prefs(dsManager.getDB(PARAMS_OAC), 'main_prefs', DEFAULT_PREFS, false, function (err, mainPrefsOnDb) {
+          freezrPrefs = mainPrefsOnDb
+          console.log('Using prefs from db') // , { mainPrefsOnDb }
+          cb(err)
+        })
       })
     } else {
+      console.log('Using prefs default') // , { DEFAULT_PREFS }
+      freezrPrefs = DEFAULT_PREFS
       cb(null)
     }
   },
 
+  // Check FS
   function (cb) {
+    lastStartupStep = 'checkfs'
     fdlog('startup waterfall - set up part 3 - create user directories => freezrStatus.can_write_to_user_folder')
     const fsParamsToCheck = dsManager.initialEnvironment.envOnFile || dsManager.initialEnvironment
-    environmentDefaults.checkFS(fsParamsToCheck, null, (err, fsWorks) => {
-      if (!err && fsWorks) freezrStatus.can_write_to_user_folder = true
+    environmentDefaults.checkFS(fsParamsToCheck, null, (err, returns) => {
+      if (err) console.error('ERROR IN FS - Failed test ' + returns.failedtest)
+      if (returns?.warnings && returns.warnings.length > 0) console.warn('WARNINGS IN FS - ' + returns.warnings.join(', '))
+      if (!err) freezrStatus.can_write_to_user_folder = true
       if (dsManager.freezrIsSetup) {
         dsManager.getOrInitUserAppFS('fradmin', 'info.freezr.admin', {}, (err, userAppFS) => {
           if (err) felog('server.js', 'error writing to fs after test has passed - this should not happen!!! - (todo: can_write_to_user_folder to false?)', err)
@@ -653,6 +791,7 @@ async.waterfall([
   },
 
   function (cb) {
+    lastStartupStep = 'setparams'
     fdlog('startup waterfall - set up part 4 - Read and write freezr secrets if doesnt exist - and run aop_uses')
     let cookieSecrets = null
     if (process && process.env && process.env.COOKIE_SECRET) { // override
@@ -699,35 +838,11 @@ async.waterfall([
     })
   },
 
-  function (cb) {
-    fdlog('startup waterfall - set up part 6 - Get freezr main preferences')
-    if (dsManager.freezrIsSetup && freezrStatus.can_read_write_to_db) {
-      adminHandler.get_or_set_prefs(dsManager.getDB(PARAMS_OAC), 'main_prefs', DEFAULT_PREFS, false, function (err, mainPrefsOnDb) {
-        freezrPrefs = mainPrefsOnDb
-        cb(err)
-      })
-    } else {
-      freezrPrefs = DEFAULT_PREFS
-      cb(null)
-    }
-  },
 
   function (cb) {
     fdlog('startup waterfall - set up part 7 Load Admin DBs')
     if (dsManager.freezrIsSetup && freezrStatus.can_read_write_to_db) {
-      const adminDBs = ['permissions', 'users', 'oauthors', 'app_tokens']
-      const adminOACs = adminDBs.map(coll => {
-        return {
-          owner: 'fradmin',
-          app_name: 'info.freezr.admin',
-          collection_name: coll
-        }
-      })
-      // adminOACs.push({
-      //   owner: 'public',
-      //   app_table: 'dev.ceps.privatefeeds.codes'
-      // })
-      dsManager.initAdminDBs(adminOACs, { addCache: true }, cb)
+      dsManager.initAdminDBs(dsManager.initialEnvironment, freezrPrefs, cb)
     } else {
       cb(null)
     }
@@ -742,16 +857,25 @@ async.waterfall([
     fdlog('Initial Params   : ' + JSON.stringify(dsManager.initialEnvironment))
     if (dsManager.freezrIsSetup) {
       dsManager.systemEnvironment = dsManager.initialEnvironment
-      console.log('Set up on Database   : ' + dsManager.initialEnvironment.dbParams.type)
+      freezrStatus.dbChoice = dsManager.initialEnvironment.dbParams.choice
+      freezrStatus.dbType = dsManager.initialEnvironment.dbParams.type
+      freezrStatus.fsChoice = dsManager.initialEnvironment.fsParams.choice
+      freezrStatus.fsType = dsManager.initialEnvironment.fsParams.type
+      freezrStatus.dbUnificationStrategy = freezrPrefs.dbUnificationStrategy
+      console.log('Set up on Database   : ' + dsManager.initialEnvironment.dbParams.choice + ' (' + dsManager.initialEnvironment.dbParams.type + ')')
+      console.log('Set up on freezrPrefs   : ', freezrPrefs)
       console.log('File System: ' + dsManager.initialEnvironment.fsParams.type)
-      if (freezrStatus.can_read_write_to_db) {
-        dsManager.setSystemUserDS('public', { dbParams: dsManager.users.fradmin.dbParams, fsParams: dsManager.users.fradmin.fsParams })
+      if ((process.env?.DB_UNIFICATION || freezrPrefs.dbUnificationStrategy) && freezrPrefs.dbUnificationStrategy !== 'db' /* default */ && freezrPrefs.dbUnificationStrategy !== process.env.DB_UNIFICATION) {
+        console.warn('mismatch ', { freezrStatus, unifOnPrefs: freezrPrefs.dbUnificationStrategy, UNIFONPROCESS: process.env.DB_UNIFICATION })
+        throw new Error('db process unification mismatch 0')
+      } else if (freezrStatus.can_read_write_to_db) {
         adminHandler.check_server_version_and_implement_updates(dsManager, VERSION, cb)
       } else {
         cb(null)
       }
     } else {
       console.log('++++++++++++++ No initialEnvironment on db or file - FIRST REGISTRATION WILL BE TRIGGERED ++++++++++++++')
+      console.log('Initial Params   : db: ' + dsManager.initialEnvironment?.dbParams?.type + ' fs: ' + dsManager.initialEnvironment?.fsParams?.type)
       fdlog('Initial Params   : ' + JSON.stringify(dsManager.initialEnvironment))
       cb(null)
     }
@@ -759,11 +883,21 @@ async.waterfall([
 
 ], function (err) {
   freezrStatus.fundamentals_okay = canUseDbAndFs(freezrStatus)
+
   console.log('Startup checks complete.')
   console.log({ freezrStatus })
-  // onsole.log({ freezrPrefs })
-  if (err) console.log(' XXXXXXXXXXXXXXXXXXXXXXXXXXX Got err on start ups XXXXXXXXXXXXXXXXXXXXXXXXXXX ')
-  if (err) helpers.warning('startup_waterfall', 'STARTUP ERR ' + JSON.stringify(err))
+  // onsole.log({ freezrPrefs, DEFAULT_PREFS, initEbv: dsManager.initialEnvironment })
+  if (err) {
+    console.log(' XXXXXXXXXXXXXXXXXXXXXXXXXXX Got err on start ups XXXXXXXXXXXXXXXXXXXXXXXXXXX ')
+    console.log(' XXXXXXXXXXXXXXXXX last step: ' + lastStartupStep + ' XXXXXXXXXXXXXXXXXX ')
+    console.log(' ... for Database   : ' + (dsManager.initialEnvironment?.dbParams?.choice || ' unknown') + ' (' + (dsManager.initialEnvironment?.dbParams?.type || 'uknown') + ')')
+    console.log('Set up on freezrPrefs   : ', freezrPrefs)
+    console.log('File System: ' + (dsManager.initialEnvironment?.fsParams?.type || 'unknown'))
+  }
+
+  if (err) helpers.warning('startup_waterfall', 'STARTUP ERR ', ' - code: ', err?.code, ' - err.message:', err.message, ' - name ', err?.name, ' statusCode: ', err?.statusCode)
+
+  if (process.env.DB_UNIFICATION) console.log('\nUnification strategy: ' + process.env.DB_UNIFICATION)
 
   // todo move to environment_defaults (short term fix in case of change in port (eg heroku)
   const theport = (process && process.env && process.env.PORT) ? process.env.PORT : dsManager.initialEnvironment?.port

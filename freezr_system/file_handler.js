@@ -18,8 +18,8 @@ const mkdirp = require('mkdirp')
 require('./flags_obj.js') /* global Flags */
 
 // MAIN LOAD PAGE
-const FREEZR_CORE_CSS = '<link rel="stylesheet" href="/app_files/public/info.freezr.public/public/freezr_core.css" type="text/css" />'
-const FREEZR_CORE_JS = '<script src="/app_files/public/info.freezr.public/public/freezr_core.js" type="text/javascript"></script>'
+const FREEZR_CORE_CSS = '<link rel="stylesheet" href="/app_files/@public/info.freezr.public/public/freezr_core.css" type="text/css" />'
+const FREEZR_CORE_JS = '<script src="/app_files/@public/info.freezr.public/public/freezr_core.js" type="text/javascript"></script>'
 exports.load_data_html_and_page = function (req, res, options) {
   fdlog('load_data_html_and_page for ' + JSON.stringify(options.page_url), req.freezrAppFS)
   req.freezrAppFS.readAppFile(options.page_url, null, function (err, htmlContent) {
@@ -66,7 +66,8 @@ exports.load_page_html = function (req, res, opt) {
       contents = contents.replace('{{APP_VERSION}}', (opt.app_version))
       contents = contents.replace('{{APP_DISPLAY_NAME}}', (opt.app_display_name ? opt.app_display_name : opt.app_name))
       contents = contents.replace('{{USER_ID}}', opt.user_id ? opt.user_id : '')
-      contents = contents.replace('{{USER_IS_ADMIN}}', opt.user_is_admin ? opt.user_is_admin : false)
+      contents = contents.replace('{{USER_IS_ADMIN}}', Boolean(opt.user_is_admin))
+      contents = contents.replace('{{USER_IS_PUBLISHER}}', Boolean(opt.user_is_publisher)),
       contents = contents.replace('{{FREEZR_SERVER_VERSION}}', (opt.freezr_server_version ? opt.freezr_server_version : 'N/A'))
       contents = contents.replace('{{SERVER_NAME}}', opt.server_name)
       contents = contents.replace('{{FREEZR_CORE_CSS}}', FREEZR_CORE_CSS)
@@ -357,8 +358,8 @@ exports.getLocalManifest = function (partialPath, callback) {
         try {
           manifest = json.parse(manifest, null, true)
         } catch (e) {
-          felog('async_manifest', 'could not parse app config at ' + partialPath)
-          err = helpers.manifest_error(exports.version, 'file_handler:async_manifest', partialPath, partialPath + ' manifest could not be parsed - parsing requires app config to have double quotes in keys.')
+          felog('getLocalManifest', 'could not parse app config at ' + partialPath)
+          err = helpers.manifest_error(exports.version, 'file_handler:getLocalManifest', partialPath, partialPath + ' manifest could not be parsed - parsing requires app config to have double quotes in keys.')
         }
         callback(err, manifest)
       }
@@ -540,6 +541,7 @@ exports.getEnvParamsFromLocalFileSystem = function () {
     felog('getEnvParamsFromLocalFileSystem', 'file exists ? ' + fs.existsSync(fullLocalPathTo(helpers.FREEZR_USER_FILES_DIR + '/fradmin/files/info.freezr.admin/freezr_environment.js')), 'could not find an environment file locally. ' + fullLocalPathTo(helpers.FREEZR_USER_FILES_DIR + '/fradmin/files/info.freezr.admin/freezr_environment.js'))
     // felog(' to do - differentiate bewtween corrupt file and non existant one')
   }
+  if (envOnFile && envOnFile.params) console.log('got envonfile from local fie ssytem - fstype', envOnFile.params?.dbParams?.type, ' - fstype', envOnFile.params?.dbParams?.type)
   if (envOnFile && envOnFile.params) return envOnFile.params
   return null
 }
@@ -573,10 +575,11 @@ exports.systemPathTo = function (partialUrl) {
     return systemPath()
   }
 }
+
 const partUrlPathTo = function (userId, appName, fileName) {
-  // fdlog('partUrlPathTo app ' + appName + ' file ' + fileName + ' user:' + userId)
-  if (helpers.startsWith(fileName, './')) return '/app_files' + (userId ? '/' + userId : '') + fileName.slice(1)
-  return '/app_files/' + (userId ? (userId + '/') : 'public/') + appName + (fileName ? '/' + fileName : '')
+  fdlog('partUrlPathTo app ' + appName + ' file ' + fileName + ' user:' + userId)
+  if (helpers.startsWith(fileName, './')) return '/app_files' + (userId ? ('/@' + userId) : '') + fileName.slice(1)
+  return '/app_files/@' + (userId || 'public') + '/' + appName + (fileName ? '/' + fileName : '')
 }
 const localCheckExistsOrCreateUserFolder = function (aPath, callback) {
   // from https://gist.github.com/danherbert-epam/3960169

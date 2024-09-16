@@ -242,7 +242,7 @@ const drawPrivateFeed = function (doc) {
   pname.className = 'group groupName alink'
   pname.innerText = doc.name
   pname.onclick = function (e) {
-    window.open((`/ppage?feed=${doc.name}&code=${doc.code}`), '_blank')
+    window.open((`/public?feed=${doc.name}&code=${doc.code}`), '_blank')
   }
   row.appendChild(pname)
   const edit = document.createElement('span')
@@ -573,7 +573,7 @@ const buttons = {
     const theId = document.getElementById('new__id_privatefeeds').innerText
     state.privatefeeds.forEach(feed => {
       if (feed._id === theId) {
-        window.open(('/ppage?feed=' + feed.name + '&code=' + feed.code), '_blank')
+        window.open(('/public?feed=' + feed.name + '&code=' + feed.code), '_blank')
       }
     })
   },

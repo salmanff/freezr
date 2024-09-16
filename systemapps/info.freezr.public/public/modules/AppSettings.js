@@ -88,7 +88,7 @@ const createPermissionsDiv = function (outerPermissions, currentAppName) {
           const acceptAll = (e.target.innerText === ACCEPT_ALL)
           e.target.onclick = null
           let errors = 0
-          e.target.innerHTML = '<img src="/app_files/public/info.freezr.public/public/static/ajaxloaderBig.gif" alt="">'
+          e.target.innerHTML = '<img src="/app_files/@public/info.freezr.public/public/static/ajaxloaderBig.gif" alt="">'
           for (const permissionObject of outerPermissions) {
             if ((acceptAll && !permissionObject.granted) || (!acceptAll && permissionObject.granted)) {
               const change = {
@@ -228,7 +228,7 @@ const makePermissionElementFrom = function (permissionObject, currentAppName, me
       id: 'freezerperm_' + permissionObject.requestee_app_table + '_' + permissionObject.requestor_app + '_' + (permissionObject.granted ? 'Deny' : 'Accept') + '_' + permissionObject.permission_name,
       onclick: function (e) {
         if (freezrMeta.appName === 'info.freezr.account') {
-          acceptButt.innerHTML = '<img src="/app_files/public/info.freezr.public/public/static/ajaxloaderBig.gif" alt="">'
+          acceptButt.innerHTML = '<img src="/app_files/@public/info.freezr.public/public/static/ajaxloaderBig.gif" alt="">'
           changePermission(e, permissionObject, currentAppName, changePermissionCallBack)
         } else {
           openPermConfirmationWindow(e, permissionObject)

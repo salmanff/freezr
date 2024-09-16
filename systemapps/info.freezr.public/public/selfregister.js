@@ -8,8 +8,8 @@ freezr.initPageScripts = function () {
   // onsole.log(isSimpleRegPage(), { thisPage })
 
   if (!isSimpleRegPage()) {
-    const fstype = thisPage === 'firstSetUp' ? 'sysDefault' :  ((freezrEnvironment && freezrEnvironment.fsParams) ? (freezrEnvironment.fsParams.choice || freezrEnvironment.fsParams.type) : null)
-    const dbtype = thisPage === 'firstSetUp' ? 'sysDefault' :  ((freezrEnvironment && freezrEnvironment.dbParams) ? (freezrEnvironment.dbParams.choice || freezrEnvironment.dbParams.type) : null)
+    const fstype = thisPage === 'firstSetUp' ? 'sysDefault' : ((freezrEnvironment && freezrEnvironment.fsParams) ? (freezrEnvironment.fsParams.choice || freezrEnvironment.fsParams.type) : null)
+    const dbtype = thisPage === 'firstSetUp' ? 'sysDefault' : ((freezrEnvironment && freezrEnvironment.dbParams) ? (freezrEnvironment.dbParams.choice || freezrEnvironment.dbParams.type) : null)
     createSelector('FS', fstype)
     createSelector('DB', dbtype)
     hideDivs(['click_goAuthFS', 'click_showOauthOptions', 'oauth_elements_FS'])
@@ -265,8 +265,11 @@ const populateFormsFromParams = function () {
     return false
   }
 }
+const longFormOf = function (resource) {
+  return (resource === 'DB' ? 'database' : (resource === 'FS' ? 'file system' : 'system'))
+}
 const checkResource = function (resource, options, callback) {
-  showError('checking ' + (resource === 'DB' ? 'database' : 'file system') + ' . . .')
+  showError('checking ' + longFormOf(resource) + ' . . .')
   if (!callback) callback = gotCheckStatus
   const [err, choice, params] = getFormData(resource)
   // onsole.log({ resource, options, callback, err, choice, params })
@@ -277,10 +280,10 @@ const checkResource = function (resource, options, callback) {
   } else {
     const toSend = { resource, env: {}, action: 'checkresource' }
     toSend.env[(resource === 'FS' ? 'fsParams' : 'dbParams')] = params
-      if (params.choice === 'sysDefault' && thisPage === 'firstSetUp') {
-        toSend.env.fsParams = freezrEnvironment.fsParams
-        toSend.env.dbParams = freezrEnvironment.dbParams
-      } else if (resource === 'DB' && params.type === 'nedb') {
+    if (params.choice === 'sysDefault' && thisPage === 'firstSetUp') {
+      toSend.env.fsParams = freezrEnvironment.fsParams
+      toSend.env.dbParams = freezrEnvironment.dbParams
+    } else if (resource === 'DB' && params.type === 'nedb') {
       const [, , fsParams] = getFormData('FS')
       toSend.env.fsParams = fsParams
     }
@@ -294,12 +297,10 @@ const checkResource = function (resource, options, callback) {
 function gotCheckStatus (err, data) {
   // if (err || (data && data.err) || (data && !data.checkpassed))
   // onsole.log('gotCheckStatus ', { err, data })
-  if (err) {
-    showError(err.message)
-  } else if (data.err) {
-    showError(data.err)
+  if (err || data.err) {
+    showError('Sorry but your ' + longFormOf(data?.resource) + " doesnt seem to be working. Got an error: " + (err?.message || data.err))
   } else if (!data.checkpassed) {
-    showError('Unsuccessful attempt to check ' + (data.resource === 'FS' ? 'file system.' : 'database.'))
+    showError('Unsuccessful attempt to check ' + longFormOf(data.resource) + '. Error - ' + (data?.err || 'Uknown. ;('))
   } else {
     showError('Your ' + (data.resource === 'FS' ? 'file system' : 'database') + ' works!')
   }

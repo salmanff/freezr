@@ -310,7 +310,7 @@ freezr.perms.shareRecords = function (idOrQuery, options, callback) {
 
         NON CEPS options
         unlisted - for public items that dont need to be lsited separately in the public_records database
-        doNotList - Does appear in the public table but doesnt show up on the ppage query list.
+        doNotList - Does appear in the public table but doesnt show up on the public page query list.
 
         idOrQuery being query is NON-CEPS - ie query_criteria or object_id_list
         */
@@ -541,7 +541,7 @@ freezr.utils.publicPathFromId = function (fileId, requesteeApp, userId) {
   if (!userId) console.warn('2021-10 breaking change - need to specify userid as userid was disassociated from fileId')
   if (!fileId || !requesteeApp || !userId) return null
   if (freezr.utils.startsWith(fileId, '/')) fileId = fileId.slice(1)
-  return '/v1/publicfiles/' + requesteeApp + '/' + userId + '/' + fileId
+  return '/v1/publicfiles/@' + userId + '/' + requesteeApp + '/' + fileId
 }
 freezr.utils.fileIdFromPath = function (filePath) {
   // returns the id given a private or public url of a freezr file path
@@ -719,7 +719,7 @@ freezerRestricted.menu.hasChanged = false
 freezerRestricted.menu.addFreezerDialogueElements = function () {
   // onsole.log('addFreezerDialogueElements')
   var freezerMenuButt = document.createElement('img')
-  freezerMenuButt.src = freezr.app.isWebBased ? '/app_files/public/info.freezr.public/public/static/freezer_log_top.png' : '../freezr/static/freezer_log_top.png'
+  freezerMenuButt.src = freezr.app.isWebBased ? '/app_files/@public/info.freezr.public/public/static/freezer_log_top.png' : '../freezr/static/freezer_log_top.png'
   freezerMenuButt.id = 'freezerMenuButt'
   freezerMenuButt.onclick = freezerRestricted.menu.freezrMenuOpen
   freezerMenuButt.className = 'freezerMenuButt_' + ((!freezr.app.isWebBased && /iPhone|iPod|iPad/.test(navigator.userAgent)) ? 'Head' : 'Norm')
@@ -796,7 +796,7 @@ freezerRestricted.menu.freezrMenuOpen = function () {
 }
 freezerRestricted.menu.resetDialogueBox = function (isAdminPage, addText) {
   var innerText = (document.getElementById('freezer_dialogueInnerText'))
-  if (innerText) innerText.innerHTML = (addText ? ('<br/><div>' + addText + '</div>') : '') + '<br/><div align="center">.<img src="' + (freezr.app.isWebBased ? '/app_files/public/info.freezr.public/public/static/ajaxloaderBig.gif' : 'freezr/static/ajaxloaderBig.gif') + '"/></div>'
+  if (innerText) innerText.innerHTML = (addText ? ('<br/><div>' + addText + '</div>') : '') + '<br/><div align="center">.<img src="' + (freezr.app.isWebBased ? '/app_files/@public/info.freezr.public/public/static/ajaxloaderBig.gif' : 'freezr/static/ajaxloaderBig.gif') + '"/></div>'
   var dialogueEl = document.getElementById('freezer_dialogueOuter')
   if (dialogueEl) dialogueEl.style.display = 'block'
   var bodyEl = document.getElementsByTagName('BODY')[0]
@@ -811,7 +811,7 @@ freezerRestricted.menu.resetDialogueBox = function (isAdminPage, addText) {
 freezerRestricted.menu.show_permissions = function () {
   document.getElementById('freezer_dialogueInnerText').innerHTML = ''
   setTimeout(async () => {
-    const filePath = freezr.app.isWebBased ? '/app_files/public/info.freezr.public/public/modules/AppSettings.js' : '../freezr/modules/AppSettings.js'
+    const filePath = freezr.app.isWebBased ? '/app_files/@public/info.freezr.public/public/modules/AppSettings.js' : '../freezr/modules/AppSettings.js'
     const { showPermsIn } = await import(filePath)
     const perms = await showPermsIn(freezrMeta.appName)
     freezerRestricted.menu.addLoginInfoToDialogue('freezer_dialogueInnerText', false)

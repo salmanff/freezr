@@ -15,6 +15,7 @@ User = function (userJson) {
   this.limits = userJson.limits || {}
   this.userPrefs = userJson.userPrefs
   this.isAdmin = userJson.isAdmin || false
+  this.isPublisher = userJson.isPublisher || false
   this.first_seen_date = userJson.first_seen_date || null
   this.last_modified_date = userJson.last_modified_date || null
   this.deleted = userJson.deleted || null
@@ -25,6 +26,7 @@ User.prototype.user_id = null
 User.prototype.full_name = null
 User.prototype.password = null
 User.prototype.isAdmin = false
+User.prototype.isPublisher = false
 User.prototype.first_seen_date = null
 User.prototype.last_modified_date = null
 User.prototype.deleted = false
@@ -45,6 +47,7 @@ User.prototype.response_obj = function () {
     full_name: this.full_name,
     email_address: this.email_address,
     isAdmin: this.isAdmin,
+    isPublisher: this.isPublisher,
     fsParams: {
       type: self.fsParams?.type,
       choice: self.fsParams?.choice

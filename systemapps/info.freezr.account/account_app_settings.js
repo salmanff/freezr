@@ -87,7 +87,7 @@ const drawStandAloneApps = async function (manifest) {
       const chromeExtInstallLink = makeBox({
         mainTextHTML: 'Click to install the chrome extension',
         mainTextFunc: goToChromeWebStore,
-        imgSrc: '/app_files/public/info.freezr.public/public/static/Chrome_Web_Store_logo_2012-2015.svg.png',
+        imgSrc: '/app_files/@public/info.freezr.public/public/static/Chrome_Web_Store_logo_2012-2015.svg.png',
         imgFunc: goToChromeWebStore
       })
       chromeExtInstallLink.id = 'freezrChromeExtInstallLink'
@@ -123,7 +123,7 @@ const drawStandAloneApps = async function (manifest) {
       otherFuncsDiv.appendChild(makeBox({
         mainTextHTML: 'Add your credentials to this device',
         mainTextFunc: genPasswordAndSendToIos,
-        imgSrc: '/app_files/public/info.freezr.public/public/static/ios_logo.png',
+        imgSrc: '/app_files/@public/info.freezr.public/public/static/ios_logo.png',
         imgFunc: genPasswordAndSendToIos
 
       }))
@@ -144,7 +144,8 @@ const drawStandAloneApps = async function (manifest) {
     otherFuncsDiv.appendChild(makeBox({
       mainTextHTML: 'Update App',
       mainTextFunc: updateAppFromUrl,
-      imgSrc: '/app_files/' + manifest.identifier + '/static/logo.png',
+      imgSrc: '/app_files/@public/info.freezr.public/public/static/update_logo.png',
+      // imgSrc: '/app_files/' + manifest.identifier + '/static/logo.png',
       imgFunc: updateAppFromUrl
     }))
   }
@@ -152,14 +153,14 @@ const drawStandAloneApps = async function (manifest) {
   otherFuncsDiv.appendChild(makeBox({
     mainTextHTML: 'Review / backup raw app data',
     mainTextFunc: function () { window.open('/account/app/viewdata/' + manifest.identifier, '_self') },
-    imgSrc: '/app_files/public/info.freezr.public/public/static/disk_logo.png',
+    imgSrc: '/app_files/@public/info.freezr.public/public/static/disk_logo.png',
     imgFunc: function () { window.open('/account/app/viewdata/' + manifest.identifier, '_self') }
   }))
 
   // otherFuncsDiv.appendChild(makeBox({
   //   mainTextHTML: 'Restore backed-up raw app data',
   //   mainTextFunc: function () { window.open('/account/app/restoredata', '_self') },
-  //   imgSrc: '/app_files/public/info.freezr.public/public/static/disk_logo.png',
+  //   imgSrc: '/app_files/@public/info.freezr.public/public/static/disk_logo.png',
   //   imgFunc: function () { window.open('/account/app/restoredata', '_self') }
   // }))
 
@@ -191,7 +192,7 @@ const drawStandAloneApps = async function (manifest) {
   otherFuncsDiv.appendChild(makeBox({
     mainTextHTML: 'Delete App',
     mainTextFunc: deleteApp,
-    imgSrc: '/app_files/public/info.freezr.public/public/static/trash_logo.png',
+    imgSrc: '/app_files/@public/info.freezr.public/public/static/trash_logo.png',
     imgFunc: deleteApp
   }))
 
@@ -217,7 +218,8 @@ const isIos = function () {
 const genAppPassword = function (appName, daysExpiry, callback) {
   const DEFAULT_EXPIRY_DAYS = 90// days
 
-  const expiry = new Date().getTime() + ((daysExpiry || DEFAULT_EXPIRY_DAYS) * 24 * 3600 * 1000)
+  const expiry = new Date().getTime() + ((daysExpiry || DEFAULT_EXPIRY_DAYS) * 24 * 3600 * 1000) // 60 * 1000 // 60 seconds for testing
+  // console.log('temp setting expiry to ', new Date(expiry).toLocaleTimeString())
   const options = { app_name: appName, expiry, one_device: false }
   const url = '/v1/account/apppassword/generate'
   // onsole.log("sending genAppPassword options",options)

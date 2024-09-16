@@ -19,7 +19,6 @@ exports.convert = async function (file, options, callback) {
     return callback(null, convertedFile)
   } catch (e) {
     console.warn('converting picture error ', e)
-    // handles error if any
     callback(e)
   }
 }

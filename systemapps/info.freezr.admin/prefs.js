@@ -1,7 +1,7 @@
 
 // admin/prefs.js
 
-/* global freezr, freezerRestricted */
+/* global freezr, freezerRestricted, freezrServerStatus */
 
 let isFirstSetup = false
 freezr.initPageScripts = function () {
@@ -10,7 +10,7 @@ freezr.initPageScripts = function () {
   if (isFirstSetup) {
     showClass('setup')
     hideClass('changeNormal')
-    document.getElementById('submitButt').value = 'Set Preferences'
+    document.getElementById('submitButt').value = 'Save and Launch Freezr'
   } else {
     showClass('changeNormal')
     hideClass('setup')
@@ -42,13 +42,15 @@ freezr.initPageScripts = function () {
     } else {
       const theInfo = {
         allowSelfReg: document.getElementById('allowSelfRegId').checked,
-        useIdsAsDbName: document.getElementById('useIdsAsDbNameId').checked,
+        useUserIdsAsDbName: document.getElementById('useUserIdsAsDbNameId').checked,
+        useUnifiedCollection: document.getElementById('useUnifiedCollectionId').checked,
         selfRegDefaultMBStorageLimit: (document.getElementById('selfRegDefaultMBStorageLimit').value ? parseInt(document.getElementById('selfRegDefaultMBStorageLimit').value) : null),
         allowAccessToSysFsDb: document.getElementById('allowAccessToSysFsDbId').checked,
         log_visits: document.getElementById('logVisitsId').checked,
         redirect_public: document.getElementById('redirectPublicId').checked,
         public_landing_app: document.getElementById('defaultPublicAppId').value,
         public_landing_page: document.getElementById('defaultLandingUrl').value,
+        hasNotbeenSave: false,
         password
       }
       if (isNaN(theInfo.selfRegDefaultMBStorageLimit)) {
@@ -58,16 +60,38 @@ freezr.initPageScripts = function () {
       }
     }
   }
+
+  if (document.getElementById('allowSelfRegId').checked) document.getElementById('selfRegOptionsArea').style.display = 'block'
+
+  document.getElementById('allowSelfRegId').onchange = function (e) {
+    document.getElementById('selfRegOptionsArea').style.display = 'block'
+  }
+
+  if (freezrServerStatus?.dbType !== 'mongodb') {
+    document.getElementById('mongoArea').style.display = 'none'
+  } else {
+    if (document.getElementById('useUnifiedCollectionId').checked) {
+      document.getElementById('mongotextArea').innerText = 'You have chosen to keep all user data in one collections... this is helpful if you expect many many users on your server.'
+    } else if (document.getElementById('useUserIdsAsDbNameId').checked) {
+      document.getElementById('mongotextArea').innerText = "You have chosen to keep each user's data in its own database. This is useful if you want to keep each user completely seprate but can be cumbersome of you have  many users or many servers using the same workspace."
+    } else {
+      document.getElementById('mongotextArea').innerText = 'Mongo default position is to keep all useer data in one database, and each table in its own collection. You can aggregate ir disaggregate this setting only on set up by setting environment variables.'
+    }
+  }
 }
 
 const gotChangeStatus = function (error, data) {
   if (data) data = freezr.utils.parse(data)
   if (error) {
+    console.warn('found err ', { error, data })
     showError('Error. ' + error.message)
   } else if (!data) {
     showError('ould not connect to server')
   } else {
     showError('Preferences Saved')
+    if (isFirstSetup) {
+      window.location = '/account/home?show=welcome'
+    }
   }
 }
 

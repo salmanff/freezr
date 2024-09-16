@@ -5,7 +5,6 @@
 /* 2021 CEPS 2.0 notes
   - table_id? use instead of app_table  for consistency?
 */
-
 exports.version = '0.0.200'
 
 const helpers = require('./helpers.js')
@@ -13,6 +12,10 @@ const bcrypt = require('bcryptjs')
 const async = require('async')
 const json = require('comment-json')
 const fileHandler = require('./file_handler.js')
+const fs = require('fs')
+
+const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args))
+
 require('./flags_obj.js')
 
 exports.generate_login_page = function (req, res) {
@@ -26,7 +29,7 @@ exports.generate_login_page = function (req, res) {
     // fdlog todo - need to sanitize text
     const options = {
       page_title: (req.params.app_name ? 'Freezr App Login for ' + req.params.app_name : ' Login (Freezr)'),
-      css_files: './public/info.freezr.public/public/freezr_style.css',
+      css_files: './@public/info.freezr.public/public/freezr_style.css',
       initial_query: null,
       server_name: req.protocol + '://' + req.get('host'),
       freezr_server_version: req.freezr_server_version,
@@ -44,7 +47,7 @@ exports.generate_login_page = function (req, res) {
     }
     options.app_name = 'info.freezr.public'
     options.page_url = 'public/account_' + ((req.params.app_name && req.params.app_name !== 'info.freezr.public') ? 'app' : '') + 'login.html'
-    options.script_files = ['./public/info.freezr.public/public/account_login.js']
+    options.script_files = ['./@public/info.freezr.public/public/account_login.js']
     options.user_id = req.session.logged_in_user_id
 
     fileHandler.load_data_html_and_page(req, res, options)
@@ -75,6 +78,7 @@ exports.generateAccountPage = function (req, res) {
     options.app_name = 'info.freezr.account'
     options.user_id = req.session.logged_in_user_id
     options.user_is_admin = req.session.logged_in_as_admin
+    options.user_is_publisher = req.session.logged_in_as_publisher
     options.server_name = req.protocol + '://' + req.get('host')
     options.other_variables = options.other_variables || req.params.other_variables // only from generateSystemDataPage
 
@@ -116,7 +120,7 @@ exports.ping = function (req, res) {
   if (!req.session.logged_in_user_id) {
     helpers.send_success(res, { logged_in: false, server_type: 'info.freezr', server_version: req.freezr_server_version })
   } else {
-    helpers.send_success(res, { logged_in: true, logged_in_as_admin: req.session.logged_in_as_admin, user_id: req.session.logged_in_user_id, server_type: 'info.freezr', server_version: req.freezr_server_version })
+    helpers.send_success(res, { logged_in: true, logged_in_as_admin: req.session.logged_in_as_admin, user_id: req.session.logged_in_user_id, server_type: 'info.freezr', server_version: req.freezr_server_version, storageLimits: req.freezrStorageLimits  })
   }
 }
 
@@ -428,10 +432,10 @@ exports.get_account_data = function (req, res) {
   // app.get('/v1/account/data/:action', accountLoggedInAPI, accountHandler.get_account_data) // app_list.json, app_resource_use.json
   switch (req.params.action) {
     case 'app_list.json':
-      exports.list_all_user_apps(req, res)
+      list_all_user_apps(req, res)
       break
     case 'app_resource_use.json':
-      exports.get_app_resources(req.query?.app_name, req, res)
+      get_app_resources(req.query?.app_name, req, res)
       break
     case 'user_prefs.json':
       helpers.send_success(res, req.freezrUserDS.userPrefs)
@@ -441,7 +445,7 @@ exports.get_account_data = function (req, res) {
       break
   }
 }
-exports.list_all_user_apps = function (req, res) {
+const list_all_user_apps = function (req, res) {
   // from get_account_data => app.get('/v1/account/data/:action', accountLoggedInAPI, accountHandler.get_account_data) // app_list.json, app_resource_use.json
 
   fdlog('account_handler list_all_user_apps')
@@ -460,7 +464,7 @@ exports.list_all_user_apps = function (req, res) {
   async.waterfall([
     // 1. get db
     function (cb) {
-      userDS.getorInitDb(oac, null, cb)
+      userDS.getorInitDb(oac, { freezrPrefs: req.freezrPrefs }, cb)
     },
 
     // 2. get all user apps
@@ -508,31 +512,31 @@ exports.list_all_user_apps = function (req, res) {
       cb(null)
     }
   ],
-    function (err) {
-      if (err) {
-        felog('list_all_user_apps', 'ERROR in list_all_user_apps ', err)
-        if (req.freezrInternalCallFwd) {
-          req.freezrInternalCallFwd(err, null)
-        } else {
-          helpers.send_failure(res, err, 'account_handler', exports.version, 'list_all_user_apps')
-        }
+  function (err) {
+    if (err) {
+      felog('list_all_user_apps', 'ERROR in list_all_user_apps ', err)
+      if (req.freezrInternalCallFwd) {
+        req.freezrInternalCallFwd(err, null)
       } else {
-        // onsole.log(" results",{ removedApps, userApps })
-        if (req.freezrInternalCallFwd) {
-          req.freezrInternalCallFwd(null, { removed_apps: removedApps, user_apps: userApps })
-        } else {
-          helpers.send_success(res, { removed_apps: removedApps, user_apps: userApps })
-        }
+        helpers.send_failure(res, err, 'account_handler', exports.version, 'list_all_user_apps')
       }
-    })
+    } else {
+      // onsole.log(" results",{ removedApps, userApps })
+      if (req.freezrInternalCallFwd) {
+        req.freezrInternalCallFwd(null, { removed_apps: removedApps, user_apps: userApps })
+      } else {
+        helpers.send_success(res, { removed_apps: removedApps, user_apps: userApps })
+      }
+    }
+  })
 }
-exports.get_app_resources = function (app, req, res) {
+const get_app_resources = function (app, req, res) {
   // from get_account_data => app.get('/v1/account/data/:action', accountLoggedInAPI, accountHandler.get_account_data) // app_list.json, app_resource_use.json
 
   fdlog('account_handler get_app_resources')
   const userDS = req.freezrUserDS
 
-  userDS.getStorageUse(null, function (err, sizeJson) {
+  userDS.getStorageUse(null, { freezrPrefs: req.freezrPrefs }, function (err, sizeJson) {
     if (req.freezrInternalCallFwd) {
       req.freezrInternalCallFwd(err, sizeJson)
     } else if (err) {
@@ -547,40 +551,30 @@ exports.get_app_resources = function (app, req, res) {
 exports.get_file_from_url_to_install_app = function (req, res) {
   // app.post('/v1/account/app_install_from_url.json', accountLoggedInUserPage, addUserAppsAndPermDBs, accountHandler.get_file_from_url_to_install_app)
   // onsole.log("get_file_from_url_to_install_app",req.body)
+  // todo 2020-07 this needs to be redone so that it saves to a temp file and then [??]
 
-  // todo 2020-07 this needs to be redone so that it saves to a temp file and then
-
-  const fs = require('fs')
-  const request = require('request')
-
-  const download = (url, dest, cb) => {
-    fdlog('download ', { url, dest })
-    // from stackoverflow.com/questions/11944932/how-to-download-a-file-with-node-js-without-using-third-party-libraries
-    const file = fs.createWriteStream(dest)
-    const sendReq = request.get(url)
-
-    // verify response code
-    sendReq.on('response', (response) => {
-      if (response.statusCode !== 200) {
-        return cb(new Error('Bad Connection - Response status was ' + response.statusCode))
-      }
-      sendReq.pipe(file)
-    })
-
-    // close() is async, call cb after close completes
-    file.on('finish', () => file.close(cb))
-
-    // check for request errors
-    sendReq.on('error', (err) => {
-      return cb(err)
-    })
-
-    file.on('error', (err) => {
-      if (err) felog('download', 'file error', err)
-      cb(err)
-    })
+  const download = (fileUrl, outputPath, cb) => {
+    fetch(fileUrl)
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`Failed to fetch ${response.statusText}`)
+        }
+        const fileStream = fs.createWriteStream(outputPath)
+        response.body.pipe(fileStream)
+        response.body.on('error', (err) => {
+          console.error('Download failed:', err)
+          throw new Error(`Failed to fownload file`)
+        })
+        fileStream.on('finish', () => {
+          // console.log('File downloaded successfully.')
+          return cb(null)
+        })
+      })
+      .catch(err => {
+        return cb(err)
+      })
   }
-
+  
   const tempAppName = req.body.app_name
   const tempFolderPath = (req.freezrUserDS.fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/' + req.session.logged_in_user_id + '/tempapps/' + tempAppName
 
@@ -624,6 +618,9 @@ exports.get_file_from_url_to_install_app = function (req, res) {
     }
   })
 }
+const appIdFrom = function (userId, appName) {
+  return userId + '_' + appName
+}
 exports.install_blank_app = function (req, res) {
   // app.post('/v1/account/app_install_blank', accountLoggedInUserPage, addUserAppsAndPermDBs, accountHandler.install_blank_app)
 
@@ -648,6 +645,7 @@ exports.install_blank_app = function (req, res) {
     if (appUrl.indexOf('/oapp/') < -1) return false
     return true
   }
+  const appNameId = appIdFrom(req.session.logged_in_user_id, appName)
   const flags = new Flags({ app_name: appName, didwhat: 'installed' })
 
   async.waterfall([
@@ -657,12 +655,12 @@ exports.install_blank_app = function (req, res) {
         cb(helpers.missing_data('user_id'))
       } else if (!appName || appName.length < 1) {
         cb(helpers.invalid_data('app name missing - that is the name of the app zip file name before any spaces.', 'account_handler', exports.version, 'install_blank_app'))
-      } else if (helpers.system_apps.indexOf(appName) > -1 || !helpers.valid_appName(appName)) {
+      } else if (helpers.is_system_app(appName) || !helpers.valid_appName(appName)) {
         cb(helpers.invalid_data('app name not allowed: ' + appName, 'account_handler', exports.version, 'install_blank_app'))
       } else if (servedUrl && !validUrl(servedUrl)) {
         cb(helpers.invalid_data('url invalid: ' + servedUrl, 'account_handler', exports.version, 'install_blank_app'))
       } else {
-        req.freezrUserAppListDB.read_by_id(appName, cb)
+        req.freezrUserAppListDB.read_by_id(appNameId, cb)
       }
     },
 
@@ -672,7 +670,7 @@ exports.install_blank_app = function (req, res) {
         cb(helpers.invalid_data('app already exists ' + appName, 'account_handler', exports.version, 'install_blank_app'))
       } else {
         // console.log('todo - update permissions?')
-        createOrUpdateUserAppList(req.freezrUserAppListDB, manifest, null, cb)
+        createOrUpdateUserAppList(req.freezrUserAppListDB, appNameId, manifest, null, cb)
       }
     },
     // get appfs to delete local app files for cloud storage
@@ -692,7 +690,7 @@ exports.install_blank_app = function (req, res) {
   ],
     function (err) {
       if (err) {
-        console.warn('install_blank_app', { err })
+        console.warn('install_blank_app', { user: req.session.logged_in_user_id, err })
         if (!err.code) err.code = 'err_unknown'
         flags.add('errors', err.code, { function: 'install_blank_app', text: err.message })
       }
@@ -761,7 +759,7 @@ exports.install_app = function (req, res) {
           if (err) felog('install_app', 'error deleting local folder after app name missing ')
           cb(helpers.invalid_data('app name missing - that is the name of the app zip file name before any spaces.', 'account_handler', exports.version, 'install_app'))
         })
-      } else if (helpers.system_apps.indexOf(realAppName) > -1 || !helpers.valid_appName(realAppName)) {
+      } else if (helpers.is_system_app(realAppName) || !helpers.valid_appName(realAppName)) {
         fileHandler.deleteLocalFolderAndContents(tempFolderPath, function (err) {
           if (err) felog('install_app', 'error deleting local folder 2 after app name not allowed ')
           cb(helpers.invalid_data('app name not allowed: ' + tempAppName, 'account_handler', exports.version, 'install_app'))
@@ -825,7 +823,8 @@ exports.install_app = function (req, res) {
     // 6. Update the app list
     function (cb) {
       const customEnv = null // todo to be added later
-      createOrUpdateUserAppList(req.freezrUserAppListDB, manifest, customEnv, cb)
+      const appNameId = appIdFrom(req.session.logged_in_user_id, realAppName)
+      createOrUpdateUserAppList(req.freezrUserAppListDB, appNameId, manifest, customEnv, cb)
     },
 
     // 8. If app already exists, flag it as an update
@@ -840,46 +839,46 @@ exports.install_app = function (req, res) {
     }
     // todo later (may be) - also check manifest permissions (as per changeNamedPermissions) to warn of any issues
   ],
-    function (error, dummy) {
-      // todo: if there is an error in a new manifest the previous one gets wied out but the ap still runs (as it was instaled before successfully), so it should be marked with an error.
-      // todo: also better to wipe out old files so old files dont linger if they dont exist in new version
-      flags.meta.app_name = realAppName
-      if (error) {
-        flags.add('errors', error.code, { function: 'install_app', text: error.message })
-      }
-      // onsole.log(flags.sentencify())
-      helpers.send_success(res, { error: (error?.message), flags: flags.sentencify() })
+  function (error, dummy) {
+    // todo: if there is an error in a new manifest the previous one gets wied out but the ap still runs (as it was instaled before successfully), so it should be marked with an error.
+    // todo: also better to wipe out old files so old files dont linger if they dont exist in new version
+    flags.meta.app_name = realAppName
+    if (error) {
+      flags.add('errors', error.code, { function: 'install_app', text: error.message })
+    }
+    // onsole.log(flags.sentencify())
+    helpers.send_success(res, { error: (error?.message), flags: flags.sentencify() })
 
-      // preload databases
-      if (!manifest) {
-        felog('No manifest for ' + realAppName + '- creating one - SNBH')
-        manifest = { app_tables: {} }
-        manifest.app_tables[realAppName] = {}
-      }
-      if (!error && manifest.app_tables && Object.keys(manifest.app_tables).length > 0 && manifest.app_tables.constructor === Object) {
-        for (const appTable in manifest.app_tables) {
-          const oac = {
-            owner: req.session.logged_in_user_id,
-            app_name: realAppName,
-            app_table: appTable
-          }
-          req.freezrUserDS.getorInitDb(oac, {}, function (err, aDb) {
-            if (err) {
-              felog('install_app - err in initiating installed app db ', err)
-            } else if (!aDb || !aDb.query) {
-              felog('install_app - err in initiating installed app db - no db present')
-            } else {
-              aDb.query(null, { count: 1 }, function (err, results) {
-                if (err) felog('install_app - err in querying installed app db ', err)
-                fdlog('db fake query for init - query results ', results)
-              })
-            }
-          })
+    // preload databases
+    if (!manifest) {
+      felog('No manifest for ' + realAppName + '- creating one - SNBH')
+      manifest = { app_tables: {} }
+      manifest.app_tables[realAppName] = {}
+    }
+    if (!error && manifest.app_tables && Object.keys(manifest.app_tables).length > 0 && manifest.app_tables.constructor === Object) {
+      for (const appTable in manifest.app_tables) {
+        const oac = {
+          owner: req.session.logged_in_user_id,
+          app_name: realAppName,
+          app_table: appTable
         }
-      } else {
-        fdlog('no pre-loading')
+        req.freezrUserDS.getorInitDb(oac, { freezrPrefs: req.freezrPrefs }, function (err, aDb) {
+          if (err) {
+            felog('install_app - err in initiating installed app db ', err)
+          } else if (!aDb || !aDb.query) {
+            felog('install_app - err in initiating installed app db - no db present')
+          } else {
+            aDb.query(null, { count: 1 }, function (err, results) {
+              if (err) felog('install_app - err in querying installed app db ', err)
+              fdlog('db fake query for init - query results ', results)
+            })
+          }
+        })
       }
-    })
+    } else {
+      fdlog('no pre-loading')
+    }
+  })
 }
 const tempAppNameFromFileName = function (originalname) {
   let name = ''
@@ -1025,8 +1024,10 @@ exports.appMgmtActions = function (req, res) /* deleteApp updateApp */ {
   const action = (req.body && req.body.action) ? req.body.action : null
   const appName = (req.body && req.body.app_name) ? req.body.app_name : null
 
+  const appNameId = appIdFrom(req.session.logged_in_user_id, appName)
+
   if (action === 'removeAppFromHomePage') {
-    req.freezrUserAppListDB.update(appName, { removed: true }, { replaceAllFields: false }, function (err, result) {
+    req.freezrUserAppListDB.update(appNameId, { removed: true }, { replaceAllFields: false }, function (err, result) {
       if (err) {
         felog('appMgmtActions', 'removeAppFromHomePage err for ' + appName, err)
         helpers.send_failure(res, err, 'account_handler', exports.version, '', 'could not mark as removed')
@@ -1037,7 +1038,7 @@ exports.appMgmtActions = function (req, res) /* deleteApp updateApp */ {
   } else if (action === 'deleteApp') {
     async.waterfall([
       function (cb) {
-        req.freezrUserAppListDB.delete_record(appName, null, cb)
+        req.freezrUserAppListDB.delete_record(appNameId, null, cb)
       },
       function (result, cb) {
         req.freezrUserPermsDB.delete_records({ requestor_app: appName }, null, cb)
@@ -1060,7 +1061,7 @@ exports.appMgmtActions = function (req, res) /* deleteApp updateApp */ {
       }
     ], function (err) {
       if (err) {
-        console.warn('error deletign app ', { err })
+        console.warn('error deletign app ', { user: req.session.logged_in_user_id, err })
         helpers.send_internal_err_failure(res, 'account_handler', exports.version, 'appMgmtActions - deleteApp', 'Internal error trying to delete app. ')
       } else {
         // onsole.log("success in deleting app")
@@ -1086,7 +1087,7 @@ exports.appMgmtActions = function (req, res) /* deleteApp updateApp */ {
           cb(helpers.invalid_data('app name: ' + realAppName, 'account_handler', exports.version, 'appMgmtActions'))
         } else if (!realAppName || realAppName.length < 1) {
           cb(helpers.invalid_data('app name missing - ', '', exports.version, 'install_app'))
-        } else if (helpers.system_apps.indexOf(realAppName) > -1 || !helpers.valid_appName(realAppName)) {
+        } else if (helpers.is_system_app(realAppName) || !helpers.valid_appName(realAppName)) {
           cb(helpers.invalid_data('app name not allowed: ' + appName, 'account_handler', exports.version, 'install_app'))
         } else if (!userDS) {
           cb(helpers.missing_data('userDS'))
@@ -1137,29 +1138,30 @@ exports.appMgmtActions = function (req, res) /* deleteApp updateApp */ {
       },
 
       function (cb) {
-        createOrUpdateUserAppList(req.freezrUserAppListDB, manifest, null, cb)
+        const appNameId = appIdFrom(req.session.logged_in_user_id, realAppName)
+        createOrUpdateUserAppList(req.freezrUserAppListDB, appNameId, manifest, null, cb)
       }
     ],
-      function (err, info) {
-        // onsole.log({ err, info })
-        flags.meta.app_name = realAppName
-        if (err) {
-          flags.add('errors', 'err_unknown', { function: 'appMgmtActions update', text: JSON.stringify(err) })
-        } else if (info.isUpdate) {
-          flags.add('notes', 'app_updated_msg')
-          flags.meta.didwhat = 'updated'
-        } else {
-          flags.meta.didwhat = 'uploaded'
-        }
-        helpers.send_success(res, flags.sentencify())
-      })
+    function (err, info) {
+      // onsole.log({ err, info })
+      flags.meta.app_name = realAppName
+      if (err) {
+        flags.add('errors', 'err_unknown', { function: 'appMgmtActions update', text: JSON.stringify(err) })
+      } else if (info.isUpdate) {
+        flags.add('notes', 'app_updated_msg')
+        flags.meta.didwhat = 'updated'
+      } else {
+        flags.meta.didwhat = 'uploaded'
+      }
+      helpers.send_success(res, flags.sentencify())
+    })
   } else {
     helpers.send_failure(res, new Error('unknown action'), 'account_handler', exports.version, 'appMgmtActions')
   }
 }
 
 // PERMISSIONS
-// format: {requestor_app, name, table_id, type, description, 'returnFields', 'searchFields'}
+// format: {requestor_app, name, table_id, type, description, 'returnFields', 'search_fields'}
 exports.CEPSrequestorAppPermissions = function (req, res) {
   // app.get('/ceps/perms/get', userAPIRights, addUserPermDBs, accountHandler.CEPSrequestorAppPermissions)
 
@@ -1610,13 +1612,13 @@ const updatePermissionRecordsFromManifest = function (freezrUserPermsDB, appName
             freezrUserPermsDB.update(existingPermFromDb._id, cleanedManifestPerm, {}, cb)
           }
         },
-          function (err) {
-            if (err) {
-              callback(err)
-            } else {
-              callback(null)
-            }
-          })
+        function (err) {
+          if (err) {
+            callback(err)
+          } else {
+            callback(null)
+          }
+        })
       })
     }
   }
@@ -1631,7 +1633,7 @@ const objectFromList = function (objectList, param, value) {
   return foundObject
 }
 
-const createOrUpdateUserAppList = function (userAppListDb, manifest, env, callback) {
+const createOrUpdateUserAppList = function (freezrUserAppListDB, appNameId, manifest, env, callback) {
   // ??? note - currently updates the app_display_name only (and marks it as NOT removed)
 
   fdlog('createOrUpdateUserAppList  ', { manifest })
@@ -1650,7 +1652,7 @@ const createOrUpdateUserAppList = function (userAppListDb, manifest, env, callba
       } else if (!helpers.valid_appName(appName)) {
         cb(helpers.invalid_data('app_name: ' + appName, 'account_handler', exports.version, 'createOrUpdateUserAppList'))
       } else {
-        userAppListDb.read_by_id(appName, cb)
+        freezrUserAppListDB.read_by_id(appNameId, cb)
       }
     },
 
@@ -1664,20 +1666,20 @@ const createOrUpdateUserAppList = function (userAppListDb, manifest, env, callba
         appEntity.app_name = appName
         appEntity.app_display_name = appDisplayName
         if (env || appEntity.env) appEntity.env = env
-        userAppListDb.update(appName, appEntity, { replaceAllFields: true }, cb)
+        freezrUserAppListDB.update(appNameId, appEntity, { replaceAllFields: true }, cb)
       } else {
         appEntity = { app_name: appName, app_display_name: appDisplayName, served_url: manifest.served_url, manifest, env, removed: false }
-        userAppListDb.create(appName, appEntity, null, cb)
+        freezrUserAppListDB.create(appNameId, appEntity, null, cb)
       }
     }
   ],
-    function (err) {
-      if (err) {
-        callback(err, {})
-      } else {
-        callback(null, { isUpdate: appExists })
-      }
-    })
+  function (err) {
+    if (err) {
+      callback(err, {})
+    } else {
+      callback(null, { isUpdate: appExists })
+    }
+  })
 }
 const permissionsAreSame = function (p1, p2) {
   return objectsaresame(p1, p2, ['granted', 'status', 'grantees', 'previousGrantees'])
@@ -1786,7 +1788,7 @@ exports.CEPSValidator = function (req, res) {
       // 1. basic checks
       function (cb) {
         if (!req.query.validation_token || !req.query.data_owner_user || !req.query.table_id || !req.query.requestor_user || (!req.query.permission && req.query.requestor_host && req.freezrTokenInfo.app_name !== 'info.freezr.account')) { // || !req.query.requestor_host  new 2022-11
-          console.warn('incomplete request 5 body ', req.bod, ' freezrTokenInfo ', req.freezrTokenInfo)
+          console.warn('CEPS Validator incomplete request 5 body ', req.bod, ' freezrTokenInfo ', req.freezrTokenInfo)
           cb(helpers.error('incomplete request 5'))
         } else {
           cb(null)
@@ -1832,7 +1834,7 @@ exports.CEPSValidator = function (req, res) {
               cb(helpers.error('invalid request 1'))
             } else if (!grantedPerms || grantedPerms.length < 1) {
               felog('invalid requst getting granted perms ', { grantedPerms })
-              console.warn('invalid requst getting granted perms ', { grantedPerms }, req.query)
+              console.warn('invalid requst getting granted perms ', { user: req.session.logged_in_user_id, grantedPerms }, req.query)
               cb(helpers.error('invalid request 2'))
             } else {
               // [2021 - groups] freezrAttributes.reader
@@ -1988,15 +1990,15 @@ const accountPageManifest = function (params) { // manifest parameters for accou
   const manifests = {
     home: {
       page_title: 'Accounts Home (Freezr)',
-      css_files: ['./public/info.freezr.public/public/freezr_style.css', 'account_home.css'],
+      css_files: ['./@public/info.freezr.public/public/freezr_style.css', 'account_home.css'],
       page_url: 'account_home.html',
-      initial_query_func: exports.list_all_user_apps,
+      initial_query_func: list_all_user_apps,
       app_name: 'info.freezr.account',
       script_files: ['account_home.js']
     },
     settings: {
       page_title: 'Account Settings (freezr)',
-      css_files: ['./public/info.freezr.public/public/freezr_style.css', 'account_home.css'],
+      css_files: ['./@public/info.freezr.public/public/freezr_style.css', 'account_home.css'],
       page_url: 'account_settings.html',
       initial_query_func: function (req, res) {
         if (req.freezrUserDS && req.freezrUserDS.fsParams && req.freezrUserDS.dbParams) {
@@ -2009,16 +2011,16 @@ const accountPageManifest = function (params) { // manifest parameters for accou
     },
     app: {
       page_title: 'Apps (freezr)' + (' - ' + params.sub_page),
-      css_files: ['./public/info.freezr.public/public/freezr_style.css', 'account_app_management.css'],
+      css_files: ['./@public/info.freezr.public/public/freezr_style.css', 'account_app_management.css'],
       page_url: 'account_app_' + params.sub_page + '.html',
       // initial_query_func: exports.list_all_user_apps,
       other_variables: (params.target_app ? ('const targetApp = "' + params.target_app + '";') : '') + ' let transformRecord',
-      script_files: ['./public/info.freezr.public/public/mustache.js'],
+      script_files: ['./@public/info.freezr.public/public/mustache.js'],
       modules: ['account_app_' + params.sub_page + '.js']
     },
     confirmperm: {
       page_title: 'Apps (freezr)' + (' - ' + params.sub_page),
-      css_files: ['./public/info.freezr.public/public/freezr_style.css', 'account_app_management.css'],
+      css_files: ['./@public/info.freezr.public/public/freezr_style.css', 'account_app_management.css'],
       page_url: 'account_confirmperm.html',
       // initial_query_func: exports.list_all_user_apps,
       // other_variables: (params.target_app ? ('const targetApp = "' + params.target_app + '"') : ''),
@@ -2026,13 +2028,13 @@ const accountPageManifest = function (params) { // manifest parameters for accou
     },
     resource_usage: {
       page_title: 'resource usage (freezr)',
-      css_files: ['./public/info.freezr.public/public/freezr_style.css', 'resource_usage.css'],
+      css_files: ['./@public/info.freezr.public/public/freezr_style.css', 'resource_usage.css'],
       page_url: 'account_resource_usage.html',
-      script_files: ['account_resource_usage.js', './public/info.freezr.public/public/mustache.js']
+      script_files: ['account_resource_usage.js', './@public/info.freezr.public/public/mustache.js']
     },
     reauthorise: {
       page_title: 'Apps (freezr)',
-      css_files: ['./public/info.freezr.public/public/freezr_style.css', './public/info.freezr.public/public/firstSetUp.css'],
+      css_files: ['./@public/info.freezr.public/public/freezr_style.css', './@public/info.freezr.public/public/firstSetUp.css'],
       page_url: 'account_reauthorise.html',
       initial_query_func: function (req, res) {
         if (req.freezrUserDS && req.freezrUserDS.owner && req.freezrUserDS.fsParams && req.freezrUserDS.fsParams.type) {
@@ -2045,7 +2047,7 @@ const accountPageManifest = function (params) { // manifest parameters for accou
     },
     reset: {
       page_title: 'Apps (freezr)',
-      css_files: ['./public/info.freezr.public/public/freezr_style.css', './public/info.freezr.public/public/firstSetUp.css'],
+      css_files: ['./@public/info.freezr.public/public/freezr_style.css', './@public/info.freezr.public/public/firstSetUp.css'],
       page_url: 'account_reset.html',
       initial_query_func: function (req, res) {
         if (req.freezrUserDS && req.freezrUserDS.owner && req.freezrUserDS.fsParams && req.freezrUserDS.fsParams.type) {
@@ -2058,7 +2060,7 @@ const accountPageManifest = function (params) { // manifest parameters for accou
     },
     perms: {
       page_title: 'Permissions (freezr)',
-      css_files: ['./public/info.freezr.public/public/freezr_style.css', './public/info.freezr.public/public/firstSetUp.css'],
+      css_files: ['./@public/info.freezr.public/public/freezr_style.css', './@public/info.freezr.public/public/firstSetUp.css'],
       page_url: 'account_perm.html',
       initial_query_func: exports.generatePermissionHTML,
       script_files: ['account_perm.js']

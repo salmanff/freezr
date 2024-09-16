@@ -36,6 +36,19 @@ const sendFailureOrRedirect = function (res, req, newUrl) {
     res.redirect(newUrl)
   }
 }
+exports.loggedInPingInfo = function (req, res, dsManager, next) {
+  const owner = req.session.logged_in_user_id
+  if (!owner) {
+    next()
+  } else {
+    dsManager.getOrSetUserDS(owner, { freezrPrefs: req.freezrPrefs }, function (err, userDS) {
+      if (!err && userDS) {
+        req.freezrStorageLimits = userDS.getUseageWarning()
+      }
+      next()
+    })
+  }
+}
 
 exports.loggedInUserPage = function (req, res, dsManager, next) {
   // all access to apps and accounts pass through this to get an app token, if logged in session
@@ -53,10 +66,10 @@ exports.loggedInUserPage = function (req, res, dsManager, next) {
   } else {
     req.freezr_server_version = exports.version
     const owner = req.session.logged_in_user_id
+
     getOrSetAppTokenForLoggedInUser(dsManager.getDB(APP_TOKEN_OAC), req, function (err, tokenInfo) {
       fdlog('loggedInUserPage ', { err, tokenInfo })
       if (!tokenInfo || !tokenInfo.app_token || !owner || err) {
-        // fdlog('didnt get appToken ')
         visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: 'cred', accessPt: 'token' })
         sendFailureOrRedirect(res, req, '/account/login?redirect=missing_token')
       } else if (!tokenInfo.logged_in || tokenInfo.requestor_id !== req.session.logged_in_user_id) {
@@ -65,7 +78,7 @@ exports.loggedInUserPage = function (req, res, dsManager, next) {
         sendFailureOrRedirect(res, req, '/account/home?redirect=access_mismatch')
       } else {
         req.freezrTokenInfo = tokenInfo
-        dsManager.getOrSetUserDS(owner, function (err, userDS) {
+        dsManager.getOrSetUserDS(owner, { freezrPrefs: req.freezrPrefs }, function (err, userDS) {
           if (err) felog('loggedInUserPage', err)
           if (err && err.message === 'user incomplete') {
             felog('loggedInUserPage ', 'redirecting to /admin/selfregister')
@@ -108,7 +121,7 @@ exports.validatedOutsideUserAppPage = function (req, res, dsManager, next) {
     validateLoggedInUserOutsideAppAccessAndAddAppFs(req, res, dsManager, next)
   } else {
     const tokendb = dsManager.getDB(APP_TOKEN_OAC)
-    tokendb.query({ owner_id: owner, requestor_id: userId, app_name: appName, user_device: deviceCode }, null, // 
+    tokendb.query({ owner_id: owner, requestor_id: userId, app_name: appName, user_device: deviceCode }, null,
       (err, tokenInfo) => {
       // getAppTokenParams(dsManager.getDB(APP_TOKEN_OAC), req, function (err, tokenInfo) {
       // {userId, appName, loggedIn}
@@ -138,7 +151,7 @@ const validateLoggedInUserOutsideAppAccessAndAddAppFs = function (req, res, dsMa
   const requestor = req.session.logged_in_user_id
   const owner = req.params.user_id
   const appToken = helpers.generateAppToken(requestor, req.params.app_name, req.session.deviceCode)
-  fdlog('validateLoggedInUserOutsideAppAccessAndAddAppFs user ', req.originalUrl,  req.freezrTokenInfo)
+  fdlog('validateLoggedInUserOutsideAppAccessAndAddAppFs user ', req.originalUrl, req.freezrTokenInfo)
 
   req.freezr_server_version = exports.version
 
@@ -149,7 +162,7 @@ const validateLoggedInUserOutsideAppAccessAndAddAppFs = function (req, res, dsMa
         // get list of amdin users and allow them in gradually
         cb(new Error('authentication'))
       } else {
-        dsManager.getorInitDb({ app_table: 'info.freezr.account.app_list', owner: req.session.logged_in_user_id }, {}, cb)
+        dsManager.getorInitDb({ app_table: 'info.freezr.account.app_list', owner: req.session.logged_in_user_id }, { freezrPrefs: req.freezrPrefs }, cb)
       }
     },
     function (requestorAppDb, cb) {
@@ -163,7 +176,7 @@ const validateLoggedInUserOutsideAppAccessAndAddAppFs = function (req, res, dsMa
 
     // 2 Make sure owner has granted permission
     function (cb) {
-      dsManager.getUserPerms(owner, cb)
+      dsManager.getUserPerms(owner, { freezrPrefs: req.freezrPrefs }, cb)
     },
     function (ownerPermsDB, cb) {
       const dbQuery = {
@@ -184,7 +197,7 @@ const validateLoggedInUserOutsideAppAccessAndAddAppFs = function (req, res, dsMa
 
     // 3 Generate App token
     function (cb) {
-      dsManager.getorInitDb(APP_TOKEN_OAC, {}, cb)
+      dsManager.getorInitDb(APP_TOKEN_OAC, { freezrPrefs: req.freezrPrefs }, cb)
     },
     function (tokendb, cb) {
       const write = {
@@ -199,7 +212,12 @@ const validateLoggedInUserOutsideAppAccessAndAddAppFs = function (req, res, dsMa
         user_device: req.session.device_code,
         date_used: new Date().getTime() - 1000
       }
-      tokendb.cache[write.app_token] = write
+      if (!tokendb.cache.byToken) tokendb.cache.byToken = {}
+      tokendb.cache.byToken[write.app_token] = write
+      if (!tokendb.cache.byOwnerDeviceApp) tokendb.cache.byOwnerDeviceApp = {}
+      if (!tokendb.cache.byOwnerDeviceApp[owner]) tokendb.cache.byOwnerDeviceApp[owner] = {}
+      if (!tokendb.cache.byOwnerDeviceApp[owner][req.session.device_code][req.params.app_name]) tokendb.cache.byOwnerDeviceApp[owner][req.session.device_code][req.params.app_name] = {}
+      tokendb.cache.byOwnerDeviceApp[owner][req.session.device_code][req.params.app_name] = write
       if (req.freezrOldTokenInfo) {
         tokendb.update(req.freezrOldTokenInfo._id, write, { replaceAllFields: true }, cb)
       } else {
@@ -235,7 +253,7 @@ const addAppFs = function (req, res, dsManager, next) {
   async.waterfall([
     // Get  AppFS to pass on to next()
     function (cb) {
-      dsManager.getOrSetUserDS(owner, cb)
+      dsManager.getOrSetUserDS(owner, { freezrPrefs: req.freezrPrefs }, cb)
     },
     function (userDS, cb) {
       userDS.getorInitAppFS(req.params.app_name, {}, cb)
@@ -288,7 +306,7 @@ exports.loggedInOrNotForSetUp = function (req, res, dsManager, next) {
         sendFailureOrRedirect(res, req, '/account/home?redirect=access_mismatch')
       } else {
         req.freezrTokenInfo = tokenInfo
-        dsManager.getOrSetUserDS(owner, function (err, userDS) {
+        dsManager.getOrSetUserDS(owner, { freezrPrefs: req.freezrPrefs }, function (err, userDS) {
           fdlog('getOrSetUserDS get err type here', (err ? err.message : ''))
           visitLogger.recordLoggedInVisit(dsManager, req, { visitType: 'pages' })
           if (err && err.message === 'user incomplete') {
@@ -338,9 +356,8 @@ exports.publicUserPage = function (req, res, dsManager, next) {
         sendFailureOrRedirect(res, req, '/')
       }
     } else {
-      dsManager.getOrSetUserDS('public', function (err, userDS) {
+      dsManager.getOrSetUserDS('public', { freezrPrefs: req.freezrPrefs }, function (err, userDS) {
         if (err) {
-          console.warn('COULD NOT GET APP FS', err)
           felog('publicUserPage ', 'Could not get appFS')
           sendFailureOrRedirect(res, req, '/')
         } else if (userDS && userDS.getorInitAppFS) {
@@ -359,7 +376,8 @@ exports.publicUserPage = function (req, res, dsManager, next) {
       })
     }
   } else if (req.params.user_id) {
-    dsManager.getOrSetUserDS(req.params.user_id, function (err, userDS) {
+    const userId = helpers.startsWith(req.params.user_id, '@') ? req.params.user_id.slice(1) : req.params.user_id
+    dsManager.getOrSetUserDS(userId, { freezrPrefs: req.freezrPrefs }, function (err, userDS) {
       if (err) felog('publicUserPage', err)
       if (err) {
         sendFailureOrRedirect(res, req, '/account/login?redirect=internalError')
@@ -375,7 +393,7 @@ exports.publicUserPage = function (req, res, dsManager, next) {
         })
       }
     })
-  } else { // if (!req.params.user_id) -> ie this is a dbquery? or a publicid ppage
+  } else { // if (!req.params.user_id) -> ie this is a dbquery? or a publicid
     // No AppFS is required as this is a a db query????
     next()
   }
@@ -419,7 +437,7 @@ exports.accountLoggedInAPI = function (req, res, dsManager, next) {
       } else {
         req.freezrTokenInfo = tokenInfo
         fdlog('accountLoggedInAPI', 'got tokenInfo - next ', req.freezrTokenInfo)
-        dsManager.getOrSetUserDS(owner, function (err, userDS) {
+        dsManager.getOrSetUserDS(owner, { freezrPrefs: req.freezrPrefs }, function (err, userDS) {
           if (err) felog('accountLoggedInAPI', 'err getting user ', owner)
           req.freezrUserDS = userDS
           visitLogger.recordLoggedInVisit(dsManager, req, { visitType: 'apis' })
@@ -485,6 +503,7 @@ exports.userLoginHandler = function (req, res, dsManager, next) {
           req.session.logged_in_user_id = userId
           req.session.logged_in_date = new Date().getTime()
           req.session.logged_in_as_admin = u.isAdmin
+          req.session.logged_in_as_publisher = u.isPublisher
           cb(null)
         } else {
           felog('userLoginHandler', 'wrong password - need to limit number of wring passwords - set a file in the datastore ;) ')
@@ -500,6 +519,7 @@ exports.userLoginHandler = function (req, res, dsManager, next) {
       function (tokenInfo, cb) {
         // todo maybe - consider setting accounts cookie only from login page... and require password to go to admin functions
         if (!tokenInfo || !tokenInfo.app_token) {
+          console.error('could not set app token', { tokenInfo })
           cb(helpers.error('could not set app token'))
         } else {
           res.cookie('app_token_' + req.session.logged_in_user_id, tokenInfo.app_token, { path: '/account' })
@@ -508,7 +528,7 @@ exports.userLoginHandler = function (req, res, dsManager, next) {
       }
     ],
     function (err) {
-      if (err) console.warn('msg -> ', err.message)
+      if (err) console.warn('login error - msg -> ', err.message)
       if (!err) {
         visitLogger.recordLoggedInVisit(dsManager, req, { userId, visitType: 'apis' })
         helpers.send_success(res, { logged_in: true, user_id: userId })
@@ -521,7 +541,6 @@ exports.userLoginHandler = function (req, res, dsManager, next) {
         } else {
           helpers.send_failure(res, err, 'access_handler', exports.version, 'login')
         }
-        // res.redirect('/ppage')
       } else {
         visitLogger.addNewFailedAuthAttempt(dsManager, req, { source: 'other', accessPt: 'login', userId })
         helpers.send_failure(res, err, 'access_handler', exports.version, 'login')
@@ -579,7 +598,7 @@ exports.appTokenLoginHandler = function (req, res, dsManager, next) {
           collection_name: 'user_devices',
           owner: userId
         }
-        dsManager.getorInitDb(devicesAoc, {}, function (err, devicesDb) {
+        dsManager.getorInitDb(devicesAoc, { freezrPrefs: req.freezrPrefs }, function (err, devicesDb) {
           if (err) {
             cb(err)
           } else {
@@ -686,8 +705,9 @@ exports.userAppLogOut = function (req, res, dsManager, next) {
     const tokendb = dsManager.getDB(APP_TOKEN_OAC)
     const nowTime = new Date().getTime()
 
-    if (tokendb.cache && tokendb.cache[appToken]) {
-      delete tokendb.cache[appToken]
+    if (tokendb.cache?.byToken && tokendb.cache.byToken[appToken]) {
+      delete tokendb.cache.byOwnerDeviceApp[tokendb.cache[appToken].owner_id][tokendb.cache[appToken].user_device][tokendb.cache[appToken].app_name]
+      delete tokendb.cache.byToken[appToken]
     }
     tokendb.update({ app_token: appToken }, { expiry: nowTime }, { replaceAllFields: false }, function (err) {
       visitLogger.recordLoggedInVisit(dsManager, req, { visitType: 'apis' })
@@ -712,10 +732,11 @@ exports.userLogOut = function (req, res, dsManager, next) {
   if (!dsManager.freezrIsSetup) {
     endLogout(new Error('freezr not set up'))
   } else {
-    if (tokendb.cache) {
+    if (tokendb.cache?.byToken) {
       Object.keys(tokendb.cache).forEach((appToken, i) => {
         if (tokendb.cache[appToken].requestor_id === req.session.logged_in_user_id && tokendb.cache[appToken].user_device === req.session.device_code) {
-          delete tokendb.cache[appToken]
+          delete tokendb.cache.byOwnerDeviceApp[req.session.logged_in_user_id][tokendb.cache.byToken[appToken].device_code]
+          delete tokendb.cache.byToken[appToken]
         }
       })
     }
@@ -735,7 +756,7 @@ exports.getManifest = function (req, res, dsManager, next) {
   async.waterfall([
     // 0. get app config
     function (cb) {
-      dsManager.getorInitDb({ app_table: 'info.freezr.account.app_list', owner: ownerId }, {}, cb)
+      dsManager.getorInitDb({ app_table: 'info.freezr.account.app_list', owner: ownerId }, { freezrPrefs: req.freezrPrefs }, cb)
     },
     function (freezrUserAppListDB, cb) {
       if (!freezrUserAppListDB || !freezrUserAppListDB.query) {
@@ -783,7 +804,7 @@ const getAppTokenParams = function (tokendb, req, callback) {
     } else if (record.one_device && record.user_device !== req.session.device_code) {
       callback(helpers.error('mismatch', 'one_device checked but device does not match (check_app_token_and_params) '))
     } else if (!record.expiry || record.expiry < new Date().getTime()) {
-      console.warn('token expied ', { appToken })
+      // console.log('token expied ', { appToken })
       const tokenInfo = { owner_id: record.owner_id, requestor_id: record.requestor_id, app_name: record.app_name, logged_in: record.logged_in }
       callback(helpers.error('expired', 'Token has expired.'), tokenInfo)
     } else {
@@ -811,9 +832,9 @@ const getTokenFromCacheOrDb = function (tokendb, appToken, callback) {
   const nowTime = new Date().getTime()
   if (!appToken) {
     callback(helpers.error('unauth', 'No appToken sent'))
-  } else if (tokendb.cache && tokendb.cache[appToken] && tokendb.cache[appToken].expiry + (5 * 24 * 60 * 60 * 1000) > nowTime) {
+  } else if (tokendb.cache?.byToken && tokendb.cache?.byToken[appToken] && tokendb.cache.byToken[appToken].expiry + (5 * 24 * 60 * 60 * 1000) > nowTime) {
     fdlog('sending cached appToken getTokenFromCacheOrDb...')
-    callback(null, [tokendb.cache[appToken]])
+    callback(null, [tokendb.cache.byToken[appToken]])
   } else {
     tokendb.query({ app_token: appToken /* expiry: { $gt: new Date().getTime() } */ }, null, callback)
   }
@@ -824,9 +845,43 @@ const getOrSetAppTokenForLoggedInUser = function (tokendb, req, callback) {
   // const appToken = getAppTokenFromHeader(req)
   const appName = req.params.app_name
   fdlog('getOrSetAppTokenForLoggedInUser ', { appName, userId, deviceCode })
+  const existingHeaderToken = getAppTokenFromHeader(req) //
+  const existingCookieToken = req.cookies['app_token_' + userId]
   if (!appName || !userId || !deviceCode) {
     callback(helpers.error('no user or app for getOrSetAppTokenForLoggedInUser'))
+  } else if (existingHeaderToken &&
+    (!existingCookieToken || existingHeaderToken !== existingCookieToken) &&
+    tokendb.cache &&
+    tokendb.cache.byToken &&
+    tokendb.cache.byToken[existingHeaderToken] &&
+    tokendb.cache.byToken[existingHeaderToken].logged_in &&
+    tokendb.cache.byToken[existingHeaderToken].requestor_id === userId &&
+    tokendb.cache.byToken[existingHeaderToken].app_name === appName &&
+    tokendb.cache.byToken[existingHeaderToken].user_device === deviceCode &&
+    tokendb.cache.byToken[existingHeaderToken].expiry > (new Date().getTime() + (5 * 24 * 60 * 60 * 1000))) {
+    return callback(null, tokendb.cache.byToken[existingHeaderToken])
+  } else if (existingHeaderToken && existingCookieToken) {
+    callback(helpers.error('existingHeaderToken not valid 1'))
+  } else if (existingCookieToken &&
+    tokendb.cache &&
+    tokendb.cache.byToken &&
+    tokendb.cache.byToken[existingCookieToken] &&
+    tokendb.cache.byToken[existingCookieToken].logged_in &&
+    tokendb.cache.byToken[existingCookieToken].requestor_id === userId &&
+    tokendb.cache.byToken[existingCookieToken].app_name === appName &&
+    tokendb.cache.byToken[existingCookieToken].user_device === deviceCode &&
+    tokendb.cache.byToken[existingCookieToken].expiry > (new Date().getTime() + (5 * 24 * 60 * 60 * 1000))) {
+    return callback(null, tokendb.cache.byToken[existingCookieToken])
+  } else if (tokendb.cache &&
+    tokendb.cache.byOwnerDeviceApp &&
+    tokendb.cache.byOwnerDeviceApp[userId] &&
+    tokendb.cache.byOwnerDeviceApp[userId][deviceCode] &&
+    tokendb.cache.byOwnerDeviceApp[userId][deviceCode][appName] &&
+    tokendb.cache.byOwnerDeviceApp[userId][deviceCode][appName].logged_in &&
+    tokendb.cache.byOwnerDeviceApp[userId][deviceCode][appName].expiry > (new Date().getTime() + (5 * 24 * 60 * 60 * 1000))) {
+    return callback(null, tokendb.cache.byOwnerDeviceApp[userId][deviceCode][appName])
   } else {
+    // if (existingToken && tokendb.cache && tokendb.cache[existingToken]) console.log('got but cannot use existing cached appToken ', tokendb.cache[existingToken])
     tokendb.query({ owner_id: userId, user_device: deviceCode, source_device: deviceCode, app_name: appName }, null,
       (err, results) => {
         const nowTime = (new Date().getTime())
@@ -853,7 +908,13 @@ const getOrSetAppTokenForLoggedInUser = function (tokendb, req, callback) {
             date_used: (recordId ? results[0].dateUsed : nowTime)
           }
           const writeCb = function (err, results) {
-            tokendb.cache[write.app_token] = write
+            if (!tokendb.cache.byToken) tokendb.cache.byToken = {}
+            tokendb.cache.byToken[write.app_token] = write
+            if (!tokendb.cache.byOwnerDeviceApp) tokendb.cache.byOwnerDeviceApp = {}
+            if (!tokendb.cache.byOwnerDeviceApp[userId]) tokendb.cache.byOwnerDeviceApp[userId] = {}
+            if (!tokendb.cache.byOwnerDeviceApp[userId][deviceCode]) tokendb.cache.byOwnerDeviceApp[userId][deviceCode] = {}
+            if (!tokendb.cache.byOwnerDeviceApp[userId][deviceCode][appName]) tokendb.cache.byOwnerDeviceApp[userId][deviceCode][appName] = {}
+            tokendb.cache.byOwnerDeviceApp[userId][deviceCode][appName] = write
             if (err) {
               fdlog('getOrSetAppTokenForLoggedInUser', 'NEED TO DEAL WITH  ERROR HERE ', err)
               callback(err)

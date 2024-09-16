@@ -21,7 +21,7 @@ freezr.initPageScripts = async function () {
   //   console.log({ errors, resourceData })
   // })
   freezr.utils.getAppResourceUsage(null, (error, useageData) => {
-    // console.log('ret from getting all resources  ', { error, useageData })
+    // onsole.log('ret from getting all resources  ', { error, useageData })
     const appListDiv = document.getElementById('app_list')
     if (useageData && useageData.resources && useageData.resources.length > 0) {
       appListDiv.appendChild(makeEl('h3', null, ('Total size: ' + showSize(useageData.totalSize))))
@@ -49,6 +49,7 @@ freezr.initPageScripts = async function () {
       })
       appListDiv.appendChild(gridContainer)
       appListDiv.appendChild(makeEl('br'))
+      appListDiv.appendChild(makeDiv(null, ' Last Updated on ' + new Date(useageData.time).toLocaleString()))
       appListDiv.appendChild(makeDiv(null, ' * Tables may appear in multiple apps'))
     } else if (error) {
       appListDiv.innerHTML = 'There are errors capturing resource size data.'

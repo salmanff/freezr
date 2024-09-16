@@ -23,11 +23,11 @@
         <div>Database</div>
         <div>Limits</div>
         {{#users}} 
-          <div>{{user_id}} <span class="freezer_emphasis">{{#isAdmin}} (admin) {{/isAdmin}}</span></div>
+          <div>{{user_id}} <span class="freezer_emphasis">{{#isAdmin}} (admin) {{/isAdmin}}{{#isPublisher}} (pub) {{/isPublisher}}</span></div>
           <div>{{email_address}} </div>
           <div>{{fsParams.type}} </div>
           <div>{{dbParams.type}} </div>
-          <div class="limitsForUsers" id="limitsFor_{{user_id}}"> {{#limits.storage}} {{limits.storage}}MB {{/limits.storage}} <span id="click_limitsFor_{{user_id}}" style = "color: blue; cursor: pointer;">(usage) </span></div>
+          <div class="limitsForUsers" id="limitsAreaFor_{{user_id}}"> <span id="limitNumberFor_{{user_id}}">{{#limits.totalSize}} {{limits.totalSizeMB}}MB {{/limits.totalSize}} {{^limits.totalSize}} Not updated {{/limits.totalSize}}</span> <span id="click_UpdatelimitsFor_{{user_id}}" style = "color: blue; cursor: pointer;">(update usage) </span> <span>{{#limits.totalSize}} from: {{ limits.timeString }} {{/limits.totalSize}} </span></div>
         {{/users}}
       </div>
 

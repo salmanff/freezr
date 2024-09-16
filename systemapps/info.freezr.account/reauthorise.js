@@ -93,6 +93,7 @@ const checkResource = function (options, callback) {
 }
 
 function gotCheckStatus (err, data) {
+  // onsole.log(' gotCheckStatus ', { err, data })
   if (err) {
     showError(err.message)
   } else if (data.err) {

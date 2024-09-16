@@ -60,6 +60,7 @@ function USER_DS (owner, env) {
 }
 
 DATA_STORE_MANAGER.prototype.setSystemUserDS = function (owner, env) {
+  // onsole.log('setSystemUserDS for ', { owner })
   if (!owner) {
     throw new Error('no owner for setSystemUserDS')
   } else if (owner === 'undefined') {
@@ -67,6 +68,7 @@ DATA_STORE_MANAGER.prototype.setSystemUserDS = function (owner, env) {
   } else if (!env || !env.fsParams || !env.dbParams) {
     throw new Error('undefined env params for user - SNBH') // fdlog temporary debug todo remvoe?
   } else if (!['test', 'public', 'fradmin'].includes(owner)) {
+    console.warn('setSystemUserDS only used for system uses - cannot initiate for ', { owner })
     throw new Error('setSystemUserDS only used for system uses - cannot initiate for ' + owner)
   } else {
     this.users[owner] = new USER_DS(owner, env)
@@ -85,8 +87,11 @@ DATA_STORE_MANAGER.prototype.getDB = function (OAC) {
     return null
   }
 }
-DATA_STORE_MANAGER.prototype.getOrSetUserDS = function (owner, callback) {
+DATA_STORE_MANAGER.prototype.getOrSetUserDS = function (owner, options, callback) {
   fdlog('getOrSetUserDS for ', { owner })
+
+  if (!options || !options.freezrPrefs) throw new Error('No options passed to getorsetuserprefs ' + JSON.stringify(options))
+
   if (this.users[owner]) {
     // fdlog('getOrSetUserDS userds exists - sending link to ', owner)
     callback(null, this.users[owner])
@@ -104,15 +109,17 @@ DATA_STORE_MANAGER.prototype.getOrSetUserDS = function (owner, callback) {
         fdlog('todonow need to make sure it has rights to use the default params', { ownerEntries })
         const dbParams = ownerEntries[0].dbParams
           ? (ownerEntries[0].dbParams.type === 'system'
-            ? self.systemEnvironment.dbParams
-            : ownerEntries[0].dbParams)
+              ? self.systemEnvironment.dbParams
+              : ownerEntries[0].dbParams)
           : null
         const fsParams = ownerEntries[0].fsParams
           ? (ownerEntries[0].fsParams.type === 'system'
-            ? self.systemEnvironment.fsParams
-            : ownerEntries[0].fsParams)
+              ? self.systemEnvironment.fsParams
+              : ownerEntries[0].fsParams)
           : null
-        if (dbParams && ownerEntries[0].dbParams?.type === 'system') dbParams.useIdsAsDbName = ownerEntries[0].dbParams.useIdsAsDbName
+        if (dbParams && ownerEntries[0].dbParams?.type === 'system') dbParams.systemDb = true
+        if (dbParams && ownerEntries[0].dbParams?.type === 'system') dbParams.useUserIdsAsDbName = options?.freezrPrefs?.useUserIdsAsDbName
+        if (dbParams && ownerEntries[0].dbParams?.type === 'system') dbParams.useUnifiedCollection = options?.freezrPrefs?.useUnifiedCollection
         // fdlog('nowdec30 - todo if system and not nedb, pass unified db')
 
         if (fsParams && fsParams.type && dbParams && dbParams.type) {
@@ -134,15 +141,16 @@ DATA_STORE_MANAGER.prototype.getOrSetUserDS = function (owner, callback) {
 const RECALCUATE_STORAGE_INNER_LIMIT = (6 * 1000)
 USER_DS.prototype.getUseageWarning = function () {
   if (!this.useage || !this.useage.storageLimit) return { ok: true }
-  if (this.useage.errorInCalculating) console.warn('ERRR this.useage.errorInCalculating', this.useage.errorInCalculating)
+  if (this.useage.errorInCalculating) felog('ERRR this.useage.errorInCalculating', this.useage.errorInCalculating)
   const isNotOk = this.useage.errorInCalculating ||
     (this.useage.lastStorageCalcs?.totalSize !== null && this.useage.lastStorageCalcs?.totalSize !== undefined && (this.useage.storageLimit * 1000000 < this.useage.lastStorageCalcs?.totalSize))
   const w = {
     ok: !isNotOk,
     storageLimit: this.useage.storageLimit,
     storageUse: this.useage.lastStorageCalcs?.totalSize
+    // useage: JSON.stringify(self.useage)
   }
-  if (!w.ok) console.warn('not okay this.useage.errorInCalculating ', this.useage.errorInCalculating, 'this.useage.storageLimit ', this.useage.storageLimit, 'this.useage.lastStorageCalcs?.totalSize ', this.useage.lastStorageCalcs?.totalSize, { isNotOk })
+  if (!w.ok) felog('not okay this.useage.errorInCalculating ', this.useage.errorInCalculating, 'this.useage.storageLimit ', this.useage.storageLimit, 'this.useage.lastStorageCalcs?.totalSize ', this.useage.lastStorageCalcs?.totalSize, { isNotOk })
   return w
 }
 USER_DS.prototype.setTimerToRecalcStorage = function (force) {
@@ -152,8 +160,9 @@ USER_DS.prototype.setTimerToRecalcStorage = function (force) {
   if (!this.useage || !this.useage.storageLimit) {
     return null
   } else {
+    const options = { freezrPrefs: { useUnifiedCollection: self.dbParams.useUnifiedCollection, useUserIdsAsDbName: self.dbParams.useUserIdsAsDbName } }
     const calculateNow = function () {
-      self.getStorageUse(null, function (err, calcs) {
+      self.getStorageUse(null, options, function (err, calcs) {
         if (err) self.useage.errorInCalculating = { error: err, time: new Date().getTime() }
         if (!err) {
           self.useage.dbWritesSinceLastCalc = 0
@@ -162,7 +171,7 @@ USER_DS.prototype.setTimerToRecalcStorage = function (force) {
       })
     }
     const outerLimitsPassed = function () {
-      const RECALCUATE_STORAGE_OUTER_TIME_LIMIT = (60 * 60 * 1000)
+      const RECALCUATE_STORAGE_OUTER_TIME_LIMIT = (6 * 60 * 60 * 1000)
       const RECALCUATE_STORAGE_OUTER_WRITE_LIMIT = 10
       return (self.useage?.lastStorageCalcs.time &&
         new Date().getTime() - self.useage?.lastStorageCalcs.time > RECALCUATE_STORAGE_OUTER_TIME_LIMIT) ||
@@ -182,103 +191,108 @@ USER_DS.prototype.setTimerToRecalcStorage = function (force) {
     return null
   }
 }
-USER_DS.prototype.getStorageUse = function (app, callback) {
+USER_DS.prototype.getStorageUse = function (app, options, callback) {
   fdlog('ds_amanger getStorageUse')
+  // onsole.log('ds_amanger getStorageUse ', { owner: this.owner, useage: this.useage, lastStorageCalcs: this.useage.lastStorageCalcs })
 
   const userId = this.owner
   const userDS = this
 
-  const oac = {
-    owner: userId,
-    app_name: 'info.freezr.account',
-    collection_name: 'app_list'
-  }
-  const resources = []
-
-  async.waterfall([
-    // 1. get db
-    function (cb) {
-      if (app) {
-        cb(null, null)
-      } else {
-        userDS.getorInitDb(oac, null, cb)
-      }
-    },
-
-    // 2. get all user apps
-    function (appList, cb) {
-      if (app) {
-        cb(null, [{ app_name: app }])
-      } else if (!appList || !appList.query) {
-        felog('bad retrieval of db ', { appList })
-        cb(new Error('inccomplete or authentication malfucntion getting db for ' + userId))
-      } else {
-        appList.query({}, null, cb)
-      }
-    },
-
-    function (allAppsToFollow, cb) {
-      async.forEach(allAppsToFollow, function (app, cb2) {
-        let allTableNamesForApp = []
-        const tableSizes = {}
-        let appFS
-        const folderSizes = { apps: 0, files: 0 }
-        async.waterfall([
-          function (cb) {
-            userDS.getorInitAppFS(app.app_name, {}, cb)
-          },
-          function (userAppFS, cb) {
-            appFS = userAppFS
-            appFS.folderSize('apps', cb)
-          },
-          function (size, cb) {
-            folderSizes.apps = size
-            appFS.folderSize('files', cb)
-          },
-          function (size, cb) {
-            folderSizes.files = size
-            cb(null)
-          },
-
-          function (cb3) {
-            userDS.getorInitDb({ owner: userId, app_table: app.app_name }, null, cb3)
-          },
-          function (topdb, cb3) {
-            topdb.getAllAppTableNames(app.app_name, cb3)
-          },
-          function (tableNames, cb3) {
-            allTableNamesForApp = tableNames
-            if (app && app.manifest && app.manifest.permissions && app.manifest.permissions.length > 0) {
-              app.manifest.permissions.forEach(perm => {
-                if (perm.table_id && !allTableNamesForApp.includes(perm.table_id)) allTableNamesForApp.push(perm.table_id)
-              })
-            }
-            cb3(null)
-          },
-          // function (cb3) {},
-          function (cb3) {
-            async.forEach(allTableNamesForApp, function (tableName, cb4) {
-              userDS.getorInitDb({ owner: userId, app_table: tableName }, null, function (err, db) {
-                if (err) {
-                  cb4(err)
-                } else {
-                  db.getTableStats(function (err, stats) {
-                    if (!err) {
-                      tableSizes[tableName] = stats.size
-                    }
-                    cb4(err)
-                  })
-                }
-              })
-            }, cb3)
-          }
-        ], function (err) {
-          resources.push({ appName: app.app_name, dbNames: allTableNamesForApp, dbs: tableSizes, apps: folderSizes.apps, files: folderSizes.files })
-          cb2(err)
-        })
-      }, cb)
+  if (!options?.forceUpdate && userDS.useage.lastStorageCalcs.totalSize) {
+    callback(null, userDS.useage.lastStorageCalcs)
+  } else {
+    const oac = {
+      owner: userId,
+      app_name: 'info.freezr.account',
+      collection_name: 'app_list'
     }
-  ],
+    const resources = []
+
+    async.waterfall([
+      // 1. get db
+      function (cb) {
+        if (app) {
+          cb(null, null)
+        } else {
+          userDS.getorInitDb(oac, options, cb)
+        }
+      },
+
+      // 2. get all user apps
+      function (appList, cb) {
+        if (app) {
+          cb(null, [{ app_name: app }])
+        } else if (!appList || !appList.query) {
+          felog('bad retrieval of db ', { appList })
+          cb(new Error('inccomplete or authentication malfucntion getting db for ' + userId))
+        } else {
+          appList.query({}, null, cb)
+        }
+      },
+
+      function (allAppsToFollow, cb) {
+        async.forEach(allAppsToFollow, function (app, cb2) {
+          let allTableNamesForApp = []
+          const tableSizes = {}
+          let appFS
+          const folderSizes = { apps: 0, files: 0 }
+          async.waterfall([
+            function (cb) {
+              userDS.getorInitAppFS(app.app_name, {}, cb)
+            },
+            function (userAppFS, cb) {
+              appFS = userAppFS
+              appFS.folderSize('apps', cb)
+            },
+            function (size, cb) {
+              folderSizes.apps = size
+              appFS.folderSize('files', cb)
+            },
+            function (size, cb) {
+              folderSizes.files = size
+              cb(null)
+            },
+
+            function (cb3) {
+              userDS.getorInitDb({ owner: userId, app_table: app.app_name }, null, cb3)
+            },
+            function (topdb, cb3) {
+              topdb.getAllAppTableNames(app.app_name, cb3)
+            },
+            function (tableNames, cb3) {
+              allTableNamesForApp = tableNames
+              if (app && app.manifest && app.manifest.permissions && app.manifest.permissions.length > 0) {
+                app.manifest.permissions.forEach(perm => {
+                  if (perm.table_id && !allTableNamesForApp.includes(perm.table_id)) allTableNamesForApp.push(perm.table_id)
+                })
+              }
+              cb3(null)
+            },
+            // function (cb3) {},
+            function (cb3) {
+              async.forEach(allTableNamesForApp, function (tableName, cb4) {
+                userDS.getorInitDb({ owner: userId, app_table: tableName }, null, function (err, db) {
+                  if (err) {
+                    cb4(err)
+                  } else {
+                    db.getTableStats(function (err, stats) {
+                      if (!err) {
+                        // todo throw error if no stats object sent
+                        tableSizes[tableName] = stats?.size || 0
+                      }
+                      cb4(err)
+                    })
+                  }
+                })
+              }, cb3)
+            }
+          ], function (err) {
+            resources.push({ appName: app.app_name, dbNames: allTableNamesForApp, dbs: tableSizes, apps: folderSizes.apps, files: folderSizes.files })
+            cb2(err)
+          })
+        }, cb)
+      }
+    ],
     function (err) {
       if (err) {
         userDS.useage.calcerror = { error: err, time: new Date().getTime() }
@@ -297,18 +311,18 @@ USER_DS.prototype.getStorageUse = function (app, callback) {
             }
           }
         })
-        // onsole.log('setting new storage size ', totalSize)
         userDS.useage.lastStorageCalcs = { resources, totalSize, time: new Date().getTime() }
         callback(null, { resources, totalSize })
       }
     })
+  }
 }
 
-DATA_STORE_MANAGER.prototype.getUserPerms = function (owner, callback) {
+DATA_STORE_MANAGER.prototype.getUserPerms = function (owner, options, callback) {
   // const self = this
-  this.getOrSetUserDS(owner, function (err, ownerDS) {
+  this.getOrSetUserDS(owner, options, function (err, ownerDS) {
     if (err) {
-      felog('getUserPerms', 'err for ' + owner, err)
+      felog('getUserPerms', 'err for ' + owner, err.message)
       callback(err)
     } else {
       const permOAC = {
@@ -333,7 +347,7 @@ DATA_STORE_MANAGER.prototype.getorInitDb = function (OAC, options, callback) {
   if (!OAC || !OAC.owner) {
     callback(new Error('cannot get db without AOC'))
   } else {
-    this.getOrSetUserDS(OAC.owner, function (err, userDS) {
+    this.getOrSetUserDS(OAC.owner, options, function (err, userDS) {
       if (err) {
         felog('getorInitDb err for ' + OAC.owner, err)
         callback(err)
@@ -344,14 +358,14 @@ DATA_STORE_MANAGER.prototype.getorInitDb = function (OAC, options, callback) {
   }
 }
 DATA_STORE_MANAGER.prototype.getorInitDbs = function (OAC, options, callback) {
-  // OAC can take a single collectiona nd app_name app_table ot an array of aoo_tables or 
+  // OAC can take a single collectiona nd app_name app_table ot an array of aoo_tables or
   fdlog('getorInitDbs ', { OAC, options })
   if (!OAC || !OAC.owner || (!OAC.app_table && !OAC.app_tables)) {
     callback(new Error('cannot get db without a properly formed AOC'))
   } else {
-    this.getOrSetUserDS(OAC.owner, function (err, userDS) {
+    this.getOrSetUserDS(OAC.owner, options, function (err, userDS) {
       if (err) {
-        felog('getorInitDb err for ' + OAC.owner, err)
+        felog('getorInitDb err for ' + OAC.owner, err.message)
         callback(err)
       } else if (OAC.app_tables && Array.isArray((OAC.app_tables))) {
         // !oac.app_name  + collection cannot take multiple values but oac.app_table can be an array of tableas
@@ -362,13 +376,13 @@ DATA_STORE_MANAGER.prototype.getorInitDbs = function (OAC, options, callback) {
             cb(err)
           })
         },
-          function (err) {
-            if (err) {
-              callback(err)
-            } else {
-              callback(null, list)
-            }
-          })
+        function (err) {
+          if (err) {
+            callback(err)
+          } else {
+            callback(null, list)
+          }
+        })
       } else {
         userDS.getorInitDb(OAC, options, callback)
       }
@@ -388,7 +402,7 @@ USER_DS.prototype.getorInitDb = function (OAC, options, callback) {
     return callback(null, this.appcoll[appTableName(OAC)])
   } else {
     fdlog('getorInitDb need to re-init db ', appTableName(OAC))
-    this.initOacDB(OAC, options = {}, callback)
+      this.initOacDB(OAC, options = {}, callback)
   }
 }
 
@@ -399,10 +413,13 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
   const userDs = this
   const dbParams = this.dbParams
   const fsParams = this.fsParams
+  // onsole.log(' initOacDB ', { db: dbParams.type, fs: fsParams.type, Ooner: OAC.owner })
 
   if (!this.dbParams.type) {
-    // console.warn({ dbParams, fsParams, OAC })
-    throw new Error('Cannot initiate db or fs without db param details (type) for user ' + this.owner)
+    // felog({ dbParams, fsParams, OAC })
+    console.warn('serious error on set up - no db or fs params', { OAC })
+    return callback(new Error('Cannot initiate db or fs without db param details (type) for user ' + this.owner))
+    // throw new Error('Cannot initiate db or fs without db param details (type) for user ' + this.owner)
   }
   if (!appTableName(OAC)) throw new Error('Cannot initiate db or fs without proper OAC ' + JSON.stringify(OAC))
 
@@ -430,12 +447,21 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
   // fdlog('initOacDB ' + this.owner, { dbParams, fsParams, OAC })
 
   const DB_CREATOR = require('../freezr_system/environment/dbApi_' + dbParams.type + '.js')
-  ds.db = new DB_CREATOR({ dbParams, fsParams, extraCreds }, OAC)
+  try {
+    ds.db = new DB_CREATOR({ dbParams, fsParams, extraCreds }, OAC)
+  } catch (e) {
+    console.warn('initoacdb creator error', { dbParams, e })
+    return callback(e)
+  }
 
   ds.db.initDB(function (err) {
     fdlog(' in ds manager - intied db ')
+    if (err && dbParams.type === 'nedb' && err.code === 'ENOENT') {
+      // should be okay hopefully as db has not been einited yet 9Added in 2024 without proper think through / test - todo review console.log)
+      err = null
+    }
     if (err) {
-      felog('initDB Err ', ds.owner, err)
+      felog('initDB Err ', ds.owner, { msg: err.message, code: err.code, name: err.name, statusCode: err.statusCode })
       callback(err)
     } else {
       fdlog('todo - ds.initDB - need to make sure ds has all required functions')
@@ -453,7 +479,7 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
 
         userDs.setTimerToRecalcStorage()
         if (!userDs.getUseageWarning().ok) {
-          cb(new Error('you have surpassed your storage limits and need to upgrade.'), { error: true, useage: userDs.getUseageWarning() })
+          cb(new Error('storageLimitExceeded'), { error: true, useage: userDs.getUseageWarning() })
         } else if (!entity || typeof entity !== 'object' || Array.isArray(entity)) {
           cb(new Error('Cannot create an invalid entity type' + (typeof entity)))
         } else if (!ds.db || !ds.db.create) {
@@ -461,7 +487,7 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
         } else {
           if (!cb) {
             helpers.state_error('ds_manager', exports.version, 'create', err, 'No cb passed on to db function')
-            cb = function (err, ret) { felog('ds.create', 'no cb passed to create', { err }) }
+            cb = function (err, ret) { felog('ds.create', 'no cb passed to create', { err: err?.message }) }
           }
           // fdlog('ds.create chges ', ds.dbChgCount, entity)
           ds.dbChgCount++
@@ -521,7 +547,7 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
 
         userDs.setTimerToRecalcStorage()
         if (!userDs.getUseageWarning().ok) {
-          cb(new Error('you have surpassed your storage limits and need to upgrade.'), { error: true, useage: userDs.getUseageWarning() })
+          cb(new Error('storageLimitExceeded'), { error: true, useage: userDs.getUseageWarning() })
         } else if (options.replaceAllFields) {
           userDs.useage.dbWritesSinceLastCalc++
           // fdlog('ds.update replaceAllFields going to update entity with new updates ',{idOrQuery, updatesToEntity})
@@ -541,12 +567,12 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
               const returns = err
                 ? null
                 : {
-                  nModified,
-                  _id: options.old_entity._id,
-                  _date_created: options.old_entity._date_created,
-                  _date_modified: updatesToEntity._date_modified,
-                  useage: userDs.getUseageWarning()
-                }
+                    nModified,
+                    _id: options.old_entity._id,
+                    _date_created: options.old_entity._date_created,
+                    _date_modified: updatesToEntity._date_modified,
+                    useage: userDs.getUseageWarning()
+                  }
               fdlog('dsmanager update 1 ', { err, result, returns })
               cb(err, returns)
             })
@@ -584,12 +610,12 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
                   const returns = err
                     ? null
                     : {
-                      nModified,
-                      _id: entityId,
-                      _date_created: oldEntity._date_created,
-                      _date_modified: updatesToEntity._date_modified,
-                      useage: userDs.getUseageWarning()
-                    }
+                        nModified,
+                        _id: entityId,
+                        _date_created: oldEntity._date_created,
+                        _date_modified: updatesToEntity._date_modified,
+                        useage: userDs.getUseageWarning()
+                      }
                   fdlog('dsmanager update 2 ', { err, result, returns })
 
                   if (entities.length > 1) {
@@ -597,7 +623,7 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
                     returns.flags = 'More than one object retrieved - first object changed'
                     felog('More than One object retrieved when updating with replaceAllFields ')
                   }
-                  if (err) felog('ds.update', 'returns from replace_record_by_id ', { updatesToEntity, err, result })
+                  if (err) felog('ds.update', 'returns from replace_record_by_id ', { updatesToEntity, msg: err.message, result })
                   cb(err, returns)
                 })
               }
@@ -631,7 +657,7 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
 
         userDs.setTimerToRecalcStorage()
         if (!userDs.getUseageWarning().ok) {
-          cb(new Error('you have surpassed your storage limits and need to upgrade.'), { error: true, useage: userDs.getUseageWarning() })
+          cb(new Error('storageLimitExceeded'), { error: true, useage: userDs.getUseageWarning() })
         } else {
           userDs.useage.dbWritesSinceLastCalc++
           ds.db.replace_record_by_id(entityId, updatedEntity, function (err, num) {
@@ -654,7 +680,7 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
       ds.upsert = function (idOrQuery, entity, cb) {
         fdlog('ds.upsert - todo - need to add checks - see "create"')
 
-        function callFwd(err, existingEntity) {
+        function callFwd (err, existingEntity) {
           // fdlog('In db_handler upsert callFwd', existingEntity, 'Will replace with new entity', entity)
           if (err) {
             helpers.state_error('ds_manager', exports.version, 'upsert', err, 'error reading db')
@@ -736,12 +762,43 @@ USER_DS.prototype.getDB = function (OAC) {
   return this.appcoll[appTableName(OAC)]
 }
 
-DATA_STORE_MANAGER.prototype.initAdminDBs = function (OACs, options = {}, callback) {
+DATA_STORE_MANAGER.prototype.initAdminDBs = function (env, freezrPrefs, callback) {
+  const adminDBs = ['permissions', 'users', 'oauthors', 'app_tokens', 'params']
+  const adminOACs = adminDBs.map(coll => {
+    return {
+      owner: 'fradmin',
+      app_name: 'info.freezr.admin',
+      collection_name: coll
+    }
+  })
+  // adminOACs.push({
+  //   owner: 'public',
+  //   app_table: 'dev.ceps.privatefeeds.codes'
+  // })
+  if (!env?.dbParams || !freezrPrefs) console.warn('initAdminDBs', { adminOACs, env, freezrPrefs })
+  console.warn('initAdminDBs', { db: env.dbParams?.type, fs: env.fsParams?.type })
+  if (!env?.dbParams || !freezrPrefs) throw new Error('cannot init admin dbs without an env or admin db')
   const self = this
-  async.forEach(OACs, function (oac, cb) {
-    self.initOacDB(oac, options, cb)
+  self.setSystemUserDS('public', env)
+  self.setSystemUserDS('fradmin', env)
+  async.forEach(adminOACs, function (oac, cb) {
+    // if (!self.users[oac.owner]) {
+    self.getOrSetUserDS(oac.owner, { freezrPrefs }, function (err, userDS) {
+      if (err) {
+        felog('initAdminDBs', 'err for ' + oac.owner, err.message)
+        cb(err)
+      } else {
+        self.initOacDB(oac, { addCache: true }, cb)
+      }
+    })
+    // } else {
+    //   self.initOacDB(oac, { addCache: true }, cb)
+    // }
   },
-    callback)
+  function (err) {
+    if (err) console.warn('err in initadminDBs', { err })
+    callback(err)
+  })
 }
 DATA_STORE_MANAGER.prototype.initUserAppFSToGetCredentials = function (user, appName, options = {}, callback) {
   // options: env - if want to use a special env for that ACO
@@ -809,7 +866,7 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
         ds.fs = new CustomFS(fsParams, { doNotPersistOnLoad: true })
       }
     } catch (e) {
-      felog('ds.initAppFS', 'ds.fs failed for ' + owner + ' using fs ' + fsParams.name, e)
+      felog('ds.initAppFS', 'ds.fs failed for ' + owner + ' using fs ' + fsParams.name, e.message)
       callback(new Error('Could not initiate dbfs file for fs type ' + fsParams.type))
     }
 
@@ -851,16 +908,20 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
             cb(err, content)
           })
         } else {
-          this.fs.readFile(pathToRead, options, function (err, content) {
-            // fdlog('setting fscache - will it persist ', { err, content })
-            content = content ? content.toString() : null
-            if (!err && content) {
-              theCache[endpath] = { content, fsLastAccessed: new Date().getTime() }
-            }
-            // todo fdlog('need a cache flush or a check on whether the size is too big')
-            // todo fdlog('also need to flush cache on refresh of apps or re-installs')
-            cb(err, content)
-          })
+          try {
+            this.fs.readFile(pathToRead, options, function (err, content) {
+              // fdlog('setting fscache - will it persist ', { err, content })
+              content = content ? content.toString() : null
+              if (!err && content) {
+                theCache[endpath] = { content, fsLastAccessed: new Date().getTime() }
+              }
+              // todo fdlog('need a cache flush or a check on whether the size is too big')
+              // todo fdlog('also need to flush cache on refresh of apps or re-installs')
+              cb(err, content)
+            })
+          } catch (err) {
+            cb(err)
+          }
         }
       }
     }
@@ -889,32 +950,50 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
         felog('sendAppFile', ' - missing file in  local ' + localpath)
         res.status(404).send('file not found!')
       } else {
-        ds.fs.getFileToSend(partialPath, function (err, streamOrFile) {
-          if (err) {
-            fdlog('sendAppFile', 'err in sendAppfile for ', { partialPath, err })
-            res.status(404).send('file not found!')
-            res.end()
-          } else {
-            // fdlog('sendAppFile -  putting back in cache ' + partialPath)
-            if (streamOrFile.pipe) { // it is a stream
-              streamOrFile.pipe(res)
-              localCheckExistsOrCreateUserFolderSync(partialPath, true)
-              streamOrFile.pipe(fs.createWriteStream(localpath))
-              self.cache.appfiles[endpath] = { fsLastAccessed: new Date().getTime() }
-            } else { // it is a file
-              res.send(streamOrFile)
-              localCheckExistsOrCreateUserFolderSync(partialPath, true)
-              fs.writeFile(localpath, streamOrFile, null, function (err, name) {
-                if (err) {
-                  felog('sendAppFile', ' -  error putting back in cache ' + partialPath)
-                } else {
-                  // fdlog('sendAppFile -  SUCCESS putting back in cache ' + partialPath)
-                  self.cache.appfiles[endpath] = { fsLastAccessed: new Date().getTime() }
-                }
-              })
+        try {
+          ds.fs.getFileToSend(partialPath, null, function (err, streamOrFile) {
+            if (err) {
+              console.warn('sendAppFile', 'err in sendAppfile for ', { partialPath, err })
+              res.status(404).send('file not found!')
+              res.end()
+            } else {
+              // fdlog('sendAppFile -  putting back in cache ' + partialPath)
+              if (streamOrFile.pipe) { // it is a stream
+                streamOrFile.pipe(res)
+                localCheckExistsOrCreateUserFolderSync(partialPath, true)
+                streamOrFile.pipe(fs.createWriteStream(localpath))
+                self.cache.appfiles[endpath] = { fsLastAccessed: new Date().getTime() }
+              } else if (ds.fsParams?.choice === 'aws') { // handle aws v3 non streamable file
+                localCheckExistsOrCreateUserFolderSync(partialPath, true)
+                fs.writeFile(localpath, streamOrFile, null, function (err, name) {
+                  if (err) {
+                    felog('sendAppFile', ' -  error putting back in cache ' + partialPath)
+                    res.status(404).send('error copying file')
+                  } else {
+                    // fdlog('sendAppFile -  SUCCESS putting back in cache ' + partialPath)
+                    self.cache.appfiles[endpath] = { fsLastAccessed: new Date().getTime() }
+                    res.sendFile(localpath)
+                  }
+                })
+              } else { // it is a file
+                res.send(streamOrFile)
+                localCheckExistsOrCreateUserFolderSync(partialPath, true)
+                fs.writeFile(localpath, streamOrFile, null, function (err, name) {
+                  if (err) {
+                    felog('sendAppFile', ' -  error putting back in cache ' + partialPath)
+                  } else {
+                    // fdlog('sendAppFile -  SUCCESS putting back in cache ' + partialPath)
+                    self.cache.appfiles[endpath] = { fsLastAccessed: new Date().getTime() }
+                  }
+                })
+              }
             }
-          }
-        })
+          })
+        } catch (err) {
+          felog('sendAppFile', 'general err in sendAppfile for ', { msg: err.message })
+          res.status(404).send('err getting file')
+          res.end()
+        }
       }
     }
 
@@ -931,6 +1010,7 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
       if (endpath.slice(-4) === '.css') res.setHeader('content-type', 'text/css')
 
       const localpath = path.normalize(ROOT_DIR + partialPath)
+      fdlog('ds path ', { localpath, endpath, partialPath })
       if (fs.existsSync(localpath)) {
         // fdlog('sendPublicAppFile - sending from local ' + partialPath + 'existsSync? ' + fs.existsSync(localpath))
         self.cache.appfiles[endpath] = { fsLastAccessed: new Date().getTime() }
@@ -939,31 +1019,37 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
         // fdlog('sendPublicAppFile - missing file in  local ' + localpath)
         res.status(404).send('file not found!')
       } else {
-        this.fs.getFileToSend(partialPath, function (err, streamOrFile) {
-          if (err) {
-            fdlog('sendPublicAppFile', 'err in sendPublicAppFile for ' + partialPath)
-            res.status(404).send('file not found!')
-            res.end()
-          } else {
-            if (streamOrFile.pipe) { // it is a stream
-              streamOrFile.pipe(res)
-              localCheckExistsOrCreateUserFolderSync(partialPath, true)
-              streamOrFile.pipe(fs.createWriteStream(localpath))
-              self.cache.appfiles[endpath] = { fsLastAccessed: new Date().getTime() }
-            } else { // it is a file
-              res.send(streamOrFile)
-              localCheckExistsOrCreateUserFolderSync(partialPath, true)
-              fs.writeFile(localpath, streamOrFile, null, function (err, name) {
-                if (err) {
-                  felog('sendAppFile', ' -  error putting back in cache ' + partialPath)
-                } else {
-                  // fdlog('sendAppFile -  SUCCESS putting back in cache ' + partialPath)
-                  self.cache.appfiles[endpath] = { fsLastAccessed: new Date().getTime() }
-                }
-              })
+        try {
+          this.fs.getFileToSend(partialPath, null, function (err, streamOrFile) {
+            if (err) {
+              fdlog('sendPublicAppFile', 'err in sendPublicAppFile for ' + partialPath)
+              res.status(404).send('file not found!')
+              res.end()
+            } else {
+              if (streamOrFile.pipe) { // it is a stream
+                streamOrFile.pipe(res)
+                localCheckExistsOrCreateUserFolderSync(partialPath, true)
+                streamOrFile.pipe(fs.createWriteStream(localpath))
+                self.cache.appfiles[endpath] = { fsLastAccessed: new Date().getTime() }
+              } else { // it is a file
+                res.send(streamOrFile)
+                localCheckExistsOrCreateUserFolderSync(partialPath, true)
+                fs.writeFile(localpath, streamOrFile, null, function (err, name) {
+                  if (err) {
+                    felog('sendAppFile', ' -  error putting back in cache ' + partialPath)
+                  } else {
+                    // fdlog('sendAppFile -  SUCCESS putting back in cache ' + partialPath)
+                    self.cache.appfiles[endpath] = { fsLastAccessed: new Date().getTime() }
+                  }
+                })
+              }
             }
-          }
-        })
+          })
+        } catch (e) {
+          fdlog('sendPublicAppFile', 'err in sendPublicAppFile for ' + partialPath)
+          res.status(404).send('error getting file 23!')
+          res.end()
+        }
       }
     }
     ds.writeToUserFiles = function (endpath, content, options, cb) {
@@ -977,22 +1063,26 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
       if (!self.cache.userfiles[endpath]) self.cache.userfiles[endpath] = {}
 
       if (!userDs.getUseageWarning().ok) {
-        cb(new Error('you have surpassed your storage limits and need to upgrade.'), { error: true, useage: userDs.getUseageWarning() })
+        cb(new Error('storageLimitExceeded'), { error: true, useage: userDs.getUseageWarning() })
       } else {
-        this.fs.writeFile(pathToWrite, content, options, function (err, name) {
-          if (err) {
-            cb(err)
-          } else if (!options || !options.nocache) {
-            fs.writeFile(ROOT_DIR + pathToWrite, content, options, function (err, name) {
-              if (err) felog('writeToUserFiles', 'Error duplicating file in local drive for ' + self.owner + ' path: ' + ROOT_DIR + pathToWrite, err)
-              if (!err) self.cache.userfiles[endpath] = { fsLastAccessed: new Date().getTime() }
+        try {
+          this.fs.writeFile(pathToWrite, content, options, function (err, name) {
+            if (err) {
+              cb(err)
+            } else if (!options || !options.nocache) {
+              fs.writeFile(ROOT_DIR + pathToWrite, content, options, function (err, name) {
+                if (err) felog('writeToUserFiles', 'Error duplicating file in local drive for ' + self.owner + ' path: ' + ROOT_DIR + pathToWrite, err.message)
+                if (!err) self.cache.userfiles[endpath] = { fsLastAccessed: new Date().getTime() }
+                cb(null, name)
+              })
+            } else {
               cb(null, name)
-            })
-          } else {
-            cb(null, name)
-            userDs.setTimerToRecalcStorage(true)
-          }
-        })
+              userDs.setTimerToRecalcStorage(true)
+            }
+          })
+        } catch (err) {
+          cb(err)
+        }
       }
     }
     ds.readUserFile = function (endpath, options, cb) {
@@ -1007,31 +1097,36 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
         self.cache.userfiles[endpath] = { fsLastAccessed: new Date().getTime() }
         fs.readFile(localpath, options, (err, content) => {
           content = content ? content.toString() : null
+          if (err) console.warn(err)
           cb(err, content)
         })
       } else {
-        this.fs.readFile(pathToRead, options, function (err, content) {
-          if (err) {
-            cb(err)
-          } else {
-            content = content ? content.toString() : null
-            let dir = localpath.split('/')
-            dir.pop()
-            dir = dir.join('/')
-            mkdirp(dir, function (err) {
-              if (err) {
-                if (err) felog('ds readUserFile', 'Error creating directory to store local copy of file for readUserFile ', { dir, localpath, err })
-                cb(null, content)
-              } else {
-                fs.writeFile(localpath, content, options, function (err, name) {
-                  if (err) felog('ds readUserFile', 'Error duplicating file in local drive for readUserFile ', { endpath, localpath, err })
-                  if (!err) self.cache.userfiles[endpath] = { fsLastAccessed: new Date().getTime() }
+        try {
+          this.fs.readFile(pathToRead, options, function (err, content) {
+            if (err) {
+              cb(err)
+            } else {
+              content = content ? content.toString() : null
+              let dir = localpath.split('/')
+              dir.pop()
+              dir = dir.join('/')
+              mkdirp(dir, function (err) {
+                if (err) {
+                  if (err) felog('ds readUserFile', 'Error creating directory to store local copy of file for readUserFile ', { dir, localpath, msg: err.message })
                   cb(null, content)
-                })
-              }
-            })
-          }
-        })
+                } else {
+                  fs.writeFile(localpath, content, options, function (err, name) {
+                    if (err) felog('ds readUserFile', 'Error duplicating file in local drive for readUserFile ', { endpath, localpath, msg: err.message })
+                    if (!err) self.cache.userfiles[endpath] = { fsLastAccessed: new Date().getTime() }
+                    cb(null, content)
+                  })
+                }
+              })
+            }
+          })
+        } catch (err) {
+          cb(err)
+        }
       }
     }
     ds.removeFile = function (endpath, options, cb) {
@@ -1049,13 +1144,17 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
       if (this.fsParams.type === 'local') { // above temp deletion is actual deletion
         cb(null, { success: true })
       } else {
-        this.fs.unlink(pathToRead, function (err) {
-          if (err) {
-            cb(err)
-          } else {
-            cb(null, { success: true })
-          }
-        })
+        try {
+          this.fs.unlink(pathToRead, function (err) {
+            if (err) {
+              cb(err)
+            } else {
+              cb(null, { success: true })
+            }
+          })
+        } catch (err) {
+          cb(err)
+        }
       }
     }
 
@@ -1072,30 +1171,37 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
         // fdlog('sendUserFile - sending from local ' + partialPath)
         res.sendFile(localpath)
       } else if (this.fs.getFileToSend) { // getFileToSend will be missing if a localfile is actually missing
-        this.fs.getFileToSend(partialPath, function (err, streamOrFile) {
-          if (err) {
-            felog('sendUserFile', 'err in sendUserFile for ', partialPath)
-            res.status(404).send('file not found!')
-            res.end()
-          } else if (streamOrFile.pipe) { // it is a stream
-            streamOrFile.pipe(res)
-            localCheckExistsOrCreateUserFolderSync(partialPath, true)
-            streamOrFile.pipe(fs.createWriteStream(localpath))
-            self.cache.userfiles[endpath] = { fsLastAccessed: new Date().getTime() }
-          } else { // it is a file
-            res.send(streamOrFile)
-            localCheckExistsOrCreateUserFolderSync(partialPath, true)
-            fs.writeFile(localpath, streamOrFile, null, function (err, name) {
-              if (err) {
-                felog('sendUserFile', ' -  error putting back in cache ' + partialPath)
-                // console.log todo - if the file is partially written, this can lead to errors - should the file be deleted locally?
-              } else {
-                // fdlog('sendAppFile -  SUCCESS putting back in cache ' + partialPath)
-                self.cache.userfiles[endpath] = { fsLastAccessed: new Date().getTime() }
-              }
-            })
-          }
-        })
+        try {
+          this.fs.getFileToSend(partialPath, null, function (err, streamOrFile) {
+            if (err) {
+              felog('sendUserFile', 'err in sendUserFile for ', partialPath)
+              res.status(404).send('file not found!')
+              res.end()
+            } else if (streamOrFile.pipe) { // it is a stream
+              streamOrFile.pipe(res)
+              localCheckExistsOrCreateUserFolderSync(partialPath, true)
+              streamOrFile.pipe(fs.createWriteStream(localpath))
+              self.cache.userfiles[endpath] = { fsLastAccessed: new Date().getTime() }
+            } else { // it is a file
+              res.send(streamOrFile)
+              localCheckExistsOrCreateUserFolderSync(partialPath, true)
+              fs.writeFile(localpath, streamOrFile, null, function (err, name) {
+                if (err) {
+                  felog('sendUserFile', ' -  error putting back in cache ' + partialPath)
+                  // console.log todo - if the file is partially written, this can lead to errors - should the file be deleted locally?
+                } else {
+                  // fdlog('sendAppFile -  SUCCESS putting back in cache ' + partialPath)
+                  self.cache.userfiles[endpath] = { fsLastAccessed: new Date().getTime() }
+                }
+              })
+            }
+          })
+        } catch (err) {
+          felog('err in sendUserFile')
+          felog('sendUserFile', 'err in sendUserFile 2 for ', partialPath)
+          res.status(404).send('file error')
+          res.end()
+        }
       } else {
         res.status(404).send('file not found!')
         res.end()
@@ -1106,7 +1212,12 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
       ds.removeAllAppFiles = function (options = {}, cb) {
         const pathToDelete = userRootFolder + '/' + this.owner + '/apps/' + this.appName
         // fdlog('ds.removeAllAppFiles  ' + pathToDelete)
-        this.fs.removeFolder(pathToDelete, cb)
+        try {
+          this.fs.removeAllAppFiles(pathToDelete, cb)
+        } catch (e) {
+          felog('err in removeAllAppFiles removeAllAppFiles')
+          cb(e)
+        }
       }
       ds.writeToAppFiles = function (endpath, content, options = {}, cb) {
         const pathToWrite = userRootFolder + '/' + this.owner + '/apps/' + this.appName + '/' + endpath
@@ -1116,24 +1227,34 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
         if (!self.cache.appfiles[endpath]) self.cache.appfiles[endpath] = {}
 
         // fdlog('ds.writeToAppFiles  ' + pathToWrite)
-        this.fs.writeFile(pathToWrite, content, options, function (err, name) {
-          if (err) {
-            cb(err)
-          } else {
-            fs.writeFile(ROOT_DIR + pathToWrite, content, options, function (err, name) {
-              if (err) felog('writeToAppFiles', 'Error duplicating file in local drive for writeToAppFiles for ', this.owner, 'path ', pathToWrite, err)
-              if (!err) self.cache.appfiles[endpath] = { fsLastAccessed: new Date().getTime() }
-              cb(null, name)
-            })
-          }
-        })
+        try {
+          this.fs.writeFile(pathToWrite, content, options, function (err, name) {
+            if (err) {
+              cb(err)
+            } else {
+              fs.writeFile(ROOT_DIR + pathToWrite, content, options, function (err, name) {
+                if (err) felog('writeToAppFiles', 'Error duplicating file in local drive for writeToAppFiles for ', this.owner, 'path ', pathToWrite, err.message)
+                if (!err) self.cache.appfiles[endpath] = { fsLastAccessed: new Date().getTime() }
+                cb(null, name)
+              })
+            }
+          })
+        } catch (err) {
+          felog('err in writefile')
+          cb(err)
+        }
       }
       ds.folderSize = function (folder, cb) {
         // needs to be for apps and for files
         if (['apps', 'files', 'db'].includes(folder)) {
           const pathToRead = userRootFolder + '/' + this.owner + '/' + folder + '/' + this.appName
           if (this.fs.size) {
-            this.fs.size(pathToRead, cb)
+            try {
+              this.fs.size(pathToRead, cb)
+            } catch (err) {
+              felog('err in folderSize')
+              cb(err)
+            }
           } else {
             cb(new Error('No size function for ' + this.fsParams.type))
           }
@@ -1145,37 +1266,47 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
 
     const initUserDirectories = function (ds, owner, cb) {
       fdlog('going to init directorries for user ' + userRootFolder + '/' + owner + '/apps/' + appName)
-      ds.fs.mkdirp(userRootFolder + '/' + owner + '/apps/' + appName, function (err) {
-        if (err) {
-          cb(err)
-        } else {
-          ds.fs.mkdirp((userRootFolder + '/' + owner + '/files/' + appName), function (err) {
-            if (err) {
-              cb(err)
-            } else {
-              ds.fs.mkdirp((userRootFolder + '/' + owner + '/db/' + appName), function (err) {
-                if (err) {
-                  cb(err)
-                } else {
-                  cb(err, ds)
-                }
-              })
-            }
-          })
-        }
-      })
+      try {
+        ds.fs.mkdirp(userRootFolder + '/' + owner + '/apps/' + appName, function (err) {
+          if (err) {
+            cb(err)
+          } else {
+            ds.fs.mkdirp((userRootFolder + '/' + owner + '/files/' + appName), function (err) {
+              if (err) {
+                cb(err)
+              } else {
+                ds.fs.mkdirp((userRootFolder + '/' + owner + '/db/' + appName), function (err) {
+                  if (err) {
+                    cb(err)
+                  } else {
+                    cb(err, ds)
+                  }
+                })
+              }
+            })
+          }
+        })
+      } catch (err) {
+        felog('err in initUserDirectories')
+        cb(err)
+      }
     }
 
     if (ds.fs.initFS) {
-      ds.fs.initFS(function (err) {
-        if (err) felog('ds.initAppFS', ' err initing fs', err)
-        if (options && options.getRefreshToken) {
-          // fdlog('ds.initAppFS', ' retururns ds.fs - ds.fs.credentials ', ds.fs.credentials, 'ds.credentials:', ds.credentials)
-          callback(null, ds)
-        } else {
-          initUserDirectories(ds, userDs.owner, callback)
-        }
-      })
+      try {
+        ds.fs.initFS(function (err) {
+          if (err) felog('ds.initAppFS', ' err initing fs', err.message)
+          if (options && options.getRefreshToken) {
+            // fdlog('ds.initAppFS', ' retururns ds.fs - ds.fs.credentials ', ds.fs.credentials, 'ds.credentials:', ds.credentials)
+            callback(null, ds)
+          } else {
+            initUserDirectories(ds, userDs.owner, callback)
+          }
+        })
+      } catch (err) {
+        felog('err in initfs')
+        callback(err)
+      }
     } else {
       initUserDirectories(ds, userDs.owner, callback)
     }
@@ -1257,7 +1388,7 @@ const localCheckExistsOrCreateUserFolderSync = function (aPath, removeEndFile) {
 
   mkDir()
 
-  function mkDir() {
+  function mkDir () {
     const dir = dirs.shift()
     if (dir === '') { // If directory starts with a /, the first path will be th root user folder.
       root = path.normalize(ROOT_DIR) // 2022 rem + pathSep

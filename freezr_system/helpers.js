@@ -8,11 +8,14 @@ const path = require('path')
 exports.RESERVED_FIELD_LIST = ['_id', '_date_created', '_date_modified','_accessible','_publicid','_date_accessibility_mod'];
 // ,'_date_published' removed as need to trust apps to set it
 const RESERVED_IDS = ['fradmin', 'admin', 'public', 'test', 'freezr', 'freezrdb']
+exports.RESERVED_IDS = RESERVED_IDS
 const MAX_USER_NAME_LEN = 25
 const RESERVED_COLLECTION_NAMES = ['field_permissions', 'accessible_objects'] // 'files' s also reserved but can write to it
 // const MAX_PP_NAME_LEN = 30
 
-exports.system_apps = ['info.freezr.account', 'info.freezr.admin', 'info.freezr.public', 'info.freezr.permissions', 'info.freezr.posts', 'info.freezr.logs']
+// old exports.system_apps = ['info.freezr.account', 'info.freezr.admin', 'info.freezr.public', 'info.freezr.permissions', 'info.freezr.posts', 'info.freezr.logs', 'dev.ceps']
+exports.system_apps = ['info.freezr', 'dev.ceps']
+    // info.freezr.account.app_list
 exports.SYSTEM_ADMIN_COLLS = ['users', 'permissions', 'visitAuthFailures', 'visitLogs', 'params', 'oauth_permissions', 'app_tokens']
 exports.SYSTEM_ADMIN_APPTABLES = exports.SYSTEM_ADMIN_COLLS.map(coll => { return ('info_freezr_admin_' + coll) })
 
@@ -32,13 +35,12 @@ exports.permitted_types = {
 }
 
 exports.is_system_app = function (appName) {
-  if (!appName) console.warn('Asking is_system_app for NULL APP')
   if (!appName) return false
   let ret = false
   appName = appName.replace(/\./g, '_')
   exports.system_apps.forEach((item, i) => {
     item = item.replace(/\./g, '_')
-    if (item === appName || exports.startsWith(appName, item)) ret = true
+    if (exports.startsWith(appName, item)) ret = true
   })
   return ret
 }
@@ -49,7 +51,7 @@ exports.valid_appName = function (appName) {
   if (appName.length > MAX_USER_NAME_LEN) return false
   if (!exports.valid_filename(appName)) return false
   if (exports.starts_with_one_of(appName, ['.', '-', '\\', 'system'])) return false
-  if (exports.system_apps.indexOf(appName) > -1) return false
+  if (exports.is_system_app(appName)) return false
   if (appName.indexOf('_') > -1) return false
   if (appName.indexOf(' ') > -1) return false
   if (appName.indexOf('$') > -1) return false
@@ -107,15 +109,15 @@ exports.valid_collection_name = function(collection_name,is_file_record)  {
 
     exports.send_failure = function(res, err, system_file, version, theFunction ) {
         console.warn("* * * ERROR *** : Helpers send failure in system_file "+system_file+" function: "+theFunction+"  error"+JSON.stringify( err));
-        var code = (typeof err == 'string')? err :(err.code ? err.code : err.name);
-        var message = (typeof err == 'string')? err :(err.message ? err.message : code);
+        var code = (typeof err == 'string')? err :(err?.code ? err.code : (err?.name || 'unknows err'));
+        var message = (typeof err == 'string')? err :(err?.message ? err.message : code);
         res.writeHead(200, { "Content-Type" : "application/json" });
-        res.end(JSON.stringify({ error: err.message, code:err.code }) /*+ "\n"*/);
+        res.end(JSON.stringify({ error: message, code }) /*+ "\n"*/);
     }
 
 // ERRORS
     exports.error = function (code, message) {
-        var e = new Error(message);
+        var e = new Error(message || code);
         e.code = code;
         return e;
     };
@@ -172,12 +174,12 @@ exports.valid_collection_name = function(collection_name,is_file_record)  {
         res.redirect('/account/home?error=true&error_type=internal&file='+system_file+"&msg="+message)
     };
     exports.missing_data = function (what, system_file, version, theFunction) {
-        console.warn ("WARNING - Missing Data err in system_file "+system_file+" function: "+theFunction+" missing:"+what);
+        console.warn("WARNING - Missing Data err in system_file "+system_file+" function: "+theFunction+" missing:"+what);
         return exports.error("missing_data",
                              "You must include " + what);
     }
     exports.invalid_data = function (what, system_file, version, theFunction) {
-        console.warn ("WARNING - Invalid Data err in system_file "+system_file+" function: "+theFunction+" missing:"+what);
+        console.warn("WARNING - Invalid Data err in system_file "+system_file+" function: "+theFunction+" missing:"+what);
         return exports.error("invalid_data",
                              "Data is invalid: " + what);
     }
@@ -320,10 +322,10 @@ exports.valid_collection_name = function(collection_name,is_file_record)  {
 
 // Other..
 var reduceToUnique = function(aList) {
-    returnList = []
+  returnList = []
   aList.forEach(function(el){
-        if(returnList.indexOf(el)<0) returnList.push(el);
-  });
+    if(returnList.indexOf(el)<0) returnList.push(el);
+  })
   return returnList
 }
 function getWords(anObject) {
@@ -348,16 +350,16 @@ function getWords(anObject) {
   }
 }
 exports.getUniqueWords = function (anObject,theFields){
- // if theFields is null, all items are counted. if not only specific theFields of the object at the top level (and it has to be an object)
- allWords = [];
- if (Array.isArray(anObject) || typeof anObject != "object" || !theFields) {
-    return getWords(anObject)
- } else {
-   theFields.forEach(function(aField) {
+  // if theFields is null, all items are counted. if not only specific theFields of the object at the top level (and it has to be an object)
+  let allWords = []
+  if (Array.isArray(anObject) || typeof anObject != "object" || !theFields) {
+    return reduceToUnique(getWords(anObject))
+  } else {
+    theFields.forEach(function(aField) {
       allWords = allWords.concat(getWords(anObject[aField]))
     });
-  return reduceToUnique(allWords);
-    }
+    return reduceToUnique(allWords);
+  }
 }
 exports.removeLastpathElement = function (statedPath, depth) {
   if (!depth) depth = 1

@@ -57,11 +57,20 @@ img {
 .outer {
 	font-family: "Lucida Sans Unicode", "Helvetica Neue", "Arial", sans-serif;
 	margin:0 auto;
-	background-image:url(/app_files/public/info.freezr.public/public/static/freezr_texture.png);
+	background-image:url(/app_files/@public/info.freezr.public/public/static/freezr_texture.png);
 	background-repeat: repeat;
-	max-width: 800px;
-	padding:15px;
+	max-width: 650px;
 	padding-bottom: 100px;
+}
+@media screen and (max-width: 650px) {
+  .outer {
+    padding:15px 10px;
+  }
+}
+@media screen and (min-width: 650px) {
+  .outer {
+    padding:15px 100px;
+  }
 }
 
 .freezr_public_genericCardOuter {
@@ -95,4 +104,6 @@ img {
 	font-size: 8px;
 	border-bottom-right-radius: 5px;
 	cursor: pointer;
+	background-color: white;
+	opacity: 0.75;
 }

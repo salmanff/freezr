@@ -1,6 +1,6 @@
 // list_users
 
-/* global freezr */
+/* global freezr, freezerRestricted */
 
 freezr.initPageScripts = function () {
   document.onclick = function (e) {
@@ -12,6 +12,10 @@ freezr.initPageScripts = function () {
 }
 
 const getUsage = function (target) {
-  console.log(target.id)
-  alert('got it')
+  const options = { user: target.id.split('_')[2] }
+  freezerRestricted.connect.read('/v1/admin/data/app_resource_use.json', options, function (err, resources) {
+    console.log({ err, resources })
+    if (err) alert('error conecting to server ' + err.message)
+    target.previousElementSibling.innerText = resources?.totalSize ? ((Math.round(resources?.totalSize / 100000) / 10) + 'MB') : ' - '
+  })
 }

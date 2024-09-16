@@ -21,7 +21,7 @@ To add upload options:
 */
 
 const retrieve_COUNT = 500;
-const FILE_SIZE_MAX = 2000000;
+const FILE_SIZE_MAX = 5000000;
 
 var dl = {  // download file structure
 			'meta': {

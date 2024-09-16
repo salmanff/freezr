@@ -2,7 +2,7 @@
 
 /* global freezr */
 
-import { showPermsIn, changePermission, getPermSentence, ACCEPT } from '/app_files/public/info.freezr.account/AppSettings.js'
+import { showPermsIn, changePermission, getPermSentence, ACCEPT } from '/app_files/@public/info.freezr.account/AppSettings.js'
 
 freezr.initPageScripts = function () {
   let confirmObject = {}

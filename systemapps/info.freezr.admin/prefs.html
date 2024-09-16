@@ -25,31 +25,17 @@ options:
     <form name="changePrefs" id="changePrefs">
       <div id="errorBox" class="errorBox"></div>
       <dl>
-        <dt><input type="checkbox" name="allowSelfReg" id="allowSelfRegId" value="allowSelfReg" {{#allowSelfReg}}checked{{/allowSelfReg}}>Allow ANYONE to create an account on this server?</dt>
+
+        <dt><h3>Logging:</h3></dt>
+        <dt><input type="checkbox" name="logVisits" id="logVisitsId" value="logVisits" {{#log_visits}}checked{{/log_visits}}>Keep log of user visits to your server. (These can be found <a href="/admin/visits">here</a>.)</dt>
 
         <br>
 
-        <dt><input type="checkbox" name="allowAccessToSysFsDb" id="allowAccessToSysFsDbId" value="allowAccessToSysFsDb" {{#allowAccessToSysFsDb}}checked{{/allowAccessToSysFsDb}}>Allow other users of this server to use your file system and database to store their data.</dt>
-        <br>
-        <dt class="changeNormal">Default Limit in MBs for each user:</dt>
-        <dd class="changeNormal"><input size="30" id="selfRegDefaultMBStorageLimit" name="selfRegDefaultMBStorageLimit" value="{{selfRegDefaultMBStorageLimit}}"/></dd>
-
-        <br>
-        <br>
-
-        <dt><input type="checkbox" name="useIdsAsDbName" id="useIdsAsDbNameId" value="useIdsAsDbName" {{#useIdsAsDbName}}checked{{/useIdsAsDbName}}>Use user Id's as database name (Mongo Only)</dt>
-        <br>
-        <br>
-
-        <dt><input type="checkbox" name="logVisits" id="logVisitsId" value="logVisits" {{#log_visits}}checked{{/log_visits}}>Keep log of user visits</dt>
-
-        <br>
-
-        <dt><b>Public Landing Page:</b></dt>
+        <dt><h3>Public Landing Page:</h3></dt>
         <dt><input type="checkbox" name="redirectPublic" id="redirectPublicId" value="redirectPublic" {{#redirect_public}}checked{{/redirect_public}}>Redirect non-logged-in visitors to a publicly accessible landing page</dt>
 
-        <dt class="changeNormal">Enter a default public url:</dt>
-        <dd class="changeNormal"><input size="30" id="defaultLandingUrl" name="defaultLandingUrl" value="{{ public_landing_page }}"/></dd>
+        <dt class="marginLeft">Enter a default public url:</dt>
+        <dd><input size="30" id="defaultLandingUrl" name="defaultLandingUrl" {{#public_landing_page}}value="{{public_landing_page}}"{{/public_landing_page}}/></dd>
 
         <span style="display:none" >
           <dt >&nbsp; &nbsp; &nbsp; Specific app public page for you (optional):</dt>
@@ -60,6 +46,24 @@ options:
           </dd>
         </span>
 
+        <br>
+        <dt><h3>Other users on your server:</h3></dt>
+        <dt><input type="checkbox" name="allowSelfReg" id="allowSelfRegId" value="allowSelfReg" {{#allowSelfReg}}checked{{/allowSelfReg}}>Allow ANYONE to create an account on this server on a self-serve basis? (You can always add specific users to your server)</dt>
+        <div id="selfRegOptionsArea" style="display:none">
+          <dt><input type="checkbox" name="allowAccessToSysFsDb" id="allowAccessToSysFsDbId" value="allowAccessToSysFsDb" {{#allowAccessToSysFsDb}}checked{{/allowAccessToSysFsDb}}>Allow other users of this server to use your file system and database to store their data.</dt>
+          <dt class="marginLeft">Default Limit in MBs for each user:</dt>
+          <dd><input size="30" id="selfRegDefaultMBStorageLimit" name="selfRegDefaultMBStorageLimit" {{#selfRegDefaultMBStorageLimit}}value="{{selfRegDefaultMBStorageLimit}}"{{/selfRegDefaultMBStorageLimit}}/></dd>
+         <br>
+        </div>
+        <div id="mongoArea">
+          <br>
+          <div id="mongotextArea"></div>
+          <!-- These are now hidden as they can no longer be changed by the user here - they can only be set with process.env variables -->
+          <dt style="display:none"><input type="checkbox" name="useUserIdsAsDbName" id="useUserIdsAsDbNameId" value="useUserIdsAsDbName" {{#useUserIdsAsDbName}}checked{{/useUserIdsAsDbName}}>Store each user's collections under a database with their name. (Mongo Only / Incompatible with unified collections)</dt>
+          <dt style="display:none"><input type="checkbox" name="useUnifiedCollection" id="useUnifiedCollectionId" value="useUnifiedCollection" {{#useUnifiedCollection}}checked{{/useUnifiedCollection}}>Use one unified collection for all user data ? (Mongo Only - this can help if you expect lots of users to register on your server.)</dt>
+        </div>
+        <br>
+
         <div>
           <br>
           <dt class="changeNormal">re-enter admin User Name</dt>
@@ -69,13 +73,13 @@ options:
         </div>
 
         <br>
+        <br>
 
-        <dd ><input id="submitButt" class="freezer_dialogue_topTitle" style="padding-left: 60px; cursor: pointer;" type="submit" value="Update Preferences"/></dd>
+        <dd style="text-align: center"><input id="submitButt" class="freezer_dialogue_topTitle" style="padding-left: 60px; padding-bottom: 10px; cursor: pointer;" type="submit" value="Update Preferences"/></dd>
       </dl>
     </form>
 
     <br>
-    <a class="freezer_dialogueTitle setup" style="padding-left: 60px; cursor: pointer;" href="/">Go on to freezr's home page</a>
 
   </div>
 </div>

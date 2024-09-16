@@ -18,6 +18,7 @@ freezr.initPageScripts = function () {
       const theInfo = {
         register_type: 'normal',
         isAdmin: (document.getElementById('isAdminId').checked),
+        isPublisher: (document.getElementById('isPublisherId').checked),
         useSysFsDb: (document.getElementById('useSysFsDbId').checked),
         email_address: document.getElementById('email_address').value,
         user_id: userId,

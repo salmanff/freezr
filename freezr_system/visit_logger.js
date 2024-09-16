@@ -94,9 +94,13 @@ exports.addNewFailedAuthAttempt = function (dsManager, req, options) {
   if (!visitLogs.authFailure[accessPt].list) visitLogs.authFailure[accessPt].list = []
   visitLogs.authFailure[accessPt].list.push(failedAuthRecord(req, options))
   fdlog('added to list visitlog length is now ', visitLogs.authFailure[accessPt].list.length)
-  setTimeout(() => {
-    cleanUpVisitAuthFailures(dsManager, { accessPt })
-  }, 5)
+  if (!req.freezrPrefs) {
+    console.warn('failure to add freezr in addNewFailedAuthAttempt for url', req.originalUrl)
+  } else {
+    setTimeout(() => {
+      cleanUpVisitAuthFailures(dsManager, { accessPt, freezrPrefs: req.freezrPrefs })
+    }, 5)
+  }
   return false
 }
 
@@ -105,6 +109,7 @@ exports.recordLoggedInVisit = function (dsManager, req, options) {
   const userId = req.session?.logged_in_user_id || options?.userId || 'unknown'
   const visitType = options?.visitType || 'unknown'
   const path = req.originalUrl.split('?').shift().replace(/\./g, '_')
+  // onsole.log('recordLoggedInVisit ', { userId, visitType })
   if (!visitLogs.loggedInUsers) visitLogs.loggedInUsers = {}
   if (!visitLogs.loggedInUsers[userId]) visitLogs.loggedInUsers[userId] = { paths: {}, pages: {}, files: {}, apis: {}, unknown: {} }
   if (!visitLogs.loggedInUsers[userId].paths[path]) visitLogs.loggedInUsers[userId].paths[path] = 0
@@ -125,7 +130,7 @@ exports.recordLoggedInVisit = function (dsManager, req, options) {
   fdlog('recordLoggedInVisit ' + appName + ' fot ' + req.originalUrl + ': visitType ' + visitType + ' req.freezrTokenInfo' + req.freezrTokenInfo + '  req.params.app_name ' + req.params.app_name)
 
   setTimeout(() => {
-    cleanUpLoggedInLogVisits(dsManager)
+    cleanUpLoggedInLogVisits(dsManager, { freezrPrefs: req.freezrPrefs })
   }, 5)
   return false
 }
@@ -146,7 +151,7 @@ const cleanUpVisitAuthFailures = function (dsManager, options) {
       accessPt,
       list: fails.list
     }
-    dsManager.getorInitDb(AUTH_FAILURE_AOC, {}, function (err, logDb) {
+    dsManager.getorInitDb(AUTH_FAILURE_AOC, { freezrPrefs: options.freezrPrefs }, function (err, logDb) {
       if (err) {
         console.error('error getting log_aoc to record logs')
       } else {
@@ -176,7 +181,7 @@ const cleanUpLoggedInLogVisits = function (dsManager, options) {
   if (!timers.visits.lastSave) timers.visits.lastSave = new Date().getTime()
   if (!timers.visits.saveWip && (options?.forceSave || timers.visits.lastSave + MAX_TIME_BEFORE_SAVE < new Date().getTime())) {
     timers.visits.saveWip = true
-    dsManager.getorInitDb(LOGGEDIN_LOG_VIST_AOC, {}, function (err, logDb) {
+    dsManager.getorInitDb(LOGGEDIN_LOG_VIST_AOC, options, function (err, logDb) {
       if (err) {
         console.error('Error getting LOGGEDIN_LOG_VIST_AOC to record logs', err)
       } else {
@@ -242,7 +247,7 @@ function dateString (time) {
 function isSysFile(url) {
   return FREEZR_SYS_FILES.indexOf(url)>-1
 }
-const FREEZR_SYS_FILES = ['/app_files/public/info.freezr.public/freezr_style.css', '/app_files/public/info.freezr.public/freezr_core.css', '/app_files/public/info.freezr.public/freezr_core.js', '/app_files/public/info.freezr.public/public/static/freezr_texture.png', '/app_files/public/info.freezr.public/static/freezer_log_top.png', '/favicon.ico']
+const FREEZR_SYS_FILES = ['/app_files/@public/info.freezr.public/freezr_style.css', '/app_files/@public/info.freezr.public/freezr_core.css', '/app_files/@public/info.freezr.public/freezr_core.js', '/app_files/@public/info.freezr.public/public/static/freezr_texture.png', '/app_files/@public/info.freezr.public/static/freezer_log_top.png', '/favicon.ico']
 function getExternalReferer (req) {
   if (!req.header('Referer')) return null;
   //onsole.log("ref "+req.header('Referer'));

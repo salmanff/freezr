@@ -1,7 +1,7 @@
 // Core freezr API - v0.0.144 - 2023-01
 
 /* global freezrMeta */ // from html or from freezr_pre_definitions (freezr_app_init)
-/* global FormData, XMLHttpRequest, confirm */ // from system
+/* global FormData, confirm */ // from system
 
 if (!freezrMeta) console.warn('Need to define freezrMeta in the app before running freezr_core.js')
 
@@ -25,9 +25,9 @@ const freezerRestricted = {
   utils: {}
 }
 
-freezr.onFreezrMenuClose = function(hasChanged) { } // this is called when freezr menu is closed.
+freezr.onFreezrMenuClose = function (hasChanged) { } // this is called when freezr menu is closed.
 
-freezr.utils.getOpCbFrom = function(optionsAndCallback) {
+freezr.utils.getOpCbFrom = function (optionsAndCallback) {
   if (!optionsAndCallback || optionsAndCallback.length === 0) return [null, null]
   const callback = optionsAndCallback[optionsAndCallback.length - 1]
   const options = optionsAndCallback.length > 1 ? (optionsAndCallback[0] || []) : []
@@ -36,7 +36,7 @@ freezr.utils.getOpCbFrom = function(optionsAndCallback) {
 }
 
 // db Functions - data base related functions - to read or write
-freezr.ceps.create = function(data, ...optionsAndCallback) {
+freezr.ceps.create = function (data, ...optionsAndCallback) {
   // write to the database
   // options:
   //  app_table or collection (in which case the app is assumed to be freezrMeta.appName app_table )
@@ -53,7 +53,7 @@ freezr.ceps.create = function(data, ...optionsAndCallback) {
     freezerRestricted.connect.send(url, data, callback, 'POST', 'application/json', writeOptions)
   }
 }
-freezr.feps.create = function(data, ...optionsAndCallback) {
+freezr.feps.create = function (data, ...optionsAndCallback) {
   // non ceps options:
   //  data_object_id (ignored if updateRecord)
   //   upsert
@@ -70,7 +70,7 @@ freezr.feps.create = function(data, ...optionsAndCallback) {
     freezerRestricted.connect.send(url, data, callback, 'POST', 'application/json', writeOptions)
   }
 }
-freezr.feps.upload = function(file, options, callback) {
+freezr.feps.upload = function (file, options, callback) {
   // upload a file and record it in the database
   // options can be: data (a json of data related to file) and updateRecord
   // and file specific ones: targetFolder, fileName, doNotOverWrite
@@ -94,7 +94,7 @@ freezr.feps.upload = function(file, options, callback) {
     callback(new Error('No file to upload'))
   }
 }
-freezr.ceps.getById = function(dataObjectId, options, callback) {
+freezr.ceps.getById = function (dataObjectId, options, callback) {
   // get a specific object by object id
   // options:
   //  app_table or collection (in which case the app is assumed to be freezrMeta.appName app_table )
@@ -109,7 +109,7 @@ freezr.ceps.getById = function(dataObjectId, options, callback) {
     freezerRestricted.connect.read(url, null, callback, readOptions)
   }
 }
-freezr.feps.getById = function(dataObjectId, options = {}, callback) {
+freezr.feps.getById = function (dataObjectId, options = {}, callback) {
   // additional feps options: permission_name and userId
   if (!dataObjectId) {
     callback(new Error('No id sent.'))
@@ -123,7 +123,7 @@ freezr.feps.getById = function(dataObjectId, options = {}, callback) {
     freezerRestricted.connect.read(url, null, callback, readOptions)
   }
 }
-freezr.ceps.getquery = function(...optionsAndCallback) {
+freezr.ceps.getquery = function (...optionsAndCallback) {
   // queries db
   // options:
   //  app_table or collection (in which case the app is assumed to be freezrMeta.appName app_table )
@@ -150,7 +150,7 @@ freezr.ceps.getquery = function(...optionsAndCallback) {
   const readOptions = { appToken: (options.appToken || null) }
   freezerRestricted.connect.read(url, options.q, callback, readOptions)
 }
-freezr.feps.postquery = function(...optionsAndCallback) {
+freezr.feps.postquery = function (...optionsAndCallback) {
   // additional feps options:
   //   permission_name, userId (which is the requestee id)
   //   appName can be added optionally to check against the manifest permission (which also has it)
@@ -174,7 +174,7 @@ freezr.feps.postquery = function(...optionsAndCallback) {
   if (options.skip) writeOptions.skip = options.skip
   freezerRestricted.connect.send(url, options, callback, 'POST', 'application/json', writeOptions)
 }
-freezr.ceps.update = function(data = {}, ...optionsAndCallback) {
+freezr.ceps.update = function (data = {}, ...optionsAndCallback) {
   // simple record update, assuming data has a ._id object
   // options:
   //    app_table or collection (in which case the app is assumed to be freezrMeta.appName.app_table )
@@ -188,7 +188,7 @@ freezr.ceps.update = function(data = {}, ...optionsAndCallback) {
     freezerRestricted.connect.send(url, data, callback, 'PUT', 'application/json', writeOptions)
   }
 }
-freezr.feps.update = function(data = {}, ...optionsAndCallback) {
+freezr.feps.update = function (data = {}, ...optionsAndCallback) {
   // additional feps options:
   //   setkeys - if true then changes only the keys in the object. (works with one _id)
   //   options.q is the query which is sent, for changing a number of items (acts as if it is setkeys)
@@ -210,7 +210,7 @@ freezr.feps.update = function(data = {}, ...optionsAndCallback) {
     freezerRestricted.connect.send(url, data, callback, 'PUT', 'application/json', writeOptions)
   }
 }
-freezr.ceps.delete = function(dataObjectId, options, callback) {
+freezr.ceps.delete = function (dataObjectId, options, callback) {
   // simple record update, assuming data has a ._id object
   // options:
   //    app_table or collection (in which case the app is assumed to be freezrMeta.appName app_table )
@@ -225,7 +225,7 @@ freezr.ceps.delete = function(dataObjectId, options, callback) {
     freezerRestricted.connect.send(url, null, callback, 'DELETE', 'application/json', writeOptions)
   }
 }
-freezr.feps.delete = function(idOrQuery, options, callback) {
+freezr.feps.delete = function (idOrQuery, options, callback) {
   // simple record update, assuming data has a ._id object
   // options:
   //    app_table or collection (in which case the app is assumed to be freezrMeta.appName app_table )
@@ -241,7 +241,7 @@ freezr.feps.delete = function(idOrQuery, options, callback) {
     freezerRestricted.connect.send(url, body, callback, 'DELETE', 'application/json', writeOptions)
   }
 }
-freezr.feps.getByPublicId = function(dataObjectId, options, callback) {
+freezr.feps.getByPublicId = function (dataObjectId, options, callback) {
   // get a specific public object by its object id
   // manifest needs to be set up for this and item to have been permissioned and tagged as public
   if (!dataObjectId) { callback(new Error('No id sent.')) }
@@ -250,7 +250,7 @@ freezr.feps.getByPublicId = function(dataObjectId, options, callback) {
   const readOptions = { appToken: (options.appToken || null) }
   freezerRestricted.connect.read(url, null, callback, readOptions)
 }
-freezr.feps.publicquery = function(options, callback) {
+freezr.feps.publicquery = function (options, callback) {
   // options can be: app_name, skip, count, userId, pid
   if (!options) options = {}
   const url = (options.host || '') + '/v1/pdbq'
@@ -264,16 +264,16 @@ freezr.feps.publicquery = function(options, callback) {
 }
 
 // Permissions and file permissions
-freezr.perms.getAppPermissions = function(callback) {
+freezr.perms.getAppPermissions = function (callback) {
   // gets a list of permissions granted - this is mainly called on my freezr_core, but can also be accessed by apps
   const url = '/ceps/perms/get'
   freezerRestricted.connect.read(url, null, callback)
 }
 // Non-CEPS
-freezr.perms.isGranted = function(permissionName, callback) {
+freezr.perms.isGranted = function (permissionName, callback) {
   // see if a permission has been granted by the user - callback(isGranted)
   const url = '/v1/permissions/getall/' + freezrMeta.appName
-  freezerRestricted.connect.read(url, null, function(err, ret) {
+  freezerRestricted.connect.read(url, null, function (err, ret) {
     let isGranted = false
     if (err) {
       callback(err)
@@ -285,7 +285,7 @@ freezr.perms.isGranted = function(permissionName, callback) {
     callback(isGranted)
   })
 }
-freezr.perms.shareRecords = function(idOrQuery, options, callback) {
+freezr.perms.shareRecords = function (idOrQuery, options, callback) {
   // gives specific people access to a specific object
   // permissionName is the permissionName under which the field is being
 
@@ -301,12 +301,12 @@ freezr.perms.shareRecords = function(idOrQuery, options, callback) {
         'table_id': app_name (defaults to what is in the permission definition - Is requried if more than one table in the permission
         'action': 'grant' or 'deny' (or anything else)
         'grantees': people being granted access (can also put grantee which is converted to a list [grantee])
-        publicid: sets a public id instead of the automated accessible_id
+        publicid: sets a public id instead of the automated accessible_id - such ids have to start with user_id - unless user has admin privelages
         _date_published: sets the publish date
 
         NON CEPS options
         unlisted - for public items that dont need to be lsited separately in the public_records database
-        doNotList - Does appear in the public table but doesnt show up on the ppage query list.
+        doNotList - Does appear in the public table but doesnt show up on the public page query list.
 
         idOrQuery being query is NON-CEPS - ie query_criteria or object_id_list
         idOrQuery can also be null but ONLY for read_all, write_all permissions (2023)
@@ -316,7 +316,7 @@ freezr.perms.shareRecords = function(idOrQuery, options, callback) {
   }
   if (!options.grantees && options.grantee) options.grantees = [options.grantee]
   if (!options.grantees || options.grantees.length < 1 || !Array.isArray(options.grantees) || !options.name) {
-    console.warn({ options })
+    console.warn(' err: options must incude permission name, grantee', { options })
     callback(new Error('must incude permission name, grantee'))
   } else {
     options.grant = (options.action === 'grant')
@@ -332,7 +332,7 @@ freezr.perms.shareRecords = function(idOrQuery, options, callback) {
     freezerRestricted.connect.ask(url, options, callback)
   }
 }
-freezr.perms.shareServableFile = function(id, options, callback) {
+freezr.perms.shareServableFile = function (id, options, callback) {
   // makes a specific file public via shareRecords
   // permissionName is the permissionName under which the field is being
   if (!options) {
@@ -378,7 +378,7 @@ freezr.perms.shareServableFile = function(id, options, callback) {
 //   "table_id": "dev.ceps.privatefeeds.codes",
 //   "permission": "privateCodes"
 // }
-freezr.perms.validateDataOwner = function(options, callback) {
+freezr.perms.validateDataOwner = function (options, callback) {
   // options - data_owner_user table_id permission
   if (!options) options = {}
   options.requestor_user = freezrMeta.userId
@@ -386,24 +386,28 @@ freezr.perms.validateDataOwner = function(options, callback) {
   // if (!options.data_owner_host) options.data_owner_host = freezrMeta.serverAddress
   if (options.data_owner_host) options.requestor_host = freezrMeta.serverAddress
   if (!options.app_id) options.app_id = freezrMeta.appName
-  freezerRestricted.connect.ask('/ceps/perms/validationtoken/set', options, function(err, ret) {
+  freezerRestricted.connect.ask('/ceps/perms/validationtoken/set', options, function (err, ret) {
     options.validation_token = ret ? ret.validation_token : null
+    if (err) {
+      const tosend = { error: err }
+      callback(tosend)
+    } else {
+      const dataOwnerUrl = (options.data_owner_host || '') + '/ceps/perms/validationtoken/validate'
 
-    const dataOwnerUrl = (options.data_owner_host || '') + '/ceps/perms/validationtoken/validate'
-
-    freezerRestricted.connect.read(dataOwnerUrl, options, function(err, ret) {
-      if (err) {
-        const tosend = { error: err }
-        callback(tosend)
-      } else {
-        callback(null, ret)
-      }
-    })
+      freezerRestricted.connect.read(dataOwnerUrl, options, function (err, ret) {
+        if (err) {
+          const tosend = { error: err }
+          callback(tosend)
+        } else {
+          callback(null, ret)
+        }
+      })
+    }
   })
 }
-freezr.ceps.sendMessage = function(toShare = {}, callback) {
-  // toShare needsrecipient_host
-  if (!toShare || !toShare.recipient_host || !toShare.recipient_id ||
+freezr.ceps.sendMessage = function (toShare = {}, callback) {
+  // toShare needs recipient_host only if sending to other server
+  if (!toShare || !toShare.recipient_id ||
     (!toShare.sharing_permission && !toShare.messaging_permission) || !toShare.contact_permission ||
     !toShare.table_id || !toShare.record_id) {
     callback(new Error('incomplete message fields - need al of recipient_host, recipient_id, sharing_permission, contact_permission, table_id, record_id ', { toShare }))
@@ -415,7 +419,7 @@ freezr.ceps.sendMessage = function(toShare = {}, callback) {
     freezerRestricted.connect.ask('/ceps/message/initiate', toShare, callback)
   }
 }
-freezr.ceps.getAppMessages = function(options, callback) {
+freezr.ceps.getAppMessages = function (options, callback) {
   console.log('todo - add getAppMessages')
 }
 // PROMISES create freezr.promise based on above
@@ -424,11 +428,11 @@ Object.keys(freezr.ceps).forEach(aFunc => { freezr.promise.ceps[aFunc] = null })
 Object.keys(freezr.feps).forEach(aFunc => { freezr.promise.feps[aFunc] = null })
 Object.keys(freezr.perms).forEach(aFunc => { freezr.promise.perms[aFunc] = null })
 Object.keys(freezr.promise).forEach(typeO => {
-  Object.keys(freezr.promise[typeO]).forEach(function(freezrfunc) {
-    freezr.promise[typeO][freezrfunc] = function() {
+  Object.keys(freezr.promise[typeO]).forEach(function (freezrfunc) {
+    freezr.promise[typeO][freezrfunc] = function () {
       const args = Array.prototype.slice.call(arguments)
-      return new Promise(function(resolve, reject) {
-        args.push(function(error, resp) {
+      return new Promise(function (resolve, reject) {
+        args.push(function (error, resp) {
           if (error || !resp || resp.error) {
             if (!error) error = resp.error ? resp : new Error('No response from promise')// temp fix todo review
             reject(error)
@@ -445,14 +449,14 @@ const freepr = freezr.promise
 if (freepr.eslinkhack) freepr.eslinthack('cleaned')
 
 // UTILITY Functions
-freezr.utils.updateFileList = function(folderName, callback) { // Currently NOT FUNCTIONAL
+freezr.utils.updateFileList = function (folderName, callback) { // Currently NOT FUNCTIONAL
   // This is for developers mainly. If files have been added to a folder manually, this function reads all the files and records them in the db
   // app.get('/v1/developer/fileListUpdate/:app_name/:source_app_code/:folderName', userDataAccessRights, app_hdlr.updateFileDb)
   const url = '/v1/developer/fileListUpdate/' + freezrMeta.appName + '/' + (folderName ? '/' + folderName : '')
   // onsole.log('fileListUpdate Sending to '+url)
   freezerRestricted.connect.read(url, null, callback)
 }
-freezr.utils.getManifest = function(appName, callback) {
+freezr.utils.getManifest = function (appName, callback) {
   // This is for developers mainly. It retrieves the manifest file and the list of app_tables which haev been used
   // app.get('/v1/developer/manifest/:app_name/:source_app_code',userDataAccessRights, app_handler.getManifest)
   // it returns: {'manifest':manifest, 'app_tables':app_tables}, where app_tables are the app_table names actually used, whether they appear in the manifest or not.
@@ -461,11 +465,11 @@ freezr.utils.getManifest = function(appName, callback) {
   const url = '/v1/developer/manifest?targetApp=' + appName
   freezerRestricted.connect.read(url, null, callback)
 }
-freezr.utils.ping = function(options, callback) {
+freezr.utils.ping = function (options, callback) {
   // pings freezr to get back logged in data
   // options can be password and appName (Not functional)
   const url = '/ceps/ping'
-  freezerRestricted.connect.read(url, options, function(error, resp) {
+  freezerRestricted.connect.read(url, options, function (error, resp) {
     if (error || !resp || resp.error) {
       callback(error || new Error((resp && resp.error) ? resp.error : 'unkown error'))
     } else if (!resp.server_type) {
@@ -475,7 +479,7 @@ freezr.utils.ping = function(options, callback) {
     }
   })
 }
-freezr.utils.getHtml = function(partPath, appName, callback) {
+freezr.utils.getHtml = function (partPath, appName, callback) {
   // Gets an html file on the freezr server
   if (!appName) appName = freezrMeta.appName
   if (!partPath.endsWith('.html') && !partPath.endsWith('.htm')) {
@@ -485,36 +489,36 @@ freezr.utils.getHtml = function(partPath, appName, callback) {
     freezerRestricted.connect.read(htmlUrl, null, callback, { textResponse: true })
   }
 }
-freezr.utils.getAllAppList = function(callback) {
+freezr.utils.getAllAppList = function (callback) {
   freezerRestricted.connect.read('/v1/account/data/app_list.json', null, callback)
 }
-freezr.utils.getPrefs = function(callback) {
+freezr.utils.getPrefs = function (callback) {
   freezerRestricted.connect.read('/v1/account/data/user_prefs.json', null, callback)
 }
-freezr.utils.getAppResourceUsage = function(app, callback) {
+freezr.utils.getAppResourceUsage = function (app, callback) {
   const options = app ? { app_name: app } : null
   freezerRestricted.connect.read('/v1/account/data/app_resource_use.json', options, callback)
 }
 
-freezr.utils.filePathFromName = function(fileName, options) {
+freezr.utils.filePathFromName = function (fileName, options) {
   console.warn('DEPRECTAED filePathFromId')
 }
-freezr.utils.filePathFromId = function(fileId, options) {
+freezr.utils.filePathFromId = function (fileId, options) {
   console.warn('DEPRECTAED filePathFromId')
 }
-freezr.utils.userfile = function(userId, fileName) { return userId + '/' + fileName }
-freezr.utils.setFilePath = function(imgEl, attr, fileId, options) {
+freezr.utils.userfile = function (userId, fileName) { return userId + '/' + fileName }
+freezr.utils.setFilePath = function (imgEl, attr, fileId, options) {
   if (!options) options = {}
   options.requestee_app = options.requestee_app || freezrMeta.appName
   options.permission_name = options.permission_name || 'self'
   options.requestee_user_id = options.requestee_user_id || freezrMeta.userId
   if (!fileId) return null
   if (freezr.utils.startsWith(fileId, '/')) fileId = fileId.slice(1)
-  freezr.utils.getFileToken(fileId, options, function(fileToken) {
+  freezr.utils.getFileToken(fileId, options, function (fileToken) {
     imgEl[attr] = '/feps/userfiles/' + options.requestee_app + '/' + options.requestee_user_id + '/' + fileId + '?fileToken=' + fileToken + (options.permission_name ? ('&permission_name=' + options.permission_name) : '')
   })
 }
-freezr.utils.getFileToken = function(fileId, options, callback) {
+freezr.utils.getFileToken = function (fileId, options, callback) {
   // WIP - to be completed 2019
   // check if exists - if not, check permissions and send back a token and keep a list of tokens
   // return token
@@ -530,7 +534,7 @@ freezr.utils.getFileToken = function(fileId, options, callback) {
     callback(token)
   })
 }
-freezr.utils.refreshFileTokens = function(eltag = 'IMG', attr = 'src') {
+freezr.utils.refreshFileTokens = function (eltag = 'IMG', attr = 'src') {
   const pictList = document.getElementsByTagName(eltag)
   if (pictList.length > 0) {
     const host = window.location.href.slice(0, (window.location.href.slice(8).indexOf('/') + 8))
@@ -544,15 +548,15 @@ freezr.utils.refreshFileTokens = function(eltag = 'IMG', attr = 'src') {
     }
   }
 }
-freezr.utils.publicPathFromId = function(fileId, requesteeApp, userId) {
+freezr.utils.publicPathFromId = function (fileId, requesteeApp, userId) {
   // returns the public file path based on the file id so it can be referred to in html.
   // params are permission_name, requesteeApp
   if (!userId) console.warn('2021-10 breaking change - need to specify userid as userid was disassociated from fileId')
   if (!fileId || !requesteeApp || !userId) return null
   if (freezr.utils.startsWith(fileId, '/')) fileId = fileId.slice(1)
-  return '/publicfiles/' + requesteeApp + '/' + userId + '/' + fileId
+  return '/publicfiles/@' + userId + '/' + requesteeApp + '/' + fileId
 }
-freezr.utils.fileIdFromPath = function(filePath) {
+freezr.utils.fileIdFromPath = function (filePath) {
   // returns the id given a private or public url of a freezr file path // todo - review fix 2023
   if (!filePath) return null
   let parts = filePath.split('/')
@@ -561,7 +565,7 @@ freezr.utils.fileIdFromPath = function(filePath) {
   parts = parts.slice((type === 'private' ? 10 : 6))
   return decodeURI(parts.join('/'))
 }
-freezr.utils.getCookie = function(cname) {
+freezr.utils.getCookie = function (cname) {
   if (freezr.app.isWebBased) {
     const name = cname + '='
     const ca = document.cookie.split(';')
@@ -577,7 +581,7 @@ freezr.utils.getCookie = function(cname) {
   }
   return ''
 }
-freezr.utils.parse = function(dataString) {
+freezr.utils.parse = function (dataString) {
   if (typeof dataString === 'string') {
     try {
       dataString = JSON.parse(dataString)
@@ -587,13 +591,12 @@ freezr.utils.parse = function(dataString) {
   }
   return dataString
 }
-freezr.utils.startsWith = function(longertext, checktext) {
-  if (!checktext || !longertext) { return false } else
-    if (checktext.length > longertext.length) { return false } else {
-      return (checktext === longertext.slice(0, checktext.length))
-    }
+freezr.utils.startsWith = function (longertext, checktext) {
+  if (!checktext || !longertext) return false
+  if (checktext.length > longertext.length) return false
+  return (checktext === longertext.slice(0, checktext.length))
 }
-freezr.utils.longDateFormat = function(aDateNum) {
+freezr.utils.longDateFormat = function (aDateNum) {
   if (!aDateNum || aDateNum + '' === '0') {
     return 'n/a'
   } else {
@@ -606,7 +609,7 @@ freezr.utils.longDateFormat = function(aDateNum) {
     }
   }
 }
-freezr.utils.testCallBack = function(returnJson) {
+freezr.utils.testCallBack = function (returnJson) {
   returnJson = freezerRestricted.utils.parse(returnJson)
   // onsole.log('testCallBack - return json is ',returnJson)
 }
@@ -624,7 +627,7 @@ freezerRestricted.menu = {}
 freezerRestricted.permissions = {}
 
 // CONNECT - BASE FUNCTIONS TO CONNECT TO SERVER
-freezerRestricted.connect.ask = function(url, data, callback, type) {
+freezerRestricted.connect.ask = function (url, data, callback, type) {
   let postData = null
   let contentType = ''
 
@@ -637,7 +640,7 @@ freezerRestricted.connect.ask = function(url, data, callback, type) {
 
   freezerRestricted.connect.send(url, postData, callback, 'POST', contentType)
 }
-freezerRestricted.connect.write = function(url, data, callback, type) {
+freezerRestricted.connect.write = function (url, data, callback, type) {
   let postData = null
   let contentType = ''
 
@@ -649,7 +652,7 @@ freezerRestricted.connect.write = function(url, data, callback, type) {
   }
   freezerRestricted.connect.send(url, postData, callback, 'PUT', contentType)
 }
-freezerRestricted.connect.read = function(url, data, callback, options) {
+freezerRestricted.connect.read = function (url, data, callback, options) {
   // options - textResponse (response is text)
   if (data) {
     const query = []
@@ -660,7 +663,7 @@ freezerRestricted.connect.read = function(url, data, callback, options) {
   }
   freezerRestricted.connect.send(url, null, callback, 'GET', null, options)
 }
-freezerRestricted.connect.send = function(url, postData, callback, method, contentType, options = {}) {
+freezerRestricted.connect.send = function (url, postData, callback, method, contentType, options = {}) {
   if (!callback) callback = freezr.utils.testCallBack
 
   if (options.textResponse) console.warn('fetch with options.textResponse not tested')
@@ -678,7 +681,7 @@ freezerRestricted.connect.send = function(url, postData, callback, method, conte
     }
     if (contentType) headers['Content-Type'] = contentType
     // const overRideSecurity = (!freezr.app.isWebBased && freezrMeta.serverAddress) 
-    async function sendReq(url, postData) { // https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
+    async function sendReq (url, postData) { // https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
       // Default options are marked with *
       const postOptions = { // developer.mozilla.org/en-US/docs/Web/API/Fetch_API/Using_Fetch
         method,
@@ -694,6 +697,7 @@ freezerRestricted.connect.send = function(url, postData, callback, method, conte
       if (response.status === 200) {
         return (options.textResponse ? response.text() : response.json()) // parses JSON response into native JavaScript objects
       } else {
+        console.warn(response)
         const error = new Error(response.statusText)
         if (response.status === 0) error.code = 'noComms'
         if (response.status === 400) error.code = 'noServer'
@@ -712,7 +716,7 @@ freezerRestricted.connect.send = function(url, postData, callback, method, conte
   }
 }
 
-freezerRestricted.connect.authorizedUrl = function(aUrl, method) {
+freezerRestricted.connect.authorizedUrl = function (aUrl, method) {
   if (freezerRestricted.utils.startsWith(aUrl, 'http') && (freezr.app.isWebBased || !freezerRestricted.utils.startsWith(aUrl, freezrMeta.serverAddress))) {
     // todo - to make authorized sites
     let warningText = (method === 'POST') ? 'The web page is trying to send data to ' : 'The web page is trying to access '
@@ -725,10 +729,10 @@ freezerRestricted.connect.authorizedUrl = function(aUrl, method) {
 
 // MENU - BASE FUNCTIONS SHOWING THEM WHEN THE FREEZR ICON (top right of each app) IS PRESSEDFreeezer Dialogie HTML
 freezerRestricted.menu.hasChanged = false
-freezerRestricted.menu.addFreezerDialogueElements = function() {
+freezerRestricted.menu.addFreezerDialogueElements = function () {
   // onsole.log('addFreezerDialogueElements')
   const freezerMenuButt = document.createElement('img')
-  freezerMenuButt.src = freezr.app.isWebBased ? '/app_files/public/info.freezr.public/public/static/freezer_log_top.png' : '../freezr/static/freezer_log_top.png'
+  freezerMenuButt.src = freezr.app.isWebBased ? '/app_files/@public/info.freezr.public/public/static/freezer_log_top.png' : '../freezr/static/freezer_log_top.png'
   freezerMenuButt.id = 'freezerMenuButt'
   freezerMenuButt.onclick = freezerRestricted.menu.freezrMenuOpen
   freezerMenuButt.className = 'freezerMenuButt_' + ((!freezr.app.isWebBased && /iPhone|iPod|iPad/.test(navigator.userAgent)) ? 'Head' : 'Norm')
@@ -756,7 +760,7 @@ freezerRestricted.menu.addFreezerDialogueElements = function() {
     elDialogueHomeButt.className = 'freezer_butt'
     elDialogueHomeButt.id = 'freezer_dialogue_homeButt'
     elDialogueHomeButt.innerHTM = 'freezr home'
-    elDialogueHomeButt.onclick = function(evt) { window.open('/account/home', '_self') }
+    elDialogueHomeButt.onclick = function (evt) { window.open('/account/home', '_self') }
     elDialogueInner.appendChild(elDialogueHomeButt)
   }
   const appTitle = document.createElement('div')
@@ -772,10 +776,10 @@ freezerRestricted.menu.addFreezerDialogueElements = function() {
   elDialogueInner.appendChild(menuPerms)
   elDialogueInner.style['-webkit-transform'] = 'translate3d(' + (Math.max(window.innerWidth, window.innerHeight)) + 'px, -' + (Math.max(window.innerWidth, window.innerHeight)) + 'px, 0)'
 }
-freezerRestricted.menu.close = function(evt) {
+freezerRestricted.menu.close = function (evt) {
   if (document.getElementById('freezer_dialogueInner')) {
     document.getElementById('freezer_dialogueInner').style['-webkit-transform'] = 'translate3d(' + (Math.max(window.innerWidth, window.innerHeight)) + 'px, -' + (Math.max(window.innerWidth, window.innerHeight)) + 'px, 0)'
-    setTimeout(function() {
+    setTimeout(function () {
       document.getElementById('freezer_dialogueOuter').style.display = 'none'
     }, 400)
     const bodyEl = document.getElementsByTagName('BODY')[0]
@@ -784,7 +788,7 @@ freezerRestricted.menu.close = function(evt) {
     freezerRestricted.menu.hasChanged = false
   }
 }
-freezerRestricted.menu.freezrMenuOpen = function() {
+freezerRestricted.menu.freezrMenuOpen = function () {
   window.scrollTo(0, 0)
   freezerRestricted.menu.resetDialogueBox()
   freezerRestricted.menu.hasChanged = true
@@ -803,9 +807,9 @@ freezerRestricted.menu.freezrMenuOpen = function() {
     document.getElementById('freezer_dialogueInnerText').innerHTML = 'Developer error: Please include the freezr_app_post_scripts.js file in your declarations.'
   }
 }
-freezerRestricted.menu.resetDialogueBox = function(isAdminPage, addText) {
+freezerRestricted.menu.resetDialogueBox = function (isAdminPage, addText) {
   const innerText = (document.getElementById('freezer_dialogueInnerText'))
-  if (innerText) innerText.innerHTML = (addText ? ('<br/><div>' + addText + '</div>') : '') + '<br/><div align="center">.<img src="' + (freezr.app.isWebBased ? '/app_files/public/info.freezr.public/public/static/ajaxloaderBig.gif' : 'freezr/static/ajaxloaderBig.gif') + '"/></div>'
+  if (innerText) innerText.innerHTML = (addText ? ('<br/><div>' + addText + '</div>') : '') + '<br/><div align="center">.<img src="' + (freezr.app.isWebBased ? '/app_files/@public/info.freezr.public/public/static/ajaxloaderBig.gif' : 'freezr/static/ajaxloaderBig.gif') + '"/></div>'
   const dialogueEl = document.getElementById('freezer_dialogueOuter')
   if (dialogueEl) dialogueEl.style.display = 'block'
   const bodyEl = document.getElementsByTagName('BODY')[0]
@@ -817,10 +821,10 @@ freezerRestricted.menu.resetDialogueBox = function(isAdminPage, addText) {
   if (document.getElementById('freezer_dialogueInner')) document.getElementById('freezer_dialogueInner').style['-webkit-transform'] = 'translate3d(0, 0, 0)'
 }
 
-freezerRestricted.menu.show_permissions = function() {
+freezerRestricted.menu.show_permissions = function () {
   document.getElementById('freezer_dialogueInnerText').innerHTML = ''
   setTimeout(async () => {
-    const filePath = freezr.app.isWebBased ? '/app_files/public/info.freezr.public/public/modules/AppSettings.js' : '../freezr/modules/AppSettings.js'
+    const filePath = freezr.app.isWebBased ? '/app_files/@public/info.freezr.public/public/modules/AppSettings.js' : '../freezr/modules/AppSettings.js'
     const { showPermsIn } = await import(filePath)
     const perms = await showPermsIn(freezrMeta.appName)
     freezerRestricted.menu.addLoginInfoToDialogue('freezer_dialogueInnerText', false)
@@ -839,8 +843,8 @@ freezerRestricted.menu.show_permissions = function() {
   //   }
   // }, { textResponse: true })
 }
-freezerRestricted.menu.replace_missing_logos = function() {
-  const imglistener = function(evt) {
+freezerRestricted.menu.replace_missing_logos = function () {
+  const imglistener = function (evt) {
     this.src = '/app_files/info.freezr.public/public/static/freezer_logo_empty.png'
     this.removeEventListener('error', imglistener)
   }
@@ -853,7 +857,7 @@ freezerRestricted.menu.replace_missing_logos = function() {
   })
 }
 
-freezerRestricted.menu.addLoginInfoToDialogue = function(aDivName, addTitle) {
+freezerRestricted.menu.addLoginInfoToDialogue = function (aDivName, addTitle) {
   const innerElText = document.getElementById(aDivName)
   if (innerElText) {
     innerElText.innerHTML = addTitle ? ('<div class="freezer_dialogue_topTitle">' + (freezrMeta.appDisplayName ? freezrMeta.appDisplayName : freezrMeta.appName) + '</div>') : '<br/>'
@@ -862,14 +866,14 @@ freezerRestricted.menu.addLoginInfoToDialogue = function(aDivName, addTitle) {
     innerElText.innerHTML += (freezrMeta.appversion ? ('<div>App version: ' + freezrMeta.appversion + '</div>') : '')
     if (!freezr.app.isWebBased) {
       innerElText.innerHTML += '<div align="center"><div class="freezer_butt" style="float:none; max-width:100px;" id="freezr_server_logout_butt">log out</div></div><br/>'
-      setTimeout(function() { document.getElementById('freezr_server_logout_butt').onclick = function() { freezr.utils.logout() } }, 10)
+      setTimeout(function () { document.getElementById('freezr_server_logout_butt').onclick = function () { freezr.utils.logout() } }, 10)
     }
   } else { console.warn('INTERNAL ERROR - NO DIV AT addLoginInfoToDialogue FOR ' + aDivName) }
 }
 
 // event listeners
 try {
-  document.onkeydown = function(evt) {
+  document.onkeydown = function (evt) {
     if (evt.key === 'Escape' && document.getElementById('freezer_dialogueOuter') && document.getElementById('freezer_dialogueOuter').style.display === 'block') { freezerRestricted.menu.close() }
   }
 } catch (e) {

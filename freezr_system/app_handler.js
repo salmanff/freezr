@@ -1259,14 +1259,14 @@ exports.messageActions = function (req, res) {
   fdlog('received messageActions at', req.body, req.params.action, 'req.freezrUserPrefs ', req.freezrUserPrefs)
   switch (req.params.action) {
     case 'initiate': {
-      fdlog('share initiate')
+      // 2024 -> removed share_records as an option 
       // make sure app has sharing permission and conctact permission
       // record message in 'messages sent'
       // communicate it to the other person's server
       // ceps/messages/transmit
       /*
       {
-        type: ‘share_records’, // or message_records' based on permission type
+        type: message_records' based on permission type
         recipient_host : ‘https://data-vault.eu’,
         recipient_id : ‘christoph’,
         group_name:
@@ -1283,19 +1283,31 @@ NEW     message:
         sender_host :
       }
       */
-      let sharingPerm = null
-      let messagingPerm = null // NEWDO?
+      // let sharingPerm = null
+      let messagingPerm = null
       let contactPerm = null
       let groupPerm = null
       let permittedRecord = null
+      let messageToKeep = null
+      let messageId = null
+      const recipientStatus = {}
+      let validatedRecipients = []
+      const validatedSameHostMembers = []
+      const validatedOtherHostMembers = []
+
       let recordAccessibleField = {}
       const recipientsSuccessfullysentTo = []
-      const recipientsWithErrorsSending = []
+      const recipientsWithErrorsSending = req.freezrBadContacts || []
       const params = req.body
-      const recipientFullName = (params.recipient_id + '@' + params.recipient_host).replace(/\./g, '_')
-      if (!params.sender_id) params.sender_id = req.freezrTokenInfo.requestor_id
+      // const recipientFullName = (params.recipient_id + '@' + params.recipient_host).replace(/\./g, '_')
+      // change
+      // if (!params.sender_id) params.sender_id = req.freezrTokenInfo.requestor_id
       if (!params.app_id) params.app_id = req.freezrTokenInfo.app_name
-      const isRecordLessMessageReply = (params.message_id && !params.record_id && params.type === 'message_records')
+      // const isRecordLessMessageReply = (params.message_id && !params.record_id && params.type === 'message_records')
+      // 2024-12 -> removed isRecordLessMessageReply - no used?
+
+      // todo - check if group_members is used and get rid of it... group_name should also be changed to groups (pl)
+      // recipientFullName is used in share_records -> should this allow multiple sharees??
 
       async.waterfall([
         // 1 basic checks
@@ -1313,15 +1325,15 @@ NEW     message:
 
           if (!objectFieldsHaveAllStrings(params, ['app_id', 'sender_id', 'sender_host', 'contact_permission', 'table_id'] || (!params.record_id && !params.message_id))) {
             cb(new Error('field insufficency mismatch'))
-          } else if (params.type !== 'share_records' && params.type !== 'message_records') {
-            cb(helpers.error(null, 'only share_records and message-_ecords type messaging currently allowed'))
+          } else if (params.type !== 'message_records') { // params.type !== 'share_records' &&
+            cb(helpers.error(null, 'only shareecords and message_records type messaging currently allowed'))
           } else if (params.sender_id !== req.freezrTokenInfo.requestor_id) {
             cb(helpers.error(null, 'requestor id mismatch'))
           } else if (params.app_id !== req.freezrTokenInfo.app_name) {
             cb(helpers.error(null, 'app id mismatch'))
-          } else if ((!params.sharing_permission && !params.messaging_permission) || !params.contact_permission) {
+          } else if (!params.messaging_permission || !params.contact_permission) { //!params.sharing_permission && 
             cb(helpers.error(null, 'missing permission names in request'))
-          } else if (!params.recipient_id && !params.group_name && !params.group_members) {
+          } else if (!params.recipient_id && !params.group_name && !params.recipients) { // todo - need to also check within recipients
             cb(helpers.error(null, 'malformed recipients in request'))
           } else if (params.recipient_id && typeof params.recipient_id !== 'string') {
             cb(helpers.error(null, 'recipient_id invalid'))
@@ -1345,10 +1357,10 @@ NEW     message:
           } else {
             // note: these should be someaht redundant checks as shareRecords would have already taken place - see next step
             results.forEach(aPerm => {
-              if (aPerm.name === params.sharing_permission &&
-                aPerm.granted && aPerm.type === 'share_records' && params.type === 'share_records' &&
-                aPerm.table_id === req.freezrRequesteeDB.oac.app_table
-              ) sharingPerm = aPerm
+              // if (aPerm.name === params.sharing_permission &&
+              //   aPerm.granted && aPerm.type === 'share_records' && params.type === 'share_records' &&
+              //   aPerm.table_id === req.freezrRequesteeDB.oac.app_table
+              // ) sharingPerm = aPerm
               if (aPerm.name === params.messaging_permission &&
                 aPerm.granted && aPerm.type === 'message_records' && params.type === 'message_records' &&
                 aPerm.table_id === req.freezrRequesteeDB.oac.app_table
@@ -1362,7 +1374,7 @@ NEW     message:
                 (aPerm.type === 'read_all' || aPerm.type === 'write_own' || aPerm.type === 'write_all')
               ) groupPerm = aPerm
             })
-            if ((sharingPerm || messagingPerm) && (contactPerm || groupPerm)) {
+            if ((messagingPerm) && (contactPerm || groupPerm)) { // sharingPerm || 
               cb(null)
             } else {
               // onsole.log({ dbApptable: req.freezrRequesteeDB.oac.app_table,  params, sharingPerm, messagingPerm, contactPerm, groupPerm })
@@ -1375,35 +1387,36 @@ NEW     message:
         function (cb) {
           if (params.record_id) {
             req.freezrRequesteeDB.read_by_id(params.record_id, cb)
-          } else if (isRecordLessMessageReply) {
-            req.freezrGotMessages.read_by_id(params.message_id, cb)
+          // } else if (isRecordLessMessageReply) {
+          //   req.freezrGotMessages.read_by_id(params.message_id, cb)
           } else {
             cb(new Error('no record id or message id provided'))
           }
         },
-        // consdtruct a permitted-record
+        // construct a permitted-record
         function (fetchedRecord, cb) {
-          if (params.type === 'share_records') {
-            if (!fetchedRecord) {
-              cb(helpers.error(null, 'no related records'))
-            } else if (!fetchedRecord._accessible || !fetchedRecord._accessible[recipientFullName] || !fetchedRecord._accessible[recipientFullName].granted) {
-              cb(helpers.error(null, 'permission not granted'))
-            } else {
-              fdlog('share initiate ', { fetchedRecord })
-              recordAccessibleField = fetchedRecord._accessible
+          // if (params.type === 'share_records') {
+          //   if (!fetchedRecord) {
+          //     cb(helpers.error(null, 'no related records'))
+          //   } else if (!fetchedRecord._accessible || !fetchedRecord._accessible[recipientFullName] || !fetchedRecord._accessible[recipientFullName].granted) {
+          //     cb(helpers.error(null, 'permission not granted'))
+          //   } else {
+          //     fdlog('share initiate ', { fetchedRecord })
+          //     recordAccessibleField = fetchedRecord._accessible
 
-              if (sharingPerm.return_fields && sharingPerm.return_fields.length > 0) {
-                permittedRecord = {}
-                sharingPerm.return_fields.forEach(key => {
-                  permittedRecord[key] = fetchedRecord[key]
-                })
-              } else {
-                permittedRecord = JSON.parse(JSON.stringify(fetchedRecord))
-              }
-              delete permittedRecord._accessible
-              cb(null)
-            }
-          } else if (params.type === 'message_records') {
+          //     if (sharingPerm.return_fields && sharingPerm.return_fields.length > 0) {
+          //       permittedRecord = {}
+          //       sharingPerm.return_fields.forEach(key => {
+          //         permittedRecord[key] = fetchedRecord[key]
+          //       })
+          //     } else {
+          //       permittedRecord = JSON.parse(JSON.stringify(fetchedRecord))
+          //     }
+          //     delete permittedRecord._accessible
+          //     cb(null)
+          //   }
+          // } else
+          if (params.type === 'message_records') {
             if (!fetchedRecord) {
               cb(helpers.error(null, 'no related records'))
             } else if (messagingPerm.table_id !== req.freezrRequesteeDB.oac.app_table) {
@@ -1412,13 +1425,14 @@ NEW     message:
               recordAccessibleField = fetchedRecord._accessible
 
               fdlog('message initiate ', { fetchedRecord })
+              console.log('message initiate ', { fetchedRecord })
 
               // check permission
               if (messagingPerm && messagingPerm.return_fields && messagingPerm.return_fields.length > 0) {
                 permittedRecord = {} // newdo -> make this the shares record...
                 /// also add message field
                 messagingPerm.return_fields.forEach(key => {
-                  permittedRecord[key] = params.record[key]
+                  if (params?.record && params.record[key]) permittedRecord[key] = params.record[key]
                   // todo later check here is shared item is a subset of the record and if not throw error
                 })
               } else {
@@ -1434,94 +1448,146 @@ NEW     message:
         },
 
         function (cb) {
-          //   if (params.recipient_id) {
-          //     const fullname = params.recipient_id + (params.recipient_host ? ('@' + params.recipient_host) : '')
-          //     cb(null, [fullname])
-          //   } else if (params.group_members) {
-          //     cb(null, params.group_members)
-          //   } else if (params.group_name && typeof params.group_name === 'string') {
-          //     req.freezrCepsGroups.query({ name: params.group_name }, null, function (err, groups) {
-          //       if (err) {
-          //         cb(err)
-          //       } else if (!groups || groups.length < 1) {
-          //         cb(new Error('No groups found'))
-          //       } else {
-          //         if (groups.length > 1) { console.warn('snbh - found 2 groups of same name') }
-          //         cb(null, groups[0].members)
-          //       }
-          //     })
-          //   }
-          // },
-          //
-          // function (members, cb) {
-          //   console.log(' sharign with ', { members })
-          if (!req.freezrMessageToMembers || req.freezrMessageToMembers.length === 0) {
-            console.warn('no members to share with')
-            cb(new Error('No members to sharewith'))
-          } else {
-            async.forEach(req.freezrMessageToMembers, function (member, cb2) {
-              const parts = member.split('@')
-              const username = parts[0]
-              const serverurl = parts.length > 1 ? parts[1] : null
-              // todo if req.freezrBlockMsgsToNonContacts is false then this call is redundant - more efficient not to do it
-              req.freezrCepsContacts.query({ username, serverurl }, {}, function (err, results) {
+          messageToKeep = { ...params }
+          messageToKeep.record = permittedRecord
+
+          req.freezrMessageRecipients.forEach(recipient => {
+            recipientStatus[recipientAsJsonKey(recipient)] = { status: 'initiate', recipient_id: recipient.recipient_id, recipient_host: recipient.recipient_host }
+          })
+          messageToKeep.status = 'initiate'
+          req.freezrSentMessages.create(null, messageToKeep, {}, cb)
+        },
+
+        function (resp, cb) {
+          messageId = resp._id
+          if (req.freezrUserPrefs.blockMsgsToNonContacts) {
+            async.forEach(req.freezrMessageRecipients, function (recipient, cb2) {
+              req.freezrCepsContacts.query({ username: recipient.recipient_id, serverurl: recipient.recipient_host }, {}, function (err, results) {
                 if (err) {
-                  recipientsWithErrorsSending.push({ fullname: member, reasons: err.message })
+                  recipientStatus[recipientAsJsonKey(recipient)] = { status: 'err', err: err.message, recipient_id: recipient.recipient_id, recipient_host: recipient.recipient_host }
+                  recipientsWithErrorsSending.push({ recipient_id: recipient.recipient_id, recipient_host: recipient.recipient_host, err: err.message })
                   cb2()
-                } else if (req.freezrUserPrefs.blockMsgsToNonContacts && (!results || results.length === 0)) {
-                  recipientsWithErrorsSending.push({ fullname: member, reasons: 'member not in contacts' })
+                } else if (!results || results.length === 0) {
+                  recipientStatus[recipientAsJsonKey(recipient)] = { status: 'member not in contacts', err: err.message, recipient_id: recipient.recipient_id, recipient_host: recipient.recipient_host }
+                  recipientsWithErrorsSending.push({ recipient_id: recipient.recipient_id, recipient_host: recipient.recipient_host, err: 'member not in contacts' })
                   cb2()
                 } else {
                   if (results.length > 1) {
-                    felog('SNBH - two contacts found where one was expected ' + JSON.stringify(results))
-                    recipientsWithErrorsSending.push({ fullname: member, reasons: '2 member are same of same not in contacts - sent to first' })
+                    felog('SNBH - two contacts found where one was expected - will add to erroed and non erroed !!! Wot to do? ' + JSON.stringify(results))
+                    recipientsWithErrorsSending.push({ recipient_id: recipient.recipient_id, recipient_host: recipient.recipient_host, err: '2 member are same of same not in contacts - sent to first' })
                   }
-                  const paramsCopy = JSON.parse(JSON.stringify(params))
-                  paramsCopy.recipient_id = username
-                  delete paramsCopy.record
-                  if (!serverurl || paramsCopy.recipient_host === paramsCopy.sender_host) {
-                    paramsCopy.recipient_host = null
-                    paramsCopy.group_members = req.freezrMessageToMembers
-                    sameHostMessageExchange(req, username, permittedRecord, params, function (err) {
-                      if (err) {
-                        recipientsWithErrorsSending.push({ fullname: member, reasons: 'failure to send' })
-                      } else {
-                        recipientsSuccessfullysentTo.push(member)
-                      }
-                      cb2()
-                    })
-                  } else {
-                    paramsCopy.recipient_host = serverurl
-                    paramsCopy.group_members = reconfigureMembersBySwitchingSendersAndReceivers(req.freezrMessageToMembers, params.sender_host, params.recipient_host)
-                    createAndTransmitMessage(req.freezrSentMessages, permittedRecord, paramsCopy, function (err) {
-                      if (err) {
-                        felog('transmitted msg with ', { err })
-                        recipientsWithErrorsSending.push({ fullname: member, reasons: 'failure to send' })
-                      } else {
-                        recipientsSuccessfullysentTo.push(member)
-                      }
-                      cb2()
-                    })
-                  }
+                  validatedRecipients.push(recipient)
+                  cb2()
+                }
+              })
+            }, cb)
+          } else {
+            validatedRecipients = req.freezrMessageRecipients
+            cb(null)
+          }
+        },
+
+        // Separate sameHost from otherHost members
+        function (cb) {
+          if (!validatedRecipients || validatedRecipients.length === 0) {
+            console.warn('no members to share with')
+            messageToKeep.recipientStatus = recipientStatus
+            messageToKeep.status = 'err'
+            req.freezrSentMessages.update(messageId, messageToKeep, {}, function (err, results) {
+              if (err) {
+                cb(err)
+              } else {
+                cb(new Error('No members to sharewith'))
+              }
+            })
+          } else {
+            messageToKeep.nonces = []
+            validatedRecipients.forEach(recipient => {
+              if (!recipient.recipient_host || recipient.recipient_host === messageToKeep.sender_host) {
+                validatedSameHostMembers.push(recipient)
+              } else {
+                const nonce = helpers.randomText(50)
+                const recipientCopy = { nonce, recipient_id: recipient.recipient_id, recipient_host: recipient.recipient_host }
+                recipientStatus[recipientAsJsonKey(recipient)].nonce = nonce
+                messageToKeep.nonces.push(nonce)
+                validatedOtherHostMembers.push(recipientCopy)
+              }
+            })
+            cb(null)
+          }
+        },
+
+        function (cb) {
+          messageToKeep.recipients = validatedRecipients
+          if (validatedSameHostMembers.length === 0) {
+            cb(null)
+          } else {
+            const messageCopy = JSON.parse(JSON.stringify(messageToKeep))
+            delete messageCopy.recipientStatus
+            delete messageCopy.nonces
+            async.forEach(validatedSameHostMembers, function (recipient, cb2) {
+              sameHostMessageExchange(req, recipient, messageCopy, function (err) {
+                if (err) {
+                  recipientsWithErrorsSending.push({ recipient_id: recipient.recipient_id, err: (err.message || 'failure to send') })
+                  recipientStatus[recipientAsJsonKey(recipient)].status = 'err'
+                  recipientStatus[recipientAsJsonKey(recipient)].err = err.message
+                } else {
+                  // update recipeintstatus
+                  recipientsSuccessfullysentTo.push(recipient)
+                  recipientStatus[recipientAsJsonKey(recipient)].status = 'verified'
+                }
+                cb2()
+              })
+            }, function (err) {
+              if (err) console.warn('error in sameHostMessageExchange - SNBH', { err })
+              cb(null)
+            })
+          }
+        },
+
+        // update message with nonceds and status of samhost ones
+        function (cb) {
+          messageToKeep.recipientStatus = recipientStatus
+          req.freezrSentMessages.update(messageId, messageToKeep, {}, cb)
+        },
+        function (fakeres, cb) {
+          if (validatedOtherHostMembers.length === 0) {
+            cb(null)
+          } else {
+            async.forEach(validatedOtherHostMembers, function (recipient, cb2) {
+              console.log('transmitting to ', recipient)
+              transmitMessage(recipient, messageToKeep, function (err) {
+                if (err) {
+                  console.warn('transmitted msg with ', { recipient, err })
+                  felog('transmitted msg with ', { err })
+                  recipientsWithErrorsSending.push({ recipient_id: recipient.recipient_id, recipient_host: recipient.recipient_host, err: (err?.message || 'failure to send') })
+                  const setObj = {}
+                  setObj['recipientStatus.' + recipientAsJsonKey(recipient) + '.status'] = 'err'
+                  req.freezrSentMessages.update(messageId, { $set: setObj }, { replaceAllFields: false }, function (resp, err) {
+                    if (err) console.warn('updated message with error', { resp, err })
+                    cb2()
+                  })
+                } else {
+                  recipientsSuccessfullysentTo.push({ recipient_id: recipient.recipient_id, recipient_host: recipient.recipient_host })
+                  cb2()
                 }
               })
             }, cb)
           }
         },
-
         function (cb) {
-          if (isRecordLessMessageReply) {
-            cb(null, null)
-          } else {
-            if (!recordAccessibleField) recordAccessibleField = {}
-            recipientsSuccessfullysentTo.forEach(member => {
-              member = member.replace(/\./g, '_')
-              if (!recordAccessibleField[member]) recordAccessibleField[member] = {}
-              if (!recordAccessibleField[member].messaged) recordAccessibleField[member].messaged = []
-              recordAccessibleField[member].messaged.push(new Date().getTime()) // newd -> list of dates??
-            })
-            req.freezrRequesteeDB.update(params.record_id.toString(), { _accessible: recordAccessibleField }, { replaceAllFields: false, newSystemParams: true }, cb)
-          }
+          // if (isRecordLessMessageReply) {
+          //   cb(null, null)
+          // } else {
+          if (!recordAccessibleField) recordAccessibleField = {}
+          recipientsSuccessfullysentTo.forEach(recipient => {
+            const recipientString = recipientAsJsonKey(recipient)
+            if (!recordAccessibleField[recipientString]) recordAccessibleField[recipientString] = {}
+            if (!recordAccessibleField[recipientString].messaged) recordAccessibleField[recipientString].messaged = []
+            recordAccessibleField[recipientString].messaged.push(new Date().getTime()) // newd -> list of dates??
+          })
+          req.freezrRequesteeDB.update(params.record_id.toString(), { _accessible: recordAccessibleField }, { replaceAllFields: false, newSystemParams: true }, cb)
+          // }
         }
 
       ], function (err, ret) {
@@ -1536,7 +1602,8 @@ NEW     message:
       break
     case 'transmit':
       {
-        fdlog('share transmit ', req.body)
+        fdlog('message transmit ', req.body)
+        console.log('message transmit ', req.body)
         // see if is in contact db and if so can get the details - verify it and then record
         // see if sender is in contacts - decide to keep it or not and to verify or not
         // record message in 'messages got' and then do a verify
@@ -1546,15 +1613,16 @@ NEW     message:
         let status = 0
         async.waterfall([
           function (cb) {
-            const fields = ['app_id', 'sender_id', 'sender_host', 'recipient_host', 'recipient_id', 'type', 'contact_permission', 'table_id', 'nonce', 'message', 'messaging_permission', 'group_members', 'record_id', 'record', 'message_id']
+            const fields = ['app_id', 'sender_id', 'sender_host', 'recipient_host', 'recipient_id', 'type', 'contact_permission', 'table_id', 'nonce', 'message', 'messaging_permission', 'record']
+            // const fields = ['app_id', 'sender_id', 'sender_host', 'type', 'contact_permission', 'table_id', 'nonce', 'message', 'messaging_permission', 'group_members', 'record_id', 'record', 'message_id']
             const fieldExceptions = ['message', 'record_id', 'record', 'message_id']
             let failed = false
-            if (!req.body.type) { req.body.type = 'share_records' } // temp hacj to revisit and fix
+            // if (!req.body.type) { req.body.type = 'share_records' } // temp hacj to revisit and fix
             for (const [key, keyObj] of Object.entries(req.body)) {
               if (fields.includes(key)) {
                 if (typeof req.body[key] === 'string') receivedParams[key] = keyObj
                 // todo later - add additional checks here
-              } else if (key !== 'message') {
+              } else if (['message', 'record_id', 'record', 'message_id', '_date_modified', '_date_created'].indexOf(key) < 0) {
                 felog('message sent unnecessary field - need to fix and add back failure for security purposes ', key)
                 // failed = true
               }
@@ -1612,7 +1680,8 @@ NEW     message:
               headers: {
                 'Content-Type': 'application/json',
                 'Content-Length': JSON.stringify(receivedParams).length
-              }
+              },
+              timeout: 2000
             }
             if (isLocalhost) options.port = receivedParams.sender_host.slice(17)
             const verifyReq = https.request(options, (verifyRes) => {
@@ -1635,12 +1704,13 @@ NEW     message:
                   cb(null, data)
                 } catch (e) {
                   felog('error parsing message in transmit', e)
+                  console.log('data chunks now -' + chunks + '- end chunks')
                   cb(e)
                 }
               })
             })
             verifyReq.on('error', (error) => {
-              felog('error in transmit ', error)
+              console.warn('error in transmit ', error)
               cb(helpers.error('message transmission error 1'))
             })
             verifyReq.write(JSON.stringify(receivedParams))
@@ -1657,56 +1727,120 @@ NEW     message:
             }
           }
         ],
-          function (err) {
-            if (err) {
-              felog('internal error in transmit', err)
-              // todo customise error handling and whther response should be given, based on more refined preferences
-              if (status > 1 || receivedParams.senderIsAContact) helpers.send_failure(res, helpers.error('internal error in transmit'), 'app_handler', exports.version, 'messageActions')
-              // ie do not respond if the sender is not a contact
-            } else {
-              helpers.send_success(res, { success: true })
-            }
-          })
+        function (err) {
+          if (err) {
+            felog('internal error in transmit', err)
+            // todo customise error handling and whther response should be given, based on more refined preferences
+            if (status > 1 || receivedParams.senderIsAContact) helpers.send_failure(res, helpers.error('internal error in transmit'), 'app_handler', exports.version, 'messageActions')
+            // ie do not respond if the sender is not a contact
+          } else {
+            helpers.send_success(res, { success: true })
+          }
+        })
       }
       break
     case 'verify':
       {
-        // verify by pinging the sender server of the nonce and getting the info
-        // fetch record nonce - have a max time...
-        // check other parameters?
-        // responde with {record: xxxx}
         fdlog('share verify')
-        const haveDifferentMessageFields = function (m1, m2) {
-          const fields = ['app_id', 'sender_id', 'sender_host', 'recipient_host', 'recipient_id', 'contact_permission', 'table_id', 'record_id']
+        const haveDifferentMessageFields = function (dbMessage, verifyeeMessage) {
+          const fields = ['app_id', 'sender_id', 'sender_host', 'contact_permission', 'table_id',]
           let failed = false
-          fields.forEach(key => { if (m1.key !== m2.key) failed = true })
+          fields.forEach(key => { if (dbMessage.key !== verifyeeMessage.key) failed = true })
+          if (!verifyeeMessage.recipient_id || !verifyeeMessage.recipient_host) failed = true
+          const recipientString = recipientAsJsonKey({ recipient_id: verifyeeMessage.recipient_id, recipient_host: verifyeeMessage.recipient_host })
+          if (!dbMessage.recipientStatus[recipientString] ||
+              dbMessage.recipientStatus[recipientString].nonce !== verifyeeMessage.nonce ||
+              dbMessage.recipientStatus[recipientString].status === 'verified') failed = true 
+          // console.log('haveDifferentMessageFields ', { dbMessage, verifyeeMessage, recipientString, dbMsgObj: dbMessage.recipientStatus[recipientString] })
+          // todo 2024-12 also check for record_id or message_id if messagewithnorecord
           return failed
         }
         if (!req.body.nonce) {
           felog('nonce required to verify messages ', req.body)
           res.sendStatus(401)
         } else {
-          req.freezrSentMessages.query({ nonce: req.body.nonce }, {}, function (err, results) {
+          const TIME_LIMIT = 1000 * 60 * 60 * 24 // 24 hours
+
+          // _date_created: { $gt: (new Date().getTime() - TIME_LIMIT) }, 
+          req.freezrSentMessages.query({ nonces: req.body.nonce }, {}, function (err, results) {
             if (err) {
               felog('error getting nonce in message ', req.body)
               helpers.send_failure(res, helpers.error('internal error'), 'app_handler', exports.version, 'messageActions')
             } else if (!results || results.length === 0) {
               felog('no results from nonce in message ', req.body)
-              // Not send a respoinse to avoid spam
-              // res.sendStatus(401)
+              // Not send a respoinse to avoid spam?
+              res.sendStatus(401)
             } else if (haveDifferentMessageFields(results[0], req.body)) {
+              console.warn('Message mismatch ', { recipientStatus: JSON.stringify(results[0].recipientStatus) })
+              console.warn('Message mismatch ', { db: results[0], body:req.body })
+              console.warn('Message mismatch ', { dbrec: results[0].recipients })
               felog('Message mismatch ', req.body)
-              // Not send a respoinse to avoid spam
-              // res.sendStatus(401)
+              // Not send a respoinse to avoid spam?
+              res.sendStatus(401)
             } else {
               // todo - discard old nonces???
-              req.freezrSentMessages.update(results[0]._id.toString(), { status: 'verified', nonce: null }, { replaceAllFields: false }, function (err) {
+              // UPODATE  sent message by remvoing nocne from nonces and updating status...
+              const nonces = results[0].nonces.splice(results[0].nonces.indexOf(req.body.nonce), 1)
+              const recipientConfirm = { recipient_id: req.body.recipient_id, recipient_host: req.body.recipient_host, status: 'verified' }
+              const recipientString = recipientAsJsonKey(recipientConfirm)
+              const recipientKey = 'recipientStatus.' + recipientString
+              // console.log('updatingh ', { recipientKey, recipientConfirm, nonces })
+              const changes = { nonces }
+              changes[recipientKey] = recipientConfirm
+              req.freezrSentMessages.update(results[0]._id.toString(), changes, { replaceAllFields: false }, function (err) {
                 if (err) felog('error updating sent messages')
                 helpers.send_success(res, { record: results[0].record, message: results[0].message, success: true })
               })
             }
           })
         }
+      }
+      break
+    case 'mark_read':
+      {
+        // each app should be able mark read on its own messages
+        // QQ: Should other apps that get access to messages be able to mark as read?
+        const params = req.body
+        const messageIds = req.body.message_ids
+        const markAll = req.body.mark_all
+
+        // onsole.log('message actions mark as read ', { params, messageIds, markAll })
+
+        async.waterfall([
+          // 1 basic checks
+          function (cb) {
+            if ((!messageIds || messageIds.length === 0) && !markAll) { // 2024: DECIDED no prems are needed to mark as read
+              cb(helpers.error(null, 'missing permission names in request'))
+            } else {
+              cb(null)
+            }
+          },
+          function (cb) {
+            if (!markAll) {
+              async.forEach(messageIds, function (mssageId, cb2) {
+                req.freezrGotMessages.query({ _id: mssageId }, {}, function (err, results) {
+                  if (err) {
+                    cb2(err)
+                  } else if (!results || results.length === 0 || results[0].app_id !== req.freezrTokenInfo.app_name) {
+                    console.warn('message not found ', { mssageId, results })
+                    cb2(new Error('message not found'))
+                  } else {
+                    req.freezrGotMessages.update(mssageId, { marked_read: true }, { replaceAllFields: false }, cb2)
+                  }
+                })
+              }, cb)
+            } else {
+              req.freezrGotMessages.update({ app_id: req.freezrTokenInfo.app_name }, { marked_read: true }, { replaceAllFields: false }, cb)
+            }
+          }
+        ], function (err, ret) {
+          if (err) {
+            console.warn('message actions mark as read err ', { err })
+            helpers.send_failure(res, err, 'app_handler', exports.version, 'messageActions mark_read')
+          } else {
+            helpers.send_success(res, { success: true })
+          }
+        })
       }
       break
     case 'get':
@@ -1735,21 +1869,85 @@ NEW     message:
       helpers.send_failure(res, helpers.error('invalid query'), 'app_handler', exports.version, 'messageActions')
   }
 }
-const reconfigureMembersBySwitchingSendersAndReceivers = function (members, senderHost, receipientHost) {
+const reconfigureMembersBySwitchingSendersAndReceivers = function (members, senderHost, recipientHost) {
   const revisedMembers = []
-  members.forEach(member => {
-    const parts = member.split('@')
-    const user = parts[0]
-    const server = parts[1]
-    let fullname = member
-    if (!server) fullname = user + '@' + senderHost
-    if (server === receipientHost) fullname = user
-    revisedMembers.push(fullname)
+  members.forEach(recipient => {
+    const tempRevisedRecipient = { recipient_id: recipient.recipient_id, recipient_host: recipient.recipient_host }
+    if (!tempRevisedRecipient.recipient_host) tempRevisedRecipient.recipient_host = senderHost
+    if (tempRevisedRecipient.recipient_host === recipientHost) tempRevisedRecipient.recipient_host = null
+    revisedMembers.push(tempRevisedRecipient)
   })
   return revisedMembers
 }
-const createAndTransmitMessage = function (sentMessagesDb, permittedRecord, checkedParams, callback) {
-  // receipientParams must have been checked for requestor and receipient being in contacts and persmissions having been granted
+
+const recipientAsJsonKey = function (recipient) {
+  if (!recipient || !recipient.recipient_id) {
+    console.warn('recipientAsJsonKey - no recipient ', recipient)
+    return null
+  }
+  let recipientString = recipient.recipient_id + (recipient.recipient_host ? ('@' + recipient.recipient_host) : '')
+  recipientString = recipientString.replace(/\./g, '_')
+  return recipientString
+}
+
+const transmitMessage = function (recipient, messageToKeep, callback) {
+  // recipientParams must have been checked for requestor and recipient being in contacts and persmissions having been granted
+  /*
+  */
+  // create nonce and record the message - status:'not sent'
+  const messageCopy = JSON.parse(JSON.stringify(messageToKeep))
+  messageCopy.recipient_host = recipient.recipient_host
+  messageCopy.recipient_id = recipient.recipient_id
+  delete messageCopy.recipientStatus
+  delete messageCopy.nonces
+  delete messageCopy.record
+  messageCopy.nonce = recipient.nonce
+  messageCopy.recipients = reconfigureMembersBySwitchingSendersAndReceivers(messageCopy.recipients, messageCopy.sender_host, messageCopy.recipient_host)
+
+  fdlog('creating a new message to send ', { recipient, messageCopy })
+
+  const isLocalhost = helpers.startsWith(recipient.recipient_host, 'http://localhost')
+  const https = isLocalhost ? require('http') : require('https')
+
+  const sendOptions = {
+    hostname: isLocalhost ? 'localhost' : recipient.recipient_host.slice(8),
+    path: '/ceps/message/transmit',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Content-Length': JSON.stringify(messageCopy).length
+    },
+    timeout: 2000
+  }
+  if (isLocalhost) sendOptions.port = Number(recipient.recipient_host.slice(17))
+  const verifyReq = https.request(sendOptions, (verifyRes) => {
+    verifyRes.on('data', (returns) => {
+      if (returns) returns = returns.toString()
+      try {
+        returns = JSON.parse(returns)
+        if (returns.error) {
+          console.warn('tranmisssion err from server ', { messageCopy, returns })
+          callback(new Error('recipient server refusal'))
+        } else {
+          callback(null)
+        }
+      } catch (e) {
+        console.warn('error getting trsnsmit ', { returns, e })
+        callback(new Error('recipient server verification'))
+      }
+    })
+  })
+  verifyReq.on('error', (error) => {
+    console.warn('error in transmit ', error)
+    callback(helpers.error('recipient server connection'))
+  })
+  verifyReq.write(JSON.stringify(messageCopy))
+  verifyReq.end()
+}
+
+
+const oldcreateAndTransmitMessage = function (sentMessagesDb, permittedRecord, checkedParams, callback) {
+  // recipientParams must have been checked for requestor and recipient being in contacts and persmissions having been granted
   /*
   {
     type: ‘share_records’, // based on permission type
@@ -1788,7 +1986,8 @@ NEWDO?  message:
         headers: {
           'Content-Type': 'application/json',
           'Content-Length': JSON.stringify(checkedParams).length
-        }
+        },
+        timeout: 2000
       }
       if (isLocalhost) sendOptions.port = Number(checkedParams.recipient_host.slice(17))
       const verifyReq = https.request(sendOptions, (verifyRes) => {
@@ -1805,15 +2004,16 @@ NEWDO?  message:
       })
       verifyReq.on('error', (error) => {
         console.warn('error in transmit ', error)
-        callback(helpers.error('message transmission error 2'))
+        callback(helpers.error('transmit failure old '))
       })
       verifyReq.write(JSON.stringify(checkedParams))
       verifyReq.end()
     }
   })
 }
-const sameHostMessageExchange = function (req, username, permittedRecord, checkedParams, callback) {
-  // receipientParams must have been checked for requestor and receipient being in contacts and persmissions having been granted
+
+const sameHostMessageExchange = function (req, recipient, messageCopy, callback) {
+  // recipientParams must have been checked for requestor and recipient being in contacts and persmissions having been granted
   /*
   {
     type: ‘share_records’, // based on permission type
@@ -1830,40 +2030,37 @@ const sameHostMessageExchange = function (req, username, permittedRecord, checke
   }
   */
 
-  const messageToKeep = { ...checkedParams }
-  messageToKeep.record = permittedRecord
-  messageToKeep.message = checkedParams.message
-  messageToKeep.status = 'verified'
-  fdlog('creating a new message INTERNAL MSG  ', { messageToKeep })
+  const username = recipient.recipient_id
+
+  messageCopy.recipient_id = recipient.recipient_id
+  messageCopy.senderIsNotContact = false
+  // delete messageCopy.record
+  messageCopy.recipient_host = null
+
+  fdlog('creating a new message INTERNAL MSG  ', { messageCopy })
   async.waterfall([
-    // check receipient to make sure has sender as contact
+    // check recipient to make sure has sender as contact
     function (cb) {
       if (!req.freezrOtherPersonContacts[username]) {
         cb(new Error('no contact db found for user ' + username))
       } else if (!req.freezrOtherPersonGotMsgs[username]) {
         cb(new Error('no msgdb found for user ' + username))
       } else {
-        req.freezrOtherPersonContacts[username].query({ username, serverurl: null }, {}, cb)
+        req.freezrOtherPersonContacts[username].query({ username: messageCopy.sender_id, serverurl: null }, {}, cb)
       }
     },
     function (results, cb) {
       // todo - make this a user preference in the future
-      if (!results) {
-        cb(helpers.error(null, 'contact  missing - ask the receipient to add you as a contact'))
-      } else if (results.length === 0) {
-        messageToKeep.senderIsNotContact = true
+      if (!results || results.length === 0) {
+        messageCopy.senderIsNotContact = true
       }
       if (results && results.length > 1) felog('two contacts found where one was expected ' + JSON.stringify(results))
       cb(null)
       //  }
     },
-    // add the sender's message queue
-    function (cb) {
-      req.freezrSentMessages.create(null, messageToKeep, {}, cb)
-    },
     // add the recipient's message queue
-    function (ret, cb) {
-      req.freezrOtherPersonGotMsgs[username].create(null, messageToKeep, {}, cb)
+    function (cb) {
+      req.freezrOtherPersonGotMsgs[username].create(null, messageCopy, {}, cb)
     }
 
   ], function (err) {

@@ -398,6 +398,11 @@ const buttons = {
         if (!params.username) params.username = params.nickname
         if (!params.nickname) throw new Error('`nickname needs to be filled to create a contact')
         if (params.serverurl && params.serverurl.slice(-1) === '/') params.serverurl = params.serverurl.slice(0, -1)
+        if (params.serverurl && params.serverurl.slice(0, 4) !== 'http') {
+          if (params.serverurl.slice(0, 1) === '/') params.serverurl = params.serverurl.slice(1)
+          if (params.serverurl.slice(0, 1) === '/') params.serverurl = params.serverurl.slice(1)
+          params.serverurl = 'https://' + params.serverurl
+        }
         params.searchname = params.username + (params.serverurl ? ('@' + params.serverurl.replace(/\./g, '_')) : '')
         // This logic needs to be moved server side
         console.warn('SERVER SHOULD BE PINGED BEFORE PERSON IS ADDED and warning given if ping dpesnt respond')

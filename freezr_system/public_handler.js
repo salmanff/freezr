@@ -433,7 +433,7 @@ const gotoShowInitialData = function (res, req, options) {
 }
 
 exports.nowGenerateSingleObjectPage = function (req, res) {
-  fdlog('nowGenerateSingleObjectPage')
+  fdlog('nowGenerateSingleObjectPage 0 ', { params: req.params } )
   req.freezrInternalCallFwd = function (err, results) {
     if (err || !results.results || results.results.length === 0 || !results.results[0]) {
       res.redirect('/public?noredirect=true&redirect=true&error=nosuchpublicobject&pid=' + req.params.object_public_id)
@@ -621,28 +621,16 @@ exports.dbp_query = function (req, res) {
       if (req.body.data_owner) queryParams.data_owner = req.body.data_owner
     }
     if (req.body.app_name) queryParams.requestor_app = req.body.app_name.toLowerCase()
-      // if (req.body.code) queryParams.privateLinks = req.body?.code
-    /* 
-    if (req.body) {
-      if (req.body?.q?.app_name) { // translating to app_name - toconsider - also trnaslate pid user_id userId ?
-        queryParams.requestor_app = req.body.q.app_name.toLowerCase()
-        delete req.body.q.app_name
-      }
-      if (req.body?.q?.feed) {
-        queryParams.privateFeedNames = req.body.q.feed
-      } else if (req.body?.q?.feed) {
-        queryParams.privateLinks = req.body.q?.code
-      }
-    }
-    */
   } else if (req.query) {
     if (req.params?.data_object_id && req.params?.user_id && req.params?.app_table) {
       queryParams._id = ('@' + req.params.user_id.toLowerCase() + '/' + req.params.app_table.toLowerCase() + '/' + req.params.data_object_id.toLowerCase())
+      if (req.query.code) queryParams.privateLinks = req.query?.code
     } else if (req.query.feed) {
       queryParams.privateFeedNames = req.query.feed
     } else if (req.query.code) {
       queryParams.privateLinks = req.query?.code
     } else {
+      console.warn('what use case is this?? still needed??')
       if (typeof req.query?.user_id === 'string' && req.query?.user_id?.slice(0, 1) === '@') req.query.user_id = req.query.user_id.slice(1)
       if (typeof req.query?.user_id === 'string' && req.query.user_id) queryParams.data_owner = req.query.user_id.toLowerCase()
       if (req.params.user_id) queryParams.data_owner = req.params.user_id.toLowerCase()
@@ -760,13 +748,13 @@ exports.dbp_query = function (req, res) {
         const theManifest = relevantManifests[retrievedRecord.data_owner][retrievedRecord.requestor_app]
         fdlog({ theManifest })
         if (theManifest && theManifest.permissions.includes(retrievedRecord.permission_name)) {
-          const cardTemplate = theManifest.cards[retrievedRecord.permission_name]
+          const cardTemplate = theManifest.cards ? theManifest.cards[retrievedRecord.permission_name] : null
           if (cardTemplate) {
             try {
               afinalRecord._card =
                 '<div class="freezr_public_genericCardOuter freezr_public_genericCardOuter_overflower"><div class="freezr_expander"> >> </div>' +
-                '<span><img src="/publicfiles/@' + afinalRecord._data_owner + '/info.freezr.account/profilePict.jpg" imgerror="hide" style="margin: -0px 5px -10px 5px; max-width: 40px; max-height: 40px; border-radius: 20px"></span>' +
-                '<div style="font-size: 12px; font-style: italic; color: #3f51b5; display: inline-block">Posted by ' + afinalRecord._data_owner + ' on ' + afinalRecord.__date_published + ' via <a href="/papp/@' + afinalRecord._data_owner + '/' + afinalRecord._app_name + '">' + afinalRecord._app_name + '</a></div>' +
+                '<span><img src="/publicfiles/@' + afinalRecord._data_owner + '/info.freezr.account/profilePict.jpg" imgerror="hide" style="margin: -0px 5px -22px 5px; border: 1px solid lightgrey; max-width: 40px; max-height: 40px; border-radius: 20px"></span>' +
+                '<div style="font-size: 12px; font-style: italic; color: #3f51b5; display: block; margin: 3px 0px -10px 50px;">Posted by ' + afinalRecord._data_owner + ' on ' + afinalRecord.__date_published + '</div>' +
                 Mustache.render(cardTemplate, afinalRecord) +
                 '</div>'
             } catch (e) {

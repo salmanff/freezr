@@ -66,11 +66,12 @@ const drawStandAloneApps = async function (manifest) {
         e.target.innerText = 'Error getting code.'
       } else {
         e.target.innerText = 'Your login url has been copied to the clipboard'
+        navigator.clipboard.writeText(resp.full_url)
       }
       e.target.style.color = 'black'
       e.target.style.cursor = 'default'
       e.target.onclick = null
-      messages.innerHTML = 'An app code was created for your app: ' + resp.app_password + '. Your login url is <div id ="freezrNewLoginUrl">' + resp.full_url + '</div>'
+      messages.innerHTML = 'An app code was created for your app: ' + resp.app_password + '. Your login url is <div id ="freezrNewLoginUrl">' + resp.full_url + '</div><br/><br/><br/>'
     })
   }
 
@@ -110,6 +111,7 @@ const drawStandAloneApps = async function (manifest) {
     // && (manifest.standAloneApps.ios || manifest.standAloneApps.android
     if (isIos() && manifest.standAloneApps.ios && manifest.standAloneApps.ios.link) {
       const genPasswordAndSendToIos = function (e) {
+        console.log('genPasswordAndSendToIos manifest.standAloneApps.ios.link ', manifest.standAloneApps.ios.link )
         genAppPassword(manifest.identifier, 180, function (err, resp) {
           if (err) {
             console.warn(err)

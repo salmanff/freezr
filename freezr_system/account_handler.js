@@ -688,14 +688,14 @@ exports.install_blank_app = function (req, res) {
       }
     }
   ],
-    function (err) {
-      if (err) {
-        console.warn('install_blank_app', { user: req.session.logged_in_user_id, err })
-        if (!err.code) err.code = 'err_unknown'
-        flags.add('errors', err.code, { function: 'install_blank_app', text: err.message })
-      }
-      helpers.send_success(res, { err, flags: flags.sentencify() })
-    })
+  function (err) {
+    if (err) {
+      console.warn('install_blank_app', { user: req.session.logged_in_user_id, err })
+      if (!err.code) err.code = 'err_unknown'
+      flags.add('errors', err.code, { function: 'install_blank_app', text: err.message })
+    }
+    helpers.send_success(res, { err, flags: flags.sentencify() })
+  })
 }
 exports.install_app = function (req, res) {
   // installAppFromZipFile =>    app.put('/v1/account/app_install_from_zipfile.json', accountLoggedInUserPage, addUserAppsAndPermDBs, installAppFromZipFile)
@@ -793,6 +793,7 @@ exports.install_app = function (req, res) {
         offThreadExtraction({
           file: req.file.buffer,
           name: req.file.originalname,
+          userId: req.params.logged_in_user_id,
           appFS,
           freezrUserAppListDB: req.freezrUserAppListDB,
           fileUrl: req.body.app_url,
@@ -895,6 +896,7 @@ const offThreadExtraction = function (params, callback) {
   /* file: req.file.buffer,
       name: req.file.originalname,
       appFS,
+      userId: req.params.logged_in_user_id,      
       freezrUserAppListDB: req.freezrUserAppListDB,
       fileUrl: req.body.app_url,
       versionDate: new Date().getTime(),
@@ -905,6 +907,9 @@ const offThreadExtraction = function (params, callback) {
   // Note params and appRecord both retain fileList for redundancy on error count
   // and also to allow this to be added as a scheduled task, where params variable is lost
   // and the appRecord alone is relied on
+
+  const appNameId = appIdFrom(params.userId, params.appFS.appName)
+
   if (params.init) {
     const [err, fileList] = fileHandler.appFileListFromZip(params.file)
     if (err) {
@@ -921,12 +926,12 @@ const offThreadExtraction = function (params, callback) {
         },
         offThreadWip: true
       }
-      params.freezrUserAppListDB.read_by_id(params.appFS.appName, function (err, record) {
+      params.freezrUserAppListDB.read_by_id(appNameId, function (err, record) {
         if (err) {
           felog('offThreadExtraction err in read_by_id', { params, err })
           callback(err)
         } else if (!record) {
-          params.freezrUserAppListDB.create(params.appFS.appName, { app_name: params.appFS.appName, app_display_name: params.appFS.appName, manifest: null, removed: false, offThreadStatus }, null, function (err) {
+          params.freezrUserAppListDB.create(appNameId, { app_name: params.appFS.appName, app_display_name: params.appFS.appName, manifest: null, removed: false, offThreadStatus }, null, function (err) {
             if (err) {
               callback(err)
             } else {
@@ -940,7 +945,7 @@ const offThreadExtraction = function (params, callback) {
             }
           })
         } else {
-          params.freezrUserAppListDB.update(params.appFS.appName, { offThreadStatus }, { replaceAllFields: false }, function (err, result) {
+          params.freezrUserAppListDB.update(appNameId, { offThreadStatus }, { replaceAllFields: false }, function (err, result) {
             if (err) {
               felog('offThreadExtraction err in freezrUserAppListDB', { params, err })
               callback(err)
@@ -964,7 +969,7 @@ const offThreadExtraction = function (params, callback) {
     // donnothing
     felog('offThreadExtraction - tried installing app maximum times ', params.tryNum)
   } else {
-    params.freezrUserAppListDB.read_by_id(params.appFS.appName, function (err, appRecord) {
+    params.freezrUserAppListDB.read_by_id(appNameId, function (err, appRecord) {
       if (err) {
         felog('offThreadExtraction - freezrUserAppListDB.read_by_id err ', { params, err })
         params.tryNum++
@@ -989,7 +994,7 @@ const offThreadExtraction = function (params, callback) {
               offThreadParams: null,
               offThreadWip: false
             }
-            params.freezrUserAppListDB.update(params.appFS.appName, { offThreadStatus }, { replaceAllFields: false }, function (err, result) {
+            params.freezrUserAppListDB.update(appNameId, { offThreadStatus }, { replaceAllFields: false }, function (err, result) {
               if (err) felog('offThreadExtraction -  all done but error at end', { params })
             })
           } else {
@@ -1002,7 +1007,7 @@ const offThreadExtraction = function (params, callback) {
                 filesRemaining: newFileList
               }
             }
-            params.freezrUserAppListDB.update(params.appFS.appName, { offThreadStatus }, { replaceAllFields: false }, function (err, result) {
+            params.freezrUserAppListDB.update(appNameId, { offThreadStatus }, { replaceAllFields: false }, function (err, result) {
               if (err) {
                 felog('offThreadWip freezrUserAppListDB - updating status interrupted ', { err, result })
                 params.tryNum++

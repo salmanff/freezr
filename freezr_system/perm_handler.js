@@ -257,14 +257,14 @@ exports.addMessageDb = function (req, res, dsManager, next) {
             res.sendStatus(401)
           } else {
             req.freezrGotMessages = gotMessages
-            getGotMessagesAndContactsFor(dsManager, req.body, req.freezrCepsGroups, req.freezrPrefs, function (err, gotMessageDbs, contactsDBs, groupMembers, badContacts) {
+            getGotMessagesAndContactsFor(dsManager, req.body, req.freezrCepsGroups, req.freezrPrefs, function (err, gotMessageDbs, contactsDBs, simpleRecipients, badContacts) {
               if (err) {
                 helpers.state_error('Could not access gotMessages - addMessageDb')
                 res.sendStatus(401)
               } else {
                 req.freezrOtherPersonGotMsgs = gotMessageDbs
                 req.freezrOtherPersonContacts = contactsDBs
-                req.freezrMessageToMembers = groupMembers
+                req.freezrMessageRecipients = simpleRecipients
                 req.freezrBadContacts = badContacts
                 next()
                 // exports.addUserPermsAndRequesteeDB(req, res, dsManager, next)
@@ -328,7 +328,19 @@ exports.addMessageDb = function (req, res, dsManager, next) {
     const owner = req.freezrTokenInfo.requestor_id
     dsManager.getorInitDb({ app_table: 'dev.ceps.messages.got', owner }, { freezrPrefs: req.freezrPrefs }, function (err, gotMessages) {
       if (err) {
-        helpers.state_error('Could not access sentMessages - addMessageDb')
+        helpers.state_error('Could not access gotMessages - addMessageDb')
+        res.sendStatus(401)
+      } else {
+        req.freezrGotMessages = gotMessages
+        next()
+      }
+    })
+  } else if (req.params.action === 'mark_read') { // client to server
+    // get own messages
+    const owner = req.freezrTokenInfo.requestor_id
+    dsManager.getorInitDb({ app_table: 'dev.ceps.messages.got', owner }, { freezrPrefs: req.freezrPrefs }, function (err, gotMessages) {
+      if (err) {
+        helpers.state_error('Could not access gotMessages - addMessageDb')
         res.sendStatus(401)
       } else {
         req.freezrGotMessages = gotMessages
@@ -341,52 +353,66 @@ exports.addMessageDb = function (req, res, dsManager, next) {
   }
 }
 const getGotMessagesAndContactsFor = function (dsManager, body, freezrCepsGroups, freezrPrefs, callback) {
-  const nowGetDBs = function (dsManager, body, groupMembers, callback) {
+  // onsole.log('getGotMessagesAndContactsFor', { body, freezrCepsGroups })
+  const nowGetDBs = function (dsManager, body, recipients, callback) {
     const gotMessageDbs = {}
     const contactsDBs = {}
     const badContacts = []
-
-    async.forEach(groupMembers, function (member, cb2) {
-      // onsole.log('going to share with ', member)
-      const parts = member.split('@')
-      const owner = parts[0]
-      const serverurl = parts > 1 ? parts[1] : null
-
-      if (!serverurl) {
-        dsManager.getorInitDb({ app_table: 'dev.ceps.messages.got', owner }, { freezrPrefs }, function (err, gotMessages) {
-          if (err) {
-            badContacts.push({ owner, err })
-            cb2(null)
-          } else {
-            gotMessageDbs[owner] = gotMessages
-            dsManager.getorInitDb({ app_table: 'dev.ceps.contacts', owner }, { freezrPrefs }, function (err, contactsDB) {
-              if (err) {
-                badContacts.push({ owner, err })
-                cb2(null)
-              } else {
-                contactsDBs[owner] = contactsDB
-                cb2(null)
-              }
-            })
-          }
-        })
-      } else {
+    const simpleRecipients = []
+    
+    async.forEach(recipients, function (recipient, cb2) {
+      if (typeof recipient === 'string') {
+        console.warn('currently only handling objects of receipients')
+        badContacts.push({ recipient_id: recipient, err: 'Object expected and got string' })
         cb2(null)
+      } else if (!recipient.recipient_id) {
+        badContacts.push({ recipient_host: recipient.recipient_host, err: 'no recipient_id' })
+        cb2(null)
+      } else {
+        // const parts = member.split('@')
+        // const owner = parts[0]
+        // const serverurl = parts > 1 ? parts[1] : null
+        simpleRecipients.push({ recipient_id: recipient.recipient_id, recipient_host: recipient.recipient_host })
+
+        if (!recipient.recipient_host || recipient.recipient_host === body.sender_host) {
+          dsManager.getorInitDb({ app_table: 'dev.ceps.messages.got', owner: recipient.recipient_id }, { freezrPrefs }, function (err, gotMessages) {
+            if (err) {
+              badContacts.push({ recipient_id: recipient.recipient_id, err: (err?.message || 'unknown err getting ciotnact messages') })
+              cb2(null)
+            } else {
+              gotMessageDbs[recipient.recipient_id] = gotMessages
+              dsManager.getorInitDb({ app_table: 'dev.ceps.contacts', owner: recipient.recipient_id }, { freezrPrefs }, function (err, contactsDB) {
+                if (err) {
+                  badContacts.push({ recipient_id: recipient.recipient_id, err: (err?.message || 'unknown err getting ciotnact db')  })
+                  cb2(null)
+                } else {
+                  contactsDBs[recipient.recipient_id] = contactsDB
+                  cb2(null)
+                }
+              })
+            }
+          })
+        } else {
+          cb2(null)
+        }
       }
     }, function (err) {
       if (err) {
         callback(err)
       } else {
-        callback(null, gotMessageDbs, contactsDBs, groupMembers, badContacts)
+        callback(null, gotMessageDbs, contactsDBs, simpleRecipients, badContacts)
       }
     })
   }
 
   if (body.recipient_id) {
-    const groupMembers = [(body.recipient_id + (body.recipient_host ? ('@' + body.recipient_host) : ''))]
+    // const groupMembers = [(body.recipient_id + (body.recipient_host ? ('@' + body.recipient_host) : ''))]
+    const groupMembers = [{ recipient_id: body.recipient_id, recipient_host: body.recipient_host }]
     nowGetDBs(dsManager, body, groupMembers, callback)
-  } else if (body.group_members) {
-    nowGetDBs(dsManager, body, body.group_members, callback)
+  } else if (body.recipients) {
+    nowGetDBs(dsManager, body, body.recipients, callback)
+  // } else if (body.group_members) {
+  //   nowGetDBs(dsManager, body, body.group_members, callback)
   } else if (body.group_name && typeof body.group_name === 'string') {
     freezrCepsGroups.query({ name: body.group_name }, null, function (err, groups) {
       if (err) {
@@ -426,14 +452,18 @@ exports.addUserPermsAndRequesteeDB = function (req, res, dsManager, next) {
   } else if (req.path.indexOf('ceps/message/transmit') > 0) {
     requesteeAppTable = 'dev.ceps.messages.got'
     owner = req.body.recipient_id
+  } else if (req.path.indexOf('ceps/message/mark_read') > 0) {
+    requesteeAppTable = 'dev.ceps.messages.got'
+    owner = req.freezrTokenInfo.requestor_id
   } else if (req.path.indexOf('ceps/message/verify') > 0) {
     requesteeAppTable = 'dev.ceps.messages.sent'
     owner = req.body.sender_id
   }
+  // onsole.log('addUserPermsAndRequesteeDB ', { requesteeAppTable, owner, path: req.path, tokeninfo: req.freezrTokenInfo })
 
   fdlog('addUserPermsAndRequesteeDB ', { requesteeAppTable, owner })
   const oac = getListOfItems ? { app_tables: requesteeAppTable, owner } : { app_table: requesteeAppTable, owner }
-  dsManager.getorInitDbs(oac, { freezrPrefs: req.freezrPrefs}, function (err, freezrRequesteeDB) {
+  dsManager.getorInitDbs(oac, { freezrPrefs: req.freezrPrefs }, function (err, freezrRequesteeDB) {
     if (!mayNotNeedTableId && err) {
       felog('addUserPermsAndRequesteeDB', 'Could not access main freezrRequesteeDB  - addUserPermsAndRequesteeDB', err)
       res.sendStatus(401)

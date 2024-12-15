@@ -405,12 +405,26 @@ freezr.perms.validateDataOwner = function (options, callback) {
     }
   })
 }
+freezr.feps.markMessagesRead = function (messageIds, markAll, callback) {
+  // toShare needsrecipient_host
+  if (!messageIds && !markAll) {
+    callback(new Error('incomplete message fields - need either messageIds or markAll '))
+  } else if (markAll && messageIds) {
+    callback(new Error('incomplete message fields - need either messageIds or markAll, not both '))
+  } else if (!markAll && (!Array.isArray(messageIds) || messageIds.length < 1)) {
+    callback(new Error('incomplete message fields - need messageIds to be an array of ids '))
+  } else {
+    const opts = { message_ids: messageIds, markAll }
+    console.log('markMessagesRead in fcore', opts)
+    freezerRestricted.connect.ask('/ceps/message/mark_read', opts, callback)
+  }
+}
 freezr.ceps.sendMessage = function (toShare = {}, callback) {
   // toShare needs recipient_host only if sending to other server
-  if (!toShare || !toShare.recipient_id ||
+  if (!toShare || (!toShare.recipient_id && !toShare.recipients) || // nb should reeally check within recipients
     (!toShare.sharing_permission && !toShare.messaging_permission) || !toShare.contact_permission ||
     !toShare.table_id || !toShare.record_id) {
-    callback(new Error('incomplete message fields - need al of recipient_host, recipient_id, sharing_permission, contact_permission, table_id, record_id ', { toShare }))
+    callback(new Error('incomplete message fields - need al of recipient_host, recipient_id, sharing_permission, contact_permission, table_id, record_id '))
   } else {
     toShare.type = toShare.sharing_permission ? 'share_records' : 'message_records'
     toShare.app_id = freezrMeta.appName

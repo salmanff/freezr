@@ -799,7 +799,7 @@ const getAppTokenParams = function (tokendb, req, callback) {
     } else if (!record.requestor_id || !record.owner_id || !record.app_name) {
       callback(helpers.error('mismatch', 'parameters do not match expected value (check_app_token_and_params)'))
     } else if (record.logged_in && record.requestor_id !== req.session.logged_in_user_id) {
-      console.warn('user_id does not match logged in  ', record.logged_in, 'ecord.requestor_id', record.requestor_id, 'logged_in_user_id', req.session.logged_in_user_id, 'url ', req.url)
+      console.warn('user_id does not match logged in  ', record.logged_in, ' Record.requestor_id', record.requestor_id, 'logged_in_user_id', req.session.logged_in_user_id, 'url ', req.url)
       callback(helpers.error('mismatch', 'user_id does not match logged in (check_app_token_and_params) '))
     } else if (record.one_device && record.user_device !== req.session.device_code) {
       callback(helpers.error('mismatch', 'one_device checked but device does not match (check_app_token_and_params) '))

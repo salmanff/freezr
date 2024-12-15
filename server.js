@@ -254,7 +254,7 @@ const userAPIRights = function (req, res, next) {
 }
 const possibleUserAPIForMessaging = function (req, res, next) {
   // for ceps/message/:action
-  if (['initiate'].includes(req.params.action)) {
+  if (['initiate','mark_read'].includes(req.params.action)) {
     accessHandler.userAPIRights(req, res, dsManager, next)
   } else {
     next()

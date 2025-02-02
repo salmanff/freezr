@@ -23,6 +23,8 @@ const permHandler = require('./freezr_system/perm_handler.js')
 const publicHandler = require('./freezr_system/public_handler.js')
 const DS_MANAGER = require('./freezr_system/ds_manager.js')
 
+const systemExtensions = require('./freezr_system/systemextensions.js')
+
 try { // for simualting env vars on localhost.
   const envSimulatForLocalDev = require('./zProcessDotEnvSimulatorForLocalDev.js')
   if (envSimulatForLocalDev && envSimulatForLocalDev.envParams) {
@@ -249,12 +251,13 @@ const redirectToIndex = function (req, res, next) {
   res.redirect(req.path + '/index.html')
 }
 const userAPIRights = function (req, res, next) {
+  console.log('req.path = ' + req.path)
   req.freezrPrefs = freezrPrefs // needed for unifiedDb
   accessHandler.userAPIRights(req, res, dsManager, next)
 }
 const possibleUserAPIForMessaging = function (req, res, next) {
   // for ceps/message/:action
-  if (['initiate','mark_read'].includes(req.params.action)) {
+  if (['initiate', 'mark_read'].includes(req.params.action)) {
     accessHandler.userAPIRights(req, res, dsManager, next)
   } else {
     next()
@@ -284,9 +287,13 @@ const userLogOut = function (req, res, next) {
   req.freezrPrefs = freezrPrefs // needed for unifiedDb
   accessHandler.userLogOut(req, res, dsManager, next)
 }
-const readWriteUserData = function (req, res, next) { 
+const readWriteUserData = function (req, res, next) {
   req.freezrPrefs = freezrPrefs // needed for unifiedDb
   permHandler.readWriteUserData(req, res, dsManager, next)
+}
+const systemExtensionPerms = function (req, res, next) {
+  req.freezrPrefs = freezrPrefs // needed for unifiedDb
+  permHandler.systemExtensionPerms(req, res, dsManager, next)
 }
 const addUserAppsAndPermDBs = function (req, res, next) {
   req.freezrPrefs = freezrPrefs // needed for unifiedDb
@@ -330,7 +337,7 @@ const addPublicUserFs = function (req, res, next) {
   permHandler.addPublicUserFs(req, res, dsManager, next)
 }
 const addUserFs = function (req, res, next) {
-  req.freezrPrefs = freezrPrefs // needed for unifiedDb
+  req.freezrPrefs = freezrPrefs // Needed for unifiedDb
   permHandler.addUserFs(req, res, dsManager, next)
 }
 const loggedInPingInfo = function (req, res, next) {
@@ -434,7 +441,6 @@ if (toReviewAndRedo) console.warn('Use toReviewAndRedo to debug ')
 
 // APP PAGES AND FILE OPERATIONS
 const addAppUses = function (cookieSecrets) {
-  console.log('review cookie mgmt and regenerate regularly')
   // TEST COOKIE ENHANCEMENETS - headers and cookies 2024 - to review and also create req.session.regenerate(function(err) { }) after logout and updates etc
   // app.use(session({
   //   cookie: {
@@ -466,7 +472,7 @@ const addAppUses = function (cookieSecrets) {
 
   // todo - to redo
   app.get('/favicon.ico', publicUserPage, servePublicAppFile)
-
+  
   // app.get('/app_files/:user_id/:app_name/public/static/:file', publicAppFile, servePublicAppFile)
   // app.get('/app_files/@:user_id/:app_name/public/static/:file', publicAppFile, servePublicAppFile)
   // app.get('/app_files/:app_name/public/:file', loggedInUserAppFile, servePublicAppFile) // since there is no user id, iser must be logged in
@@ -525,7 +531,7 @@ const addAppUses = function (cookieSecrets) {
   app.post('/v1/account/applogout', userAppLogOut)
 
   app.post('/v1/account/appMgmtActions.json', accountLoggedInAPI, addUserAppsAndPermDBs, accountHandler.appMgmtActions)
-  app.put('/v1/account/data/setPrefs.json', accountLoggedInAPI, addAllUsersDb, addUserAppsAndPermDBs, accountHandler.setPrefs)
+  app.put('/v1/account/data/:action', accountLoggedInAPI, addAllUsersDb, addUserAppsAndPermDBs, accountHandler.accountActions)
   app.put('/v1/account/changePassword.json', accountLoggedInAPI, addAllUsersDb, accountHandler.changePassword)
   app.get('/v1/account/apppassword/generate', accountLoggedInAPI, addAppTokenDB, accountHandler.app_password_generate_one_time_pass)
   app.get('/v1/account/apppassword/updateparams', accountLoggedInAPI, addAppTokenDB, accountHandler.app_password_update_params)
@@ -571,8 +577,8 @@ const addAppUses = function (cookieSecrets) {
   app.get('/ceps/ping', addVersionNumber, loggedInPingInfo, accountHandler.ping)
 
   // Permissions
-  app.get('/ceps/perms/view/:app_name', (req, res) => res.redirect('/account/perms/' + req.params.app_name +
-    (req.query.name ? ('?permission_name=' + req.query.name) : '')))
+  // app.get('/ceps/perms/view/:app_name', (req, res) => res.redirect('/account/perms/' + req.params.app_name +
+  //  (req.query.name ? ('?permission_name=' + req.query.name) : '')))
   app.get('/ceps/perms/get', userAPIRights, addUserPermDBs, accountHandler.CEPSrequestorAppPermissions)
   app.get('/ceps/perms/validationtoken/:action', addValidationDBs, accountHandler.CEPSValidator) // for actions validate, verify
   app.post('/ceps/perms/validationtoken/:action', userAPIRights, addValidationDBs, accountHandler.CEPSValidator) // for action set
@@ -603,6 +609,56 @@ const addAppUses = function (cookieSecrets) {
   app.get('/feps/getuserfiletoken/:permission_name/:app_name/:user_id/*', userAPIRights, readWriteUserData, addUserFilesDb, appHandler.read_record_by_id) // collection_name is files
   app.get('/feps/userfiles/:app_name/:user_id/*', addUserFs, appHandler.sendUserFileWithFileToken) // collection_name is files
   app.get('/feps/fetchuserfiles/:app_name/:user_id/*', userAPIRights, addUserFs, appHandler.sendUserFileWithAppToken) // collection_name is files
+
+  // Ugly hacks before using freezrAttributes in the funcs and msking sure it doesnt create any issues
+  const addAppFsForSystemExtensions = function (req, res, next) {
+    // nb - this is not needed for admin functions
+    req.params.user_id = req.freezrAttributes.owner_user_id // req.session?.logged_in_user_id /// can be changed o 
+    req.params.app_name = req.freezrAttributes?.requestor_app 
+    accessHandler.addAppFsForApi(req, res, dsManager, next)
+  }
+  const uploadIfNeedbe = function (req, res, next) { // used for systemExtensions api
+    function isEmpty (obj) {
+      for (const prop in obj) {
+        if (Object.hasOwn(obj, prop)) {
+          return false
+        }
+      }
+      return true
+    }
+    if (isEmpty(req.body)) {
+      // onsole.log('addUserFsForSystemExtensions - uploading file')
+      upload(req, res, function (err) {
+        if (err) {
+          console.warn('multer err ', err)
+          helpers.send_failure(res, helpers.error('file upload error', err), 'server.js', VERSION, 'server')
+        } else {
+          fdlog('post upload have file', Boolean(req.file))
+          if (req.body.options && (typeof req.body.options === 'string')) req.body = JSON.parse(req.body.options)
+          next()
+        }
+      })
+    } else {
+      fdlog('addUserFsForSystemExtensions - NO file')
+      next()
+    }
+  }
+  const addUserFsForSystemExtensions = function (req, res, next) {
+    // not required for local ADMIN_FUNCTIONS but okay to keep
+    req.params.user_id = req.freezrAttributes.owner_user_id //  req.freezrAttributes.owner_user_idreq.session?.logged_in_user_id
+    req.params.app_name = req.freezrAttributes?.requestor_app
+    req.freezrPrefs = freezrPrefs // Needed for unifiedDb
+    permHandler.addUserFs(req, res, dsManager, next)
+  }
+  const addPublicFsForSystemExtensions = function (req, res, next) {
+    if (systemExtensions.LOCAL_FUNCTIONS.includes(req.params.task)) {
+      req.freezrPrefs = freezrPrefs // Needed for unifiedDb
+      accessHandler.addPublicFsForSystemExtensions(req, res, dsManager, next)
+    } else {
+      next()
+    }
+  }
+  app.use('/feps/systemextensions/:task', userAPIRights, uploadIfNeedbe, systemExtensionPerms, addAppFsForSystemExtensions, addPublicFsForSystemExtensions, addUserFsForSystemExtensions, systemExtensions.tasks) // first two are only ethere to help hasAtLeastOnePublicRecord
 
   // permissions
   app.get('/v1/permissions/gethtml/:app_name', userAPIRights, addUserPermDBs, accountHandler.generatePermissionHTML)
@@ -898,7 +954,7 @@ async.waterfall([
   if (err) helpers.warning('startup_waterfall', 'STARTUP ERR ', ' - code: ', err?.code, ' - err.message:', err.message, ' - name ', err?.name, ' statusCode: ', err?.statusCode)
 
   if (process.env.DB_UNIFICATION) console.log('\nUnification strategy: ' + process.env.DB_UNIFICATION)
-
+  
   // todo move to environment_defaults (short term fix in case of change in port (eg heroku)
   const theport = (process && process.env && process.env.PORT) ? process.env.PORT : dsManager.initialEnvironment?.port
 

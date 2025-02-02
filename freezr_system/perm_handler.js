@@ -5,6 +5,7 @@ exports.version = '0.0.200'
 /* global User */
 
 const helpers = require('./helpers.js')
+const systemExtensions = require('./systemextensions.js')
 const async = require('async')
 
 // dsManager.getorInitDb({app_table: 'info.freezr.account.app_list', owner: freezrAttributes.owner_user_id}, {}, function(err, requesteeAppListDB) {})
@@ -19,22 +20,22 @@ exports.readWriteUserData = function (req, res, dsManager, next) {
     requestor_app: null,
     requestor_user_id: null,
     own_record: false, // ie not permitted
-    record_is_permitted: false,
+    record_is_permitted: false, 
     grantedPerms: []
   }
 
   freezrAttributes.requestor_app = req.freezrTokenInfo.app_name
   freezrAttributes.requestor_user_id = req.freezrTokenInfo.requestor_id
-  freezrAttributes.owner_user_id = req.freezrTokenInfo.owner_id
+  freezrAttributes.owner_user_id = req.body.owner_id || req.freezrTokenInfo.owner_id
 
   if (!req.params) req.params = {}
   if (!req.query) req.query = {}
-  freezrAttributes.permission_name = req.params.permission_name /* for files get */ || req.query.permission_name /* for CEPS get */
+  freezrAttributes.permission_name = req.params.permission_name /* for files get */ || req.body.permission_name /* for CEPS get */
 
   const requestFile = helpers.startsWith(req.path, '/feps/getuserfiletoken') || helpers.startsWith(req.path, '/feps/upload/')// /feps/getuserfiletoken
   if (requestFile) {
     req.params.app_table = req.params.app_name + '.files'
-    freezrAttributes.owner_user_id = req.params.user_id
+    freezrAttributes.owner_user_id = req.params.user_id // 2025 -> to check 
   }
 
   if (!freezrAttributes.owner_user_id) freezrAttributes.owner_user_id = freezrAttributes.requestor_user_id
@@ -100,7 +101,7 @@ exports.readWriteUserData = function (req, res, dsManager, next) {
           granted: true
         }
         if (freezrAttributes.permission_name) {
-          dbQuery.permission_name = freezrAttributes.permission_name
+          dbQuery.name = freezrAttributes.permission_name
         }
 
         if (freezrAttributes.owner_user_id === 'public') {
@@ -116,7 +117,7 @@ exports.readWriteUserData = function (req, res, dsManager, next) {
               res.sendStatus(401)
             } else {
               // [2021 - groups] freezrAttributes.reader
-              fdlog('permDB dbQuery ', { dbQuery, grantedPerms })
+              fdlog('permDB dbQuery ', { dbQuery, grantedPerms, freezrAttributes })
               freezrAttributes.grantedPerms = grantedPerms
               getDbTobeRead()
             }
@@ -125,6 +126,57 @@ exports.readWriteUserData = function (req, res, dsManager, next) {
       }
     })
   }
+}
+
+exports.systemExtensionPerms = async function (req, res, dsManager, next) {
+  // assume token info in in req.freezrTokenInfo => {requestor_id, app_name, loggedIn}
+  fdlog('readWriteUserData ', { freezrTokenInfo: req.freezrTokenInfo, body: req.body })
+
+  const freezrAttributes = { }
+
+  freezrAttributes.requestor_app = req.freezrTokenInfo?.app_name
+  freezrAttributes.requestor_user_id = req.freezrTokenInfo?.requestor_id
+  freezrAttributes.owner_user_id = freezrAttributes.requestor_user_id
+  freezrAttributes.permission_name = req.body?.permission_name
+
+  // for serverless
+  const permQuery = {
+    requestor_app: freezrAttributes.requestor_app,
+    granted: true,
+    permission_name: freezrAttributes.permission_name
+  }
+
+  try {
+    if (systemExtensions.LOCAL_FUNCTIONS.includes(req.params.task)) {
+      if (!req.session.logged_in_as_admin && systemExtensions.ADMIN_FUNCTIONS.includes(req.params.action)) throw new Error('uploading systemExtensions can only be done by admin users')
+      // todo - consider adding permissions for users to invoke locally
+    } else {
+      const permDB = await dsManager.async.getUserPerms(freezrAttributes.owner_user_id, { freezrPrefs: req.freezrPrefs })
+      // const permDB = await dsManager.asyncGetUserPerms(freezrAttributes.owner_user_id, { freezrPrefs: req.freezrPrefs })
+      const perms = permDB.async.query(permQuery, {})
+      if (!perms || perms.length === 0) {
+        throw new Error('no permission found')
+      }
+      freezrAttributes.permisson = perms[0]
+
+      freezrAttributes.slParams = await dsManager.async.getUserSlParams(freezrAttributes.owner_user_id, { freezrPrefs: req.freezrPrefs })
+    } 
+    // permission has been granted
+    if (req.body.read_collection_name) {
+      freezrAttributes.freezrDbs = {}
+      // todo - should do for each collection_name in an array or object
+      const appTableName = req.freezrTokenInfo.app_name + '.' + req.body.read_collection_name
+      freezrAttributes.freezrDbs[req.body.read_collection_name] = await dsManager.async.getorInitDb({ app_table: appTableName, owner: freezrAttributes.owner_user_id }, { freezrPrefs: req.freezrPrefs })
+      // const testqueryresults = await freezrAttributes.freezrDbs[req.body.read_collection_name].async.query({}, {})
+      // console.log('testquery', { appTableName, owner: freezrAttributes.owner_user_id, testqueryresults })
+    }
+    req.freezrAttributes = freezrAttributes
+    next()
+  } catch (e) {
+    felog('systemExtensionPerms', 'error in getting db', e)
+    res.sendStatus(401)
+  }
+
 }
 
 exports.addUserAppsAndPermDBs = function (req, res, dsManager, next) {
@@ -156,7 +208,20 @@ exports.addUserPermDBs = function (req, res, dsManager, next) {
       res.sendStatus(401)
     } else {
       req.freezrUserPermsDB = freezrUserPermsDB
-      next()
+      if (req.query?.owner && req.query?.owner !== req.freezrTokenInfo.requestor_id) {
+        dsManager.getorInitDb({ app_table: 'info.freezr.account.permissions', owner: req.query?.owner }, { freezrPrefs: req.freezrPrefs }, function (err, freezrDataOwnerPermsDB) {
+          if (err) {
+            helpers.state_error('Could not access main freezrUserPermsDB - addUserAppsAndPermDBs')
+            req.freezrDataOwnerPermsDB = null
+            next()
+          } else {
+            req.freezrDataOwnerPermsDB = freezrDataOwnerPermsDB
+            next()
+          }
+        })
+      } else {
+        next()
+      }
     }
   })
 }

@@ -1,4 +1,4 @@
-// picture.js - a service in freezr
+// picture.js - a system extension in freezr
 
 const sharp = require('sharp')
 

@@ -95,12 +95,13 @@ exports.ENV_PARAMS = {
     aws: {
       type: 'aws',
       label: 'AWS (Amazon)',
-      msg: 'You can use Amazon S3 storage as your file system. Please obtain an access token an enter it here.',
+      msg: 'You can use Amazon S3 storage as your file system. Please obtain an access token an enter it here. (If you already have a bucket enter it below, or make sure the token has rights to create one.',
       forPages: ['unRegisteredUser', 'newParams'],
       fields: [
         { name: 'accessKeyId', display: 'Access Key Id:' },
         { name: 'secretAccessKey', display: 'Secret Access Key:' },
-        { name: 'region', display: 'Region:' }
+        { name: 'region', display: 'Region:' },
+        { name: 'bucket', display: 'Bucket Name:', optional: true }
       ]
     },
     azure: {
@@ -361,7 +362,6 @@ const fsParseCreds = {
 const DS_MANAGER = require('../ds_manager.js')
 exports.checkDB = function (env, options, callback) {
   fdlog('checkdb ', { env, options })
-  console.log('checkdb ', { env: env.dbParams?.type, options })
   // options : { okToCheckOnLocal}
   const TEST_OAC = {
     owner: 'test',
@@ -461,7 +461,7 @@ exports.checkFS = function (env, options, callback) {
     },
     function (goUserAppFS, cb) {
       userAppFS = goUserAppFS
-      userRootFolder = (userAppFS.fsParams.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/' + userId + '/' + 'files/' + appName + '/'
+      userRootFolder = (userAppFS.fsParams?.rootFolder || helpers.FREEZR_USER_FILES_DIR) + '/' + userId + '/' + 'files/' + appName + '/'
       if (options && options.getRefreshToken && userAppFS.credentials) returns.refreshToken = userAppFS.credentials.refreshToken
       cb(null)
     },

@@ -213,6 +213,8 @@ const getPermSentence = function (aPerm, currentAppName) {
     sentence += accessWord + ' individual data records from the table <b ' + (otherTable ? 'style="color:purple;")' : '') + '>' + aPerm.table_id + '</b>, with  ' + (aPerm.sharable_groups ? ('the following groups:  ' + aPerm.sharable_groups.join(' ')) : 'others') + '.<br/> This allows the app to send specific records and related messgaes to third parties.'
   } else if (aPerm.type === 'share_records') {
     sentence += accessWord + ' individual data records from the table <b ' + (otherTable ? 'style="color:purple;")' : '') + '>' + aPerm.table_id + '</b>, with  ' + (aPerm.sharable_groups ? ('the following groups:  ' + aPerm.sharable_groups.join(' ')) : 'others') + '.<br/> This allows the app to give access to any third party to specific records even after they change.'
+  } else if (aPerm.type === 'use_serverless') {
+    sentence += accessWord + ' your serverless credentials and run compute.'
   } else {
     sentence += accessWord + ' some records - UNKNOWN SCOPE'
   }

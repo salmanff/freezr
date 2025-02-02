@@ -507,7 +507,7 @@ exports.checkManifest = function (manifest, appName, appVersion, flags) {
     }
 
     if (manifest.pages) {
-      for (var page in manifest.pages) {
+      for (const page in manifest.pages) {
         if (Object.prototype.hasOwnProperty.call(manifest.pages, page)) {
           if (exports.fileExt(manifest.pages[page].html_file) !== 'html') flags.add('warnings', 'config_file_bad_ext', { ext: 'html', filename: manifest.pages[page].html_file })
           if (manifest.pages[page].css_files) {
@@ -522,7 +522,7 @@ exports.checkManifest = function (manifest, appName, appVersion, flags) {
             if (typeof manifest.pages[page].script_files === 'string') manifest.pages[page].script_files = [manifest.pages[page].script_files]
             manifest.pages[page].script_files.forEach(
               function (oneFile) {
-                if (exports.fileExt(oneFile) !== 'js') {
+                if (exports.fileExt(oneFile) !== 'js' && exports.fileExt(oneFile) !== 'mjs') {
                   flags.add('warnings', 'config_file_bad_ext', { ext: 'js', filename: oneFile })
                 }
               })

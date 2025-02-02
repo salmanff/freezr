@@ -20,10 +20,249 @@ const ROOT_DIR = helpers.removeLastpathElement(__dirname) + pathSep
 const ENV_FILE_DIR = path.normalize(ROOT_DIR + 'node_modules' + pathSep + 'nedb-asyncfs' + pathSep + 'env' + pathSep)
 
 function DATA_STORE_MANAGER () {
-  this.freezrIsSetup = false
-  this.users = {} // each a USER_DS
-  this.visitLogs = {}
+  const self = this
+
+  self.freezrIsSetup = false
+  self.users = {} // each a USER_DS
+  self.visitLogs = {}
+
+  self.getOrSetUserDS = function (owner, options, callback) {
+    fdlog('getOrSetUserDS for ', { owner })
+  
+    if (!options || !options.freezrPrefs) throw new Error('No options passed to getorsetuserprefs ' + JSON.stringify(options))
+  
+    if (self.users[owner]) {
+      // fdlog('getOrSetUserDS userds exists - sending link to ', owner)
+      callback(null, self.users[owner])
+    } else {
+      const userOac = { owner: 'fradmin', app_name: 'info.freezr.admin', collection_name: 'users' }
+      const allUsersDb = self.getDB(userOac)
+      allUsersDb.query({ user_id: owner }, null, function (err, ownerEntries) {
+        fdlog('getOrSetUserDS - going to reset - got users in getOrSetUserDS ', { ownerEntries, owner, err })
+        if (err) throw err
+        if (!ownerEntries || ownerEntries.length === 0) {
+          felog('ds.getOrSetUserDS', 'no user in ds for c' + owner)
+          callback(new Error(('no user ' + owner)))
+        } else {
+          fdlog('todonow need to make sure it has rights to use the default params', { ownerEntries })
+          const dbParams = ownerEntries[0].dbParams
+            ? (ownerEntries[0].dbParams.type === 'system'
+                ? self.systemEnvironment.dbParams
+                : ownerEntries[0].dbParams)
+            : null
+          const fsParams = ownerEntries[0].fsParams
+            ? (ownerEntries[0].fsParams.type === 'system'
+                ? self.systemEnvironment.fsParams
+                : ownerEntries[0].fsParams)
+            : null
+          if (dbParams && ownerEntries[0].dbParams?.type === 'system') dbParams.systemDb = true
+          if (dbParams && ownerEntries[0].dbParams?.type === 'system') dbParams.useUserIdsAsDbName = options?.freezrPrefs?.useUserIdsAsDbName
+          if (dbParams && ownerEntries[0].dbParams?.type === 'system') dbParams.useUnifiedCollection = options?.freezrPrefs?.useUnifiedCollection
+          // fdlog('nowdec30 - todo if system and not nedb, pass unified db')
+          const slParams = ownerEntries[0].slParams
+  
+          if (fsParams && fsParams.type && dbParams && dbParams.type) {
+            self.users[owner] = new USER_DS(owner, { dbParams, fsParams, slParams, limits: ownerEntries[0].limits, userPrefs: ownerEntries[0].userPrefs })
+            callback(null, self.users[owner])
+            // get current resources
+            if (ownerEntries[0].limits && ownerEntries[0].limits.storage) {
+              self.users[owner].setTimerToRecalcStorage()
+            }
+          } else {
+            felog('ds.getOrSetUserDS', 'incomplete user ' + owner)
+            fdlog('ds.getOrSetUserDS', 'incomplete user ', { owner, fsParams, dbParams })
+            callback(new Error('user incomplete'))
+          }
+        }
+      })
+    }
+  }
+
+  self.setSystemUserDS = function (owner, env) {
+    // onsole.log('setSystemUserDS for ', { owner })
+    if (!owner) {
+      throw new Error('no owner for setSystemUserDS')
+    } else if (owner === 'undefined') {
+      throw new Error('undefined string owner for setSystemUserDS - SNBH') // fdlog temporary debug todo remvoe?
+    } else if (!env || !env.fsParams || !env.dbParams) {
+      throw new Error('undefined env params for user - SNBH') // fdlog temporary debug todo remvoe?
+    } else if (!['test', 'public', 'fradmin'].includes(owner)) {
+      console.warn('setSystemUserDS only used for system uses - cannot initiate for ', { owner })
+      throw new Error('setSystemUserDS only used for system uses - cannot initiate for ' + owner)
+    } else {
+      self.users[owner] = new USER_DS(owner, env)
+      // fdlog('todo - add allowUsersToUseAdminDs to freezr_environment params on set up')
+  
+      // if (!env && !this.allowUsersToUseAdminDs to freezr_environment params on set up) throw new Error ('Users need to set their own datastores')
+      return self.users[owner]
+    }
+  }
+  self.getDB = function (OAC) {
+    // fdlog('getDB for ', OAC.owner, 'table: ', appTableName(OAC))
+    if (self.users && self.users[OAC.owner] && self.users[OAC.owner].appcoll) {
+      return self.users[OAC.owner].appcoll[appTableName(OAC)]
+    } else {
+      felog('ds_manager getDB', 'could not find user DB', OAC.owner)
+      return null
+    }
+  }
+
+  self.getUserPerms = function (owner, options, callback) {
+    // const self = this
+    self.getOrSetUserDS(owner, options, function (err, ownerDS) {
+      if (err) {
+        felog('getUserPerms', 'err for ' + owner, err.message)
+        callback(err)
+      } else {
+        const permOAC = {
+          app_name: 'info.freezr.account',
+          collection_name: 'permissions',
+          owner
+        }
+        ownerDS.getorInitDb(permOAC, {}, callback)
+        // old ownerDS.initOacDB(permOAC, {}, callback)
+      }
+    })
+  }
+  self.initOacDB = function (OAC, options = {}, callback) {
+    // options: env - if want to use a special env for that ACO
+    const ownerDS = self.users[OAC.owner]
+    if (!ownerDS) throw new Error('Cannot intiiate user db without a user object. (Initiate user first.)')
+    fdlog('pre init db store', { ownerDS })
+
+    ownerDS.initOacDB(OAC, options = {}, callback)
+  }
+  self.getorInitDb = function (OAC, options, callback) {
+    if (!OAC || !OAC.owner) {
+      callback(new Error('cannot get db without AOC'))
+    } else {
+      self.getOrSetUserDS(OAC.owner, options, function (err, userDS) {
+        if (err) {
+          felog('getorInitDb err for ' + OAC.owner, err)
+          callback(err)
+        } else {
+          userDS.getorInitDb(OAC, options, callback)
+        }
+      })
+    }
+  }
+  self.getorInitDbs = function (OAC, options, callback) {
+    // OAC can take a single collectiona nd app_name app_table ot an array of aoo_tables or
+    fdlog('getorInitDbs ', { OAC, options })
+    if (!OAC || !OAC.owner || (!OAC.app_table && !OAC.app_tables)) {
+      callback(new Error('cannot get db without a properly formed AOC'))
+    } else {
+      self.getOrSetUserDS(OAC.owner, options, function (err, userDS) {
+        if (err) {
+          felog('getorInitDb err for ' + OAC.owner, err.message)
+          callback(err)
+        } else if (OAC.app_tables && Array.isArray((OAC.app_tables))) {
+          // !oac.app_name  + collection cannot take multiple values but oac.app_table can be an array of tableas
+          const list = []
+          async.forEach(OAC.app_tables, function (tableName, cb) {
+            userDS.getorInitDb({ owner: OAC.owner, app_table: tableName }, options, function (err, db) {
+              if (db) list.push(db)
+              cb(err)
+            })
+          },
+          function (err) {
+            if (err) {
+              callback(err)
+            } else {
+              callback(null, list)
+            }
+          })
+        } else {
+          userDS.getorInitDb(OAC, options, callback)
+        }
+      })
+    }
+  }
+
+  self.initAdminDBs = function (env, freezrPrefs, callback) {
+    const adminDBs = ['permissions', 'users', 'oauthors', 'app_tokens', 'params']
+    const adminOACs = adminDBs.map(coll => {
+      return {
+        owner: 'fradmin',
+        app_name: 'info.freezr.admin',
+        collection_name: coll
+      }
+    })
+    // adminOACs.push({
+    //   owner: 'public',
+    //   app_table: 'dev.ceps.privatefeeds.codes'
+    // })
+    if (!env?.dbParams || !freezrPrefs) console.warn('initAdminDBs', { adminOACs, env, freezrPrefs })
+    console.warn('initAdminDBs', { db: env.dbParams?.type, fs: env.fsParams?.type })
+    if (!env?.dbParams || !freezrPrefs) throw new Error('cannot init admin dbs without an env or admin db')
+    // const self = this
+    self.setSystemUserDS('public', env)
+    self.setSystemUserDS('fradmin', env)
+    async.forEach(adminOACs, function (oac, cb) {
+      // if (!self.users[oac.owner]) {
+      self.getOrSetUserDS(oac.owner, { freezrPrefs }, function (err, userDS) {
+        if (err) {
+          felog('initAdminDBs', 'err for ' + oac.owner, err.message)
+          cb(err)
+        } else {
+          self.initOacDB(oac, { addCache: true }, cb)
+        }
+      })
+      // } else {
+      //   self.initOacDB(oac, { addCache: true }, cb)
+      // }
+    },
+    function (err) {
+      if (err) console.warn('err in initadminDBs', { err })
+      callback(err)
+    })
+  }
+  self.initUserAppFSToGetCredentials = function (user, appName, options = {}, callback) {
+    // options: env - if want to use a special env for that ACO
+    const ownerDS = self.users[user]
+    if (!ownerDS) throw new Error('Cannot intitiate user fs without a user object. (Initiate user first.) ' + user)
+
+    ownerDS.initAppFS(appName, options, (err, appFS) => {
+      // fdlog('got returns appfs for initUserAppFSToGetCredentials ', { err }, 'creds: ', appFS.fs.credentials)
+      if (err || !appFS || !appFS.fs || !appFS.fs.credentials) {
+        callback((err || new Error('could not get app fs credentials  in initalising')))
+      } else {
+        callback(null, appFS.fs.credentials)
+      }
+    })
+  }
+  self.getOrInitUserAppFS = function (user, appName, options = {}, callback) {
+    // options: env - if want to use a special env for that ACO
+    const ownerDS = self.users[user]
+    if (!ownerDS) throw new Error('Cannot intitiate user fs without a user object. (Initiate user first.) ' + user)
+
+    ownerDS.getorInitAppFS(appName, options, callback)
+  }
+
+  self.getUserSlParams = function (owner, options, callback) {
+    self.getOrSetUserDS(owner, options, function (err, ownerDS) {
+      if (err) {
+        felog('getUserSlParams', 'err for ' + owner, err.message)
+        callback(err)
+      } else {
+        callback(null, ownerDS.slParams)
+      }
+    })
+  }
+
+  // self.asyncGetUserPerms = convertToAsync(self.getUserPerms)
+  self.async = {
+    getUserPerms: convertToAsync(self.getUserPerms),
+    getorInitDb: convertToAsync(self.getorInitDb),
+    getUserSlParams: convertToAsync(self.getUserSlParams)
+  }
 }
+// DATA_STORE_MANAGER.prototype.asyncGetUserPerms = convertToAsync(DATA_STORE_MANAGER.prototype.getUserPerms)
+
+// USER_DS.prototype.async = {
+//   getorInitDb: convertToAsync(USER_DS.prototype.getorInitDb)
+// }
+
 function USER_DS (owner, env) {
   const self = this
   // fdlog({ owner, env })
@@ -33,6 +272,7 @@ function USER_DS (owner, env) {
   fdlog('todonow need to make sure defaultparams can be used.')
   this.fsParams = env.fsParams
   this.dbParams = env.dbParams
+  this.slParams = env.slParams
   this.userPrefs = env.userPrefs || {
     blockMsgsToNonContacts: false,
     blockMsgsFromNonContacts: false
@@ -56,86 +296,6 @@ function USER_DS (owner, env) {
   }
   this.appfiles = {
     // app_name : {fsObject, dbObject, fsParams}
-  }
-}
-
-DATA_STORE_MANAGER.prototype.setSystemUserDS = function (owner, env) {
-  // onsole.log('setSystemUserDS for ', { owner })
-  if (!owner) {
-    throw new Error('no owner for setSystemUserDS')
-  } else if (owner === 'undefined') {
-    throw new Error('undefined string owner for setSystemUserDS - SNBH') // fdlog temporary debug todo remvoe?
-  } else if (!env || !env.fsParams || !env.dbParams) {
-    throw new Error('undefined env params for user - SNBH') // fdlog temporary debug todo remvoe?
-  } else if (!['test', 'public', 'fradmin'].includes(owner)) {
-    console.warn('setSystemUserDS only used for system uses - cannot initiate for ', { owner })
-    throw new Error('setSystemUserDS only used for system uses - cannot initiate for ' + owner)
-  } else {
-    this.users[owner] = new USER_DS(owner, env)
-    // fdlog('todo - add allowUsersToUseAdminDs to freezr_environment params on set up')
-
-    // if (!env && !this.allowUsersToUseAdminDs to freezr_environment params on set up) throw new Error ('Users need to set their own datastores')
-    return this.users[owner]
-  }
-}
-DATA_STORE_MANAGER.prototype.getDB = function (OAC) {
-  // fdlog('getDB for ', OAC.owner, 'table: ', appTableName(OAC))
-  if (this.users && this.users[OAC.owner] && this.users[OAC.owner].appcoll) {
-    return this.users[OAC.owner].appcoll[appTableName(OAC)]
-  } else {
-    felog('ds_manager getDB', 'could not find user DB', OAC.owner)
-    return null
-  }
-}
-DATA_STORE_MANAGER.prototype.getOrSetUserDS = function (owner, options, callback) {
-  fdlog('getOrSetUserDS for ', { owner })
-
-  if (!options || !options.freezrPrefs) throw new Error('No options passed to getorsetuserprefs ' + JSON.stringify(options))
-
-  if (this.users[owner]) {
-    // fdlog('getOrSetUserDS userds exists - sending link to ', owner)
-    callback(null, this.users[owner])
-  } else {
-    const self = this
-    const userOac = { owner: 'fradmin', app_name: 'info.freezr.admin', collection_name: 'users' }
-    const allUsersDb = self.getDB(userOac)
-    allUsersDb.query({ user_id: owner }, null, function (err, ownerEntries) {
-      fdlog('getOrSetUserDS - going to reset - got users in getOrSetUserDS ', { ownerEntries, owner, err })
-      if (err) throw err
-      if (!ownerEntries || ownerEntries.length === 0) {
-        felog('ds.getOrSetUserDS', 'no user in ds for c' + owner)
-        callback(new Error(('no user ' + owner)))
-      } else {
-        fdlog('todonow need to make sure it has rights to use the default params', { ownerEntries })
-        const dbParams = ownerEntries[0].dbParams
-          ? (ownerEntries[0].dbParams.type === 'system'
-              ? self.systemEnvironment.dbParams
-              : ownerEntries[0].dbParams)
-          : null
-        const fsParams = ownerEntries[0].fsParams
-          ? (ownerEntries[0].fsParams.type === 'system'
-              ? self.systemEnvironment.fsParams
-              : ownerEntries[0].fsParams)
-          : null
-        if (dbParams && ownerEntries[0].dbParams?.type === 'system') dbParams.systemDb = true
-        if (dbParams && ownerEntries[0].dbParams?.type === 'system') dbParams.useUserIdsAsDbName = options?.freezrPrefs?.useUserIdsAsDbName
-        if (dbParams && ownerEntries[0].dbParams?.type === 'system') dbParams.useUnifiedCollection = options?.freezrPrefs?.useUnifiedCollection
-        // fdlog('nowdec30 - todo if system and not nedb, pass unified db')
-
-        if (fsParams && fsParams.type && dbParams && dbParams.type) {
-          self.users[owner] = new USER_DS(owner, { dbParams, fsParams, limits: ownerEntries[0].limits, userPrefs: ownerEntries[0].userPrefs })
-          callback(null, self.users[owner])
-          // get current resources
-          if (ownerEntries[0].limits && ownerEntries[0].limits.storage) {
-            self.users[owner].setTimerToRecalcStorage()
-          }
-        } else {
-          felog('ds.getOrSetUserDS', 'incomplete user ' + owner)
-          fdlog('ds.getOrSetUserDS', 'incomplete user ', { owner, fsParams, dbParams })
-          callback(new Error('user incomplete'))
-        }
-      }
-    })
   }
 }
 const RECALCUATE_STORAGE_INNER_LIMIT = (6 * 1000)
@@ -317,78 +477,6 @@ USER_DS.prototype.getStorageUse = function (app, options, callback) {
     })
   }
 }
-
-DATA_STORE_MANAGER.prototype.getUserPerms = function (owner, options, callback) {
-  // const self = this
-  this.getOrSetUserDS(owner, options, function (err, ownerDS) {
-    if (err) {
-      felog('getUserPerms', 'err for ' + owner, err.message)
-      callback(err)
-    } else {
-      const permOAC = {
-        app_name: 'info.freezr.account',
-        collection_name: 'permissions',
-        owner
-      }
-      ownerDS.getorInitDb(permOAC, {}, callback)
-      // old ownerDS.initOacDB(permOAC, {}, callback)
-    }
-  })
-}
-DATA_STORE_MANAGER.prototype.initOacDB = function (OAC, options = {}, callback) {
-  // options: env - if want to use a special env for that ACO
-  const ownerDS = this.users[OAC.owner]
-  if (!ownerDS) throw new Error('Cannot intiiate user db without a user object. (Initiate user first.)')
-  fdlog('pre init db store', { ownerDS })
-
-  ownerDS.initOacDB(OAC, options = {}, callback)
-}
-DATA_STORE_MANAGER.prototype.getorInitDb = function (OAC, options, callback) {
-  if (!OAC || !OAC.owner) {
-    callback(new Error('cannot get db without AOC'))
-  } else {
-    this.getOrSetUserDS(OAC.owner, options, function (err, userDS) {
-      if (err) {
-        felog('getorInitDb err for ' + OAC.owner, err)
-        callback(err)
-      } else {
-        userDS.getorInitDb(OAC, options, callback)
-      }
-    })
-  }
-}
-DATA_STORE_MANAGER.prototype.getorInitDbs = function (OAC, options, callback) {
-  // OAC can take a single collectiona nd app_name app_table ot an array of aoo_tables or
-  fdlog('getorInitDbs ', { OAC, options })
-  if (!OAC || !OAC.owner || (!OAC.app_table && !OAC.app_tables)) {
-    callback(new Error('cannot get db without a properly formed AOC'))
-  } else {
-    this.getOrSetUserDS(OAC.owner, options, function (err, userDS) {
-      if (err) {
-        felog('getorInitDb err for ' + OAC.owner, err.message)
-        callback(err)
-      } else if (OAC.app_tables && Array.isArray((OAC.app_tables))) {
-        // !oac.app_name  + collection cannot take multiple values but oac.app_table can be an array of tableas
-        const list = []
-        async.forEach(OAC.app_tables, function (tableName, cb) {
-          userDS.getorInitDb({ owner: OAC.owner, app_table: tableName }, options, function (err, db) {
-            if (db) list.push(db)
-            cb(err)
-          })
-        },
-        function (err) {
-          if (err) {
-            callback(err)
-          } else {
-            callback(null, list)
-          }
-        })
-      } else {
-        userDS.getorInitDb(OAC, options, callback)
-      }
-    })
-  }
-}
 USER_DS.prototype.getorInitDb = function (OAC, options, callback) {
   if (this.owner !== OAC.owner) throw new Error('getorInitDb SNBH - user trying to get another users info' + this.owner + ' vs ' + OAC.owner)
 
@@ -402,7 +490,7 @@ USER_DS.prototype.getorInitDb = function (OAC, options, callback) {
     return callback(null, this.appcoll[appTableName(OAC)])
   } else {
     fdlog('getorInitDb need to re-init db ', appTableName(OAC))
-      this.initOacDB(OAC, options = {}, callback)
+    this.initOacDB(OAC, options = {}, callback)
   }
 }
 
@@ -750,6 +838,9 @@ USER_DS.prototype.initOacDB = function (OAC, options = {}, callback) {
         fdlog('ds.getTableStats')
         ds.db.stats(callback)
       }
+      ds.async = {
+        query: convertToAsync(ds.query)
+      }
 
       callback(null, ds)
     }
@@ -762,66 +853,24 @@ USER_DS.prototype.getDB = function (OAC) {
   return this.appcoll[appTableName(OAC)]
 }
 
-DATA_STORE_MANAGER.prototype.initAdminDBs = function (env, freezrPrefs, callback) {
-  const adminDBs = ['permissions', 'users', 'oauthors', 'app_tokens', 'params']
-  const adminOACs = adminDBs.map(coll => {
-    return {
-      owner: 'fradmin',
-      app_name: 'info.freezr.admin',
-      collection_name: coll
-    }
-  })
-  // adminOACs.push({
-  //   owner: 'public',
-  //   app_table: 'dev.ceps.privatefeeds.codes'
-  // })
-  if (!env?.dbParams || !freezrPrefs) console.warn('initAdminDBs', { adminOACs, env, freezrPrefs })
-  console.warn('initAdminDBs', { db: env.dbParams?.type, fs: env.fsParams?.type })
-  if (!env?.dbParams || !freezrPrefs) throw new Error('cannot init admin dbs without an env or admin db')
-  const self = this
-  self.setSystemUserDS('public', env)
-  self.setSystemUserDS('fradmin', env)
-  async.forEach(adminOACs, function (oac, cb) {
-    // if (!self.users[oac.owner]) {
-    self.getOrSetUserDS(oac.owner, { freezrPrefs }, function (err, userDS) {
-      if (err) {
-        felog('initAdminDBs', 'err for ' + oac.owner, err.message)
-        cb(err)
-      } else {
-        self.initOacDB(oac, { addCache: true }, cb)
-      }
+const convertToAsync = function (fn) {
+  const promise = function () {
+    const args = Array.prototype.slice.call(arguments)
+    return new Promise(function (resolve, reject) {
+      args.push(function (error, resp) {
+        if (error || !resp || resp.error) {
+          if (!error) error = resp.error ? resp : new Error('No response from promise')// temp fix todo review
+          reject(error)
+        } else {
+          resolve(resp)
+        }
+      })
+      fn(...args)
     })
-    // } else {
-    //   self.initOacDB(oac, { addCache: true }, cb)
-    // }
-  },
-  function (err) {
-    if (err) console.warn('err in initadminDBs', { err })
-    callback(err)
-  })
-}
-DATA_STORE_MANAGER.prototype.initUserAppFSToGetCredentials = function (user, appName, options = {}, callback) {
-  // options: env - if want to use a special env for that ACO
-  const ownerDS = this.users[user]
-  if (!ownerDS) throw new Error('Cannot intitiate user fs without a user object. (Initiate user first.) ' + user)
-
-  ownerDS.initAppFS(appName, options, (err, appFS) => {
-    // fdlog('got returns appfs for initUserAppFSToGetCredentials ', { err }, 'creds: ', appFS.fs.credentials)
-    if (err || !appFS || !appFS.fs || !appFS.fs.credentials) {
-      callback((err || new Error('could not get app fs credentials  in initalising')))
-    } else {
-      callback(null, appFS.fs.credentials)
-    }
-  })
+  }
+  return promise
 }
 
-DATA_STORE_MANAGER.prototype.getOrInitUserAppFS = function (user, appName, options = {}, callback) {
-  // options: env - if want to use a special env for that ACO
-  const ownerDS = this.users[user]
-  if (!ownerDS) throw new Error('Cannot intitiate user fs without a user object. (Initiate user first.) ' + user)
-
-  ownerDS.getorInitAppFS(appName, options, callback)
-}
 USER_DS.prototype.getorInitAppFS = function (appName, options, callback) {
   if (this.appfiles[appName]) {
     return callback(null, this.appfiles[appName])
@@ -878,15 +927,18 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
 
     ds.readAppFile = function (endpath, options = {}, cb) {
       fdlog('readAppFile ', { endpath })
-      if (!this.cache.appfiles) this.cache.appfiles = {}
-      if (!this.cache.appfiles[endpath]) this.cache.appfiles[endpath] = {}
-      const theCache = this.cache.appfiles
+      // if (!this.cache.appfiles) this.cache.appfiles = {}
+      // if (!this.cache.appfiles[endpath]) this.cache.appfiles[endpath] = {}
+      // const theCache = this.cache.appfiles
+      if (!ds.cache.appfiles) ds.cache.appfiles = {}
+      if (!ds.cache.appfiles[endpath]) ds.cache.appfiles[endpath] = {}
+      const theCache = ds.cache.appfiles
 
       if (isSystemApp) {
-        const localpath = path.normalize(ROOT_DIR + 'systemapps/' + this.appName + '/' + endpath)
+        const localpath = path.normalize(ROOT_DIR + 'systemapps/' + ds.appName + '/' + endpath)
         // fdlog('going to read local system fiule ', localpath)
         fs.readFile(localpath, options, function (err, content) {
-          content = content ? content.toString() : null
+          content = content ? (options?.doNotToString ? content : content.toString()) : null
           cb(err, content)
         })
       } else if (theCache[endpath].content) {
@@ -894,14 +946,14 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
         // fdlog('fscache reading fromc cache ' + endpath)
         cb(null, theCache[endpath].content)
       } else {
-        const pathToRead = userRootFolder + '/' + this.owner + '/apps/' + this.appName + '/' + endpath
+        const pathToRead = userRootFolder + '/' + ds.owner + '/apps/' + ds.appName + '/' + endpath
         // fdlog('ds.readAppFile and add to fscache  ' + pathToRead)
         const localpath = path.normalize(ROOT_DIR + pathToRead)
 
         if (fs.existsSync(localpath)) {
           // this is included because of offthreadinstalls - may be more long-term efficient to add to cache upon install
           fs.readFile(localpath, options, function (err, content) {
-            content = content ? content.toString() : null
+            content = content ?  (options?.doNotToString ? content : content.toString()) : null
             if (!err && content) {
               theCache[endpath] = { content, fsLastAccessed: new Date().getTime() }
             }
@@ -909,9 +961,9 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
           })
         } else {
           try {
-            this.fs.readFile(pathToRead, options, function (err, content) {
+            ds.fs.readFile(pathToRead, options, function (err, content) {
               // fdlog('setting fscache - will it persist ', { err, content })
-              content = content ? content.toString() : null
+              content = content ? (options?.doNotToString ? content : content.toString()) : null
               if (!err && content) {
                 theCache[endpath] = { content, fsLastAccessed: new Date().getTime() }
               }
@@ -1157,6 +1209,39 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
         }
       }
     }
+    ds.removeFolder = function (endpath, options, cb) {
+      console.log('remove folder fs - NOT TESTED ---- for ', this.owner, 'type: ', this.fsParams?.type)
+      options = options || {} // Currently no options
+      const pathToRead = userRootFolder + '/' + this.owner + '/files/' + this.appName + '/' + endpath
+      const self = this
+      if (!self.cache.userfiles) self.cache.userfiles = {}
+      Object.keys(self.cache.userfiles).forEach(key => {
+        if (key.indexOf(endpath) === 0) {
+          delete self.cache.userfiles[key]
+        }
+      })
+
+      const localpath = path.normalize(ROOT_DIR + pathToRead)
+      if (fs.existsSync(localpath)) {
+        fs.rmdirSync(localpath)
+      }
+      // onsole.log('remove file fs', this.fsParams)
+      if (this.fsParams.type === 'local') { // above temp deletion is actual deletion
+        cb(null, { success: true })
+      } else {
+        try {
+          this.fs.removeFolder(pathToRead, function (err) {
+            if (err) {
+              cb(err)
+            } else {
+              cb(null, { success: true })
+            }
+          })
+        } catch (err) {
+          cb(err)
+        }
+      }
+    }
 
     ds.sendUserFile = function (endpath, res, options) {
       const partialPath = (userRootFolder + '/' + this.owner + '/files/' + this.appName + '/' + endpath)
@@ -1208,12 +1293,36 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
       }
     }
 
+    ds.getUserFile = function (endpath, options, cb) {
+      const partialPath = (userRootFolder + '/' + this.owner + '/files/' + this.appName + '/' + endpath)
+
+      const self = this
+      const localpath = path.normalize(ROOT_DIR + partialPath)
+      if (this.fs.getFileToSend) { // getFileToSend will be missing if a localfile is actually missing
+        try {
+          this.fs.getFileToSend(partialPath, null, function (err, streamOrFile) {
+            if (err) {
+              felog('sendUserFile', 'err in sendUserFile for ', partialPath)
+              cb(err)
+            } else { // it is a file
+              cb(null, streamOrFile)
+            }
+          })
+        } catch (err) {
+          felog('err in getUserFile')
+          cb(err)
+        }
+      } else {
+        cb(new Error('file not found!'))
+      }
+    }
+
     if (!isSystemApp) {
       ds.removeAllAppFiles = function (options = {}, cb) {
         const pathToDelete = userRootFolder + '/' + this.owner + '/apps/' + this.appName
         // fdlog('ds.removeAllAppFiles  ' + pathToDelete)
         try {
-          this.fs.removeAllAppFiles(pathToDelete, cb)
+          ds.fs.removeFolder(pathToDelete, cb)
         } catch (e) {
           felog('err in removeAllAppFiles removeAllAppFiles')
           cb(e)
@@ -1264,6 +1373,10 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
       }
     }
 
+    ds.async = {
+      readAppFile: convertToAsync(ds.readAppFile)
+    }
+
     const initUserDirectories = function (ds, owner, cb) {
       fdlog('going to init directorries for user ' + userRootFolder + '/' + owner + '/apps/' + appName)
       try {
@@ -1287,6 +1400,7 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
           }
         })
       } catch (err) {
+        console.warn('initUserDirectories err ', err)
         felog('err in initUserDirectories')
         cb(err)
       }

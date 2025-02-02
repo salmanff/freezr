@@ -30,7 +30,7 @@ freezr.onFreezrMenuClose = function (hasChanged) { } // this is called when free
 freezr.utils.getOpCbFrom = function (optionsAndCallback) {
   if (!optionsAndCallback || optionsAndCallback.length === 0) return [null, null]
   const callback = optionsAndCallback[optionsAndCallback.length - 1]
-  const options = optionsAndCallback.length > 1 ? (optionsAndCallback[0] || []) : []
+  const options = optionsAndCallback.length > 1 ? (optionsAndCallback[0] || {}) : {}
   if (optionsAndCallback.length > 2) console.warn('too many parameters in function', optionsAndCallback)
   return [options, callback]
 }
@@ -68,6 +68,20 @@ freezr.feps.create = function (data, ...optionsAndCallback) {
     const url = (options.host || '') + '/feps/write/' + appTable + (options.data_object_id ? ('/' + options.data_object_id + (options.upsert ? '?upsert=true' : '')) : '')
     const writeOptions = { appToken: (options.appToken || null) }
     freezerRestricted.connect.send(url, data, callback, 'POST', 'application/json', writeOptions)
+  }
+}
+freezr.feps.write = function (data, ...optionsAndCallback) {
+  const [options, callback] = freezr.utils.getOpCbFrom(optionsAndCallback)
+  if (!data) {
+    callback(new Error('No data to write.'))
+  } else if (options.updateRecord) {
+    freezr.feps.update(data, options, callback)
+  } else {
+    options._entity = data
+    const appTable = options.app_table || (freezrMeta.appName + (options.collection ? ('.' + options.collection) : ''))
+    const url = (options.host || '') + '/feps/write/' + appTable + (options.data_object_id ? ('/' + options.data_object_id + (options.upsert ? '?upsert=true' : '')) : '')
+    const writeOptions = { appToken: (options.appToken || null) }
+    freezerRestricted.connect.send(url, options, callback, 'POST', 'application/json', writeOptions)
   }
 }
 freezr.feps.upload = function (file, options, callback) {
@@ -261,6 +275,33 @@ freezr.feps.publicquery = function (options, callback) {
     delete options.host
   }
   freezerRestricted.connect.send(url, options, callback, 'POST', 'application/json', readOptions)
+} 
+freezr.feps.systemExtensions = function (options, callback) {
+  // options can be: app_name, skip, count, userId, pid
+  if (!options || !options.task) {
+    callback(new Error('No options sent.'))
+    return
+  }
+  // to check to make sure function naame is has no unallowed characters
+  const url = (options.host || '') + '/feps/systemextensions/' + options.task
+  const writeOptions = { }
+  if (options.appToken) {
+    writeOptions.appToken = options.appToken
+    delete options.appToken
+    delete options.host
+  }
+  if (options.file) {
+    writeOptions.uploadFile = true
+    const uploadData = new FormData()
+    uploadData.append('file', options.file) /* onsole.log('Sending file1') */
+    const newOptions = {}
+    Object.keys(options).forEach((key) => { if (key !== 'file') newOptions[key] = options[key] })
+    uploadData.append('options', JSON.stringify(newOptions))
+    uploadData.append('other', 'hello other')
+    freezerRestricted.connect.send(url, uploadData, callback, 'PUT', null, writeOptions)
+  } else {
+    freezerRestricted.connect.send(url, options, callback, 'PUT', 'application/json', writeOptions)
+  }
 }
 
 // Permissions and file permissions
@@ -270,6 +311,11 @@ freezr.perms.getAppPermissions = function (callback) {
   freezerRestricted.connect.read(url, null, callback)
 }
 // Non-CEPS
+freezr.perms.getAllAppPermissions = function (options, callback) {
+  // this can inbclude permissions others have granted - currently takes options,owner
+  const url = '/ceps/perms/get' + (options.owner ? ('?owner=' + options.owner) : '')
+  freezerRestricted.connect.read(url, null, callback)
+}
 freezr.perms.isGranted = function (permissionName, callback) {
   // see if a permission has been granted by the user - callback(isGranted)
   const url = '/v1/permissions/getall/' + freezrMeta.appName
@@ -415,7 +461,6 @@ freezr.feps.markMessagesRead = function (messageIds, markAll, callback) {
     callback(new Error('incomplete message fields - need messageIds to be an array of ids '))
   } else {
     const opts = { message_ids: messageIds, markAll }
-    console.log('markMessagesRead in fcore', opts)
     freezerRestricted.connect.ask('/ceps/message/mark_read', opts, callback)
   }
 }
@@ -801,7 +846,7 @@ freezerRestricted.menu.close = function (evt) {
     freezr.onFreezrMenuClose(freezerRestricted.menu.hasChanged)
     freezerRestricted.menu.hasChanged = false
   }
-}
+} 
 freezerRestricted.menu.freezrMenuOpen = function () {
   window.scrollTo(0, 0)
   freezerRestricted.menu.resetDialogueBox()

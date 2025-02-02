@@ -433,7 +433,7 @@ const gotoShowInitialData = function (res, req, options) {
 }
 
 exports.nowGenerateSingleObjectPage = function (req, res) {
-  fdlog('nowGenerateSingleObjectPage 0 ', { params: req.params } )
+  fdlog('nowGenerateSingleObjectPage 0 ', { params: req.params })
   req.freezrInternalCallFwd = function (err, results) {
     if (err || !results.results || results.results.length === 0 || !results.results[0]) {
       res.redirect('/public?noredirect=true&redirect=true&error=nosuchpublicobject&pid=' + req.params.object_public_id)
@@ -630,7 +630,7 @@ exports.dbp_query = function (req, res) {
     } else if (req.query.code) {
       queryParams.privateLinks = req.query?.code
     } else {
-      console.warn('what use case is this?? still needed??')
+      // console.warn('used for feeds - change?')
       if (typeof req.query?.user_id === 'string' && req.query?.user_id?.slice(0, 1) === '@') req.query.user_id = req.query.user_id.slice(1)
       if (typeof req.query?.user_id === 'string' && req.query.user_id) queryParams.data_owner = req.query.user_id.toLowerCase()
       if (req.params.user_id) queryParams.data_owner = req.params.user_id.toLowerCase()

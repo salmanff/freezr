@@ -265,7 +265,53 @@ const addAppFs = function (req, res, dsManager, next) {
 
   ], function (err) {
     if (err) {
-      res.redirect('/')
+      if (req.freezrAppFsIsApi) {
+        console.warn('error getting app FS')
+        req.freezrAppFS = null
+        req.freezrAppFSError = err
+        next()
+      } else {
+        console.warn('err in adappfs', { err })
+        res.redirect('/')
+      }
+    } else {
+      next()
+    }
+  })
+}
+exports.addAppFsForApi = function (req, res, dsManager, next) {
+  req.freezrAppFsIsApi = true
+  addAppFs(req, res, dsManager, next)
+}
+exports.addPublicFsForSystemExtensions = function (req, res, dsManager, next) {
+  const owner = 'public'
+
+  req.freezr_server_version = exports.version
+
+  async.waterfall([
+    // Get  AppFS to pass on to next()
+    function (cb) {
+      if (req.session.logged_in_as_admin) { // redundant but adding again just in case
+        cb(null)
+      } else {
+        cb(new Error('Cannot get public fs for logged in user'))
+      }
+    },
+    function (cb) {
+      dsManager.getOrSetUserDS(owner, { freezrPrefs: req.freezrPrefs }, cb)
+    },
+    function (userDS, cb) {
+      userDS.getorInitAppFS('SystemExtensions', {}, cb)
+    },
+    function (appFS, cb) {
+      req.freezrPublicSystemExtensionsFS = appFS
+      cb()
+    }
+
+  ], function (err) {
+    if (err) {
+      console.warn('err in addPublicFsForSystemExtensions ', { err })
+      res.sendStatus(401)
     } else {
       next()
     }
@@ -752,6 +798,7 @@ exports.getManifest = function (req, res, dsManager, next) {
   fdlog('getting getManifest in access_handler ', req.freezrTokenInfo, 'req.req.query.targetApp ', req.query.targetApp)
   const appName = (req.freezrTokenInfo.app_name === 'info.freezr.account' && (req.query.targetApp || req.body.targetApp)) ? (req.query.targetApp || req.body.targetApp) : req.freezrTokenInfo.app_name
   const ownerId = req.freezrTokenInfo.owner_id
+  let appDb
 
   async.waterfall([
     // 0. get app config
@@ -763,20 +810,29 @@ exports.getManifest = function (req, res, dsManager, next) {
         felog('getManifest err - no db at ', { freezrUserAppListDB })
         cb(new Error('could not get freezrUserAppListDB'))
       } else {
-        freezrUserAppListDB.query({ app_name: appName }, {}, cb)
+        appDb = freezrUserAppListDB
+        appDb.query({ app_name: appName }, {}, cb)
       }
     },
     function (list, cb) {
       if (!list || list.length === 0 || !list[0].manifest) {
         // no manifest - Adding blank getManifest in access_handler
         req.freezrRequestorManifest = { identifier: appName, pages: {} }
+        cb(null)
+      } else if (list.length > 1) {
+        appDb.delete_record(list[0]._id, {}, function (err, result) {
+          console.warn('DOUBLE MANIFEST ERROR SNBH', { appName, ownerId, err, result }) // hopefully a legacy mistake bug fiz - this shouldnt re-occur 
+          req.freezrRequestorManifest = list[1].manifest
+          fdlog('will send second manifest ', req.freezrRequestorManifest)
+          cb(null)
+        })
       } else {
         // Adding full getManifest in access_handler
         // if (list && list[0]) fdlog('list[0].manifest', list[0].manifest)
         req.freezrRequestorManifest = list[0].manifest
         fdlog('got manifest ', req.freezrRequestorManifest)
+        cb(null)
       }
-      cb(null)
     }
   ], function (err) {
     if (err) felog('getManifest', err)

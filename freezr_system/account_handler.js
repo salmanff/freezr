@@ -278,18 +278,30 @@ exports.changePassword = function (req, res) {
     }
 
   ],
-    function (err, returns) {
-      if (err) {
-        helpers.send_failure(res, err, 'account_handler', exports.version, 'changePassword')
-      } else if (!returns || !returns.nModified || returns.nModified === 0) {
-        helpers.send_failure(res, helpers.error('change error - was not able to change any passwords: ' + JSON.stringify(returns)), 'account_handler', exports.version, 'changePassword')
-      } else {
-        if (returns.nModified !== 1) felog('changePassword', 'error in changing user records - to investigate why more than 1 modified ', returns)
-        helpers.send_success(res, { user: u.response_obj() })
-      }
-    })
+  function (err, returns) {
+    if (err) {
+      helpers.send_failure(res, err, 'account_handler', exports.version, 'changePassword')
+    } else if (!returns || !returns.nModified || returns.nModified === 0) {
+      helpers.send_failure(res, helpers.error('change error - was not able to change any passwords: ' + JSON.stringify(returns)), 'account_handler', exports.version, 'changePassword')
+    } else {
+      if (returns.nModified !== 1) felog('changePassword', 'error in changing user records - to investigate why more than 1 modified ', returns)
+      helpers.send_success(res, { user: u.response_obj() })
+    }
+  })
 }
-exports.setPrefs = function (req, res) {
+
+exports.accountActions = function (req, res) {
+  if (req.params.action === 'setPrefs.json' || req.params.action === 'setPrefs') {
+    accountActionSetPrefs(req, res)
+  } else if (req.params.action === 'setServicesParams' || req.params.action === 'setServicesItem') {
+    accountActionSetServicesParams(req, res)
+  } else {
+    helpers.send_failure(res, new Error('invalid account action page'), 'account_handler', exports.version, req.params.action)
+  }
+  // accountHandler.setPrefs setPrefs.json
+}
+
+const accountActionSetPrefs = function (req, res) {
   // app.put('/v1/account/data/setPrefs.json', accountLoggedInAPI, addAllUsersDb, accountHandler.setPrefs)
   // todo later -> merge this endpoint with changePassword and others
 
@@ -338,18 +350,126 @@ exports.setPrefs = function (req, res) {
     }
 
   ],
-    function (err, returns) {
-      fdlog('userPrefs ', { err, returns })
-      if (err) {
-        helpers.send_failure(res, err, 'account_handler', exports.version, 'setPrefs')
-      } else if (!returns || !returns.nModified || returns.nModified === 0) {
-        helpers.send_failure(res, helpers.error('change error - was not able to change setPrefs: ' + JSON.stringify(returns)), 'account_handler', exports.version, 'setPrefs')
+  function (err, returns) {
+    fdlog('userPrefs ', { err, returns })
+    if (err) {
+      helpers.send_failure(res, err, 'account_handler', exports.version, 'setPrefs')
+    } else if (!returns || !returns.nModified || returns.nModified === 0) {
+      helpers.send_failure(res, helpers.error('change error - was not able to change setPrefs: ' + JSON.stringify(returns)), 'account_handler', exports.version, 'setPrefs')
+    } else {
+      req.freezrUserDS.userPrefs = userPrefs
+      if (returns.nModified !== 1) felog('setPrefs', 'error in changing user records - to investigate why more than 1 modified ', returns)
+      helpers.send_success(res, { user: u.response_obj() })
+    }
+  })
+}
+const accountActionSetServicesParams = function (req, res) {
+  // app.put('/v1/account/data/setServices', accountLoggedInAPI, addAllUsersDb, accountHandler.setPrefs)
+  // app.put('/v1/account/data/setServicesItem', accountLoggedInAPI, addAllUsersDb, accountHandler.setPrefs)
+  // todo later -> merge this endpoint with changePassword and others
+  // nb -> not sure setServicesItem is a good idea - perhjaps just change to update role
+
+  fdlog('accountActionSetServicesParams, body ', req.body)
+
+  let slParams = { // used for setServicesParams - reset below for setServicesItem
+    type: req.body.type,
+    region: req.body.region,
+    accessKeyId: req.body.accessKeyId,
+    secretAccessKey: req.body.secretAccessKey,
+    arnRole: req.body.arnRole
+  }
+
+  const userId = req.session.logged_in_user_id
+  const userPrefs = {}
+  let u = null
+  async.waterfall([
+    // 1. basic checks
+    function (cb) {
+      if (!userId) {
+        cb(helpers.auth_failure('account_handler.js', exports.version, 'accountActionSetServicesParams', 'user not logged in'))
+      } else if (req.params.action === 'setServicesParams' && (!slParams.type || !slParams.region || !slParams.accessKeyId || !slParams.secretAccessKey)) {
+        cb(helpers.auth_failure('account_handler.js', exports.version, 'accountActionSetServicesParams', 'need all params to update'))
+      } else if (req.params.action === 'setServicesItem' && (!slParams.type || (!slParams.region && !slParams.accessKeyId || !slParams.secretAccessKey))) {
+        cb(helpers.auth_failure('account_handler.js', exports.version, 'accountActionSetServicesParams', 'need all params to update'))
       } else {
-        req.freezrUserDS.userPrefs = userPrefs
-        if (returns.nModified !== 1) felog('setPrefs', 'error in changing user records - to investigate why more than 1 modified ', returns)
-        helpers.send_success(res, { user: u.response_obj() })
+        cb(null)
       }
-    })
+    },
+
+    async () => {
+      const systemExtensions = require('./systemextensions.js')
+      if (req.params.action === 'setServicesParams' && slParams.type === 'aws' && !slParams.arnRole) {
+        const role = await systemExtensions.createAwsRole(slParams)
+        if (role.error || !role.Arn) {
+          console.warn('error setting role ', role)
+          console.warn('error setting role - code is ', role?.error?.Error?.Code)
+          return [helpers.error(role?.error?.Error?.Code || 'error creating role'), null]
+        } else {
+          slParams.arnRole = role.Arn
+          return [null, null]
+        }
+      } else {
+        // todo need to check valifity of credentials even if role is not added
+        return [null, null]
+      }
+    },
+    ([err, val], cb) => {
+      if (err) {
+        cb(err)
+      } else {
+        cb(null)
+      }
+    },
+
+    // 3. get user
+    function (cb) {
+      req.allUsersDb.query({ user_id: userId }, null, cb)
+    },
+
+    // 4. check the password
+    function (results, cb) {
+      require('./user_obj.js')
+      u = new User(results[0])
+      if (req.params.action === 'setServicesItem') {
+        // todo -> nb thisd should really only be used for arnRole. perhaps restrict when add other types
+        slParams = results[0].slParams
+        if (req.body.type) slParams.type = req.body.type
+        if (req.body.region) slParams.region = req.body.region
+        if (req.body.accessKeyId) slParams.accessKeyId = req.body.accessKeyId
+        if (req.body.secretAccessKey) slParams.secretAccessKey = req.body.secretAccessKey
+        if (req.body.arnRole) slParams.arnRole = req.body.arnRole
+      }
+      if (!results || results.length === 0) {
+        cb(helpers.auth_failure('account_handler.js', exports.version, 'accountActionSetServicesParams', 'funky error'))
+      } else if (results.length > 1) {
+        cb(helpers.auth_failure('account_handler.js', exports.version, 'accountActionSetServicesParams', 'getting too many users'))
+      } else {
+        cb(null)
+      }
+    },
+
+    // 5. change prefs for the user.
+    function (cb) {
+      req.allUsersDb.update(
+        { user_id: userId },
+        { slParams },
+        { replaceAllFields: false },
+        cb)
+    }
+
+  ],
+  function (err, returns) {
+    fdlog('accountActionSetServicesParams', { err, returns })
+    if (err) {
+      helpers.send_failure(res, err, 'account_handler', exports.version, 'accountActionSetServicesParams')
+    } else if (!returns || !returns.nModified || returns.nModified === 0) {
+      helpers.send_failure(res, helpers.error('change error - was not able to change accountActionSetServicesParams: ' + JSON.stringify(returns)), 'account_handler', exports.version, 'accountActionSetServicesParams')
+    } else {
+      req.freezrUserDS.userPrefs = userPrefs
+      if (returns.nModified !== 1) felog('accountActionSetServicesParams', 'error in changing user records - to investigate why more than 1 modified ', returns)
+      helpers.send_success(res, { user: u.response_obj() })
+    }
+  })
 }
 exports.removeFromFreezr = function (req, res) {
   // app.put('/v1/account/changePassword.json', accountLoggedInAPI, addAllUsersDb, accountHandler.changePassword)
@@ -428,27 +548,10 @@ exports.removeFromFreezr = function (req, res) {
 }
 
 // Data retreival
-exports.get_account_data = function (req, res) {
-  // app.get('/v1/account/data/:action', accountLoggedInAPI, accountHandler.get_account_data) // app_list.json, app_resource_use.json
-  switch (req.params.action) {
-    case 'app_list.json':
-      list_all_user_apps(req, res)
-      break
-    case 'app_resource_use.json':
-      get_app_resources(req.query?.app_name, req, res)
-      break
-    case 'user_prefs.json':
-      helpers.send_success(res, req.freezrUserDS.userPrefs)
-      break
-    default:
-      helpers.send_failure(res, new Error('invalid page'), 'account_handler', exports.version, req.params.action)
-      break
-  }
-}
-const list_all_user_apps = function (req, res) {
+const listAllUserApps = function (req, res) {
   // from get_account_data => app.get('/v1/account/data/:action', accountLoggedInAPI, accountHandler.get_account_data) // app_list.json, app_resource_use.json
 
-  fdlog('account_handler list_all_user_apps')
+  fdlog('account_handler listAllUserApps')
 
   const userId = req.session.logged_in_user_id
   const userDS = req.freezrUserDS
@@ -514,11 +617,11 @@ const list_all_user_apps = function (req, res) {
   ],
   function (err) {
     if (err) {
-      felog('list_all_user_apps', 'ERROR in list_all_user_apps ', err)
+      felog('listAllUserApps', 'ERROR in listAllUserApps ', err)
       if (req.freezrInternalCallFwd) {
         req.freezrInternalCallFwd(err, null)
       } else {
-        helpers.send_failure(res, err, 'account_handler', exports.version, 'list_all_user_apps')
+        helpers.send_failure(res, err, 'account_handler', exports.version, 'listAllUserApps')
       }
     } else {
       // onsole.log(" results",{ removedApps, userApps })
@@ -530,21 +633,38 @@ const list_all_user_apps = function (req, res) {
     }
   })
 }
-const get_app_resources = function (app, req, res) {
+const getAppResources = function (app, req, res) {
   // from get_account_data => app.get('/v1/account/data/:action', accountLoggedInAPI, accountHandler.get_account_data) // app_list.json, app_resource_use.json
 
-  fdlog('account_handler get_app_resources')
+  fdlog('account_handler getAppResources')
   const userDS = req.freezrUserDS
 
   userDS.getStorageUse(null, { freezrPrefs: req.freezrPrefs }, function (err, sizeJson) {
     if (req.freezrInternalCallFwd) {
       req.freezrInternalCallFwd(err, sizeJson)
     } else if (err) {
-      helpers.send_failure(res, err, 'account_handler', exports.version, 'get_app_resources')
+      helpers.send_failure(res, err, 'account_handler', exports.version, 'getAppResources')
     } else {
       helpers.send_success(res, sizeJson)
     }
   })
+}
+exports.get_account_data = function (req, res) {
+  // app.get('/v1/account/data/:action', accountLoggedInAPI, accountHandler.get_account_data) // app_list.json, app_resource_use.json
+  switch (req.params.action) {
+    case 'app_list.json':
+      listAllUserApps(req, res)
+      break
+    case 'app_resource_use.json':
+      getAppResources(req.query?.app_name, req, res)
+      break
+    case 'user_prefs.json':
+      helpers.send_success(res, req.freezrUserDS.userPrefs)
+      break
+    default:
+      helpers.send_failure(res, new Error('invalid page'), 'account_handler', exports.version, req.params.action)
+      break
+  }
 }
 
 // App Installation and Updating
@@ -566,7 +686,7 @@ exports.get_file_from_url_to_install_app = function (req, res) {
           throw new Error(`Failed to fownload file`)
         })
         fileStream.on('finish', () => {
-          // console.log('File downloaded successfully.')
+          // onsole.log('File downloaded successfully.')
           return cb(null)
         })
       })
@@ -629,9 +749,7 @@ exports.install_blank_app = function (req, res) {
   const appName = req.body.app_name
   const servedUrl = req.body.served_url
   const appDisplayName = req.body.app_display_name
-  if (servedUrl && !appName) {
-    // console.log('todo should be able to get appname from app url - Also could get manifest and logo')
-  }
+
   const manifest = {
     identifier: appName,
     served_url: servedUrl,
@@ -793,7 +911,7 @@ exports.install_app = function (req, res) {
         offThreadExtraction({
           file: req.file.buffer,
           name: req.file.originalname,
-          userId: req.params.logged_in_user_id,
+          userId: req.session.logged_in_user_id,
           appFS,
           freezrUserAppListDB: req.freezrUserAppListDB,
           fileUrl: req.body.app_url,
@@ -828,7 +946,7 @@ exports.install_app = function (req, res) {
       createOrUpdateUserAppList(req.freezrUserAppListDB, appNameId, manifest, customEnv, cb)
     },
 
-    // 8. If app already exists, flag it as an update
+    // 7. If app already exists, flag it as an update
     function (info, cb) {
       if (info.isUpdate) {
         flags.add('notes', 'app_updated_msg')
@@ -837,7 +955,32 @@ exports.install_app = function (req, res) {
         flags.meta.didwhat = 'uploaded'
       }
       cb(null)
+    },
+
+    // 8. if update has a systemExtensions perm then update 
+    async () => {
+      const manifestPerms = (manifest && manifest.permissions && Object.keys(manifest.permissions).length > 0) ? JSON.parse(JSON.stringify(manifest.permissions)) : null
+      if (manifestPerms && manifestPerms.length > 0 && manifestPerms.filter(perm => perm.type === 'use_serverless').length > 0) {
+        const systemExtensions = require('./systemextensions.js')
+        const installed = await systemExtensions.upsertextensionsFuncsOnInstall(req, realAppName, manifestPerms, realAppPath)
+        if (installed.error) {
+          console.warn('installed setting perms ', installed)
+          return [helpers.error(installed.error || 'error creating systemExtensions perm'), null]
+        } else {
+          return [null, null]
+        }
+      } else {
+        return [null, null]
+      }
+    },
+    ([err, val], cb) => {
+      if (err) {
+        cb(err)
+      } else {
+        cb(null)
+      }
     }
+
     // todo later (may be) - also check manifest permissions (as per changeNamedPermissions) to warn of any issues
   ],
   function (error, dummy) {
@@ -910,7 +1053,10 @@ const offThreadExtraction = function (params, callback) {
 
   const appNameId = appIdFrom(params.userId, params.appFS.appName)
 
-  if (params.init) {
+  if (!params?.userId || !params?.appFS?.appName) {
+    felog('offThreadExtraction - missing params ', { params })
+    callback(new Error('missing params'))
+  } else if (params.init) {
     const [err, fileList] = fileHandler.appFileListFromZip(params.file)
     if (err) {
       felog('offThreadExtraction err in appFileListFromZip', { params, err })
@@ -1172,16 +1318,37 @@ exports.CEPSrequestorAppPermissions = function (req, res) {
 
   const requestorId = req.freezrTokenInfo.requestor_id // requestor and requestee are the same
   const requestorApp = req.freezrTokenInfo.app_name
-  fdlog('CEPSrequestorAppPermissions for ', { requestorApp, requestorId }) // + 'req.freezrTokenInfo', req.freezrTokenInfo)
 
-  // if (req.query) { console.log('todo - have to add queries on permission name and table_id') }
   req.freezrUserPermsDB.query({ requestor_app: requestorApp, status: { $ne: 'removed' } }, {}, function (err, returnPerms) {
     fdlog('CEPSrequestorAppPermissions ', { requestorApp, returnPerms })
     if (err) {
       helpers.send_failure(res, err, 'account_handler', exports.version, 'requestorApp')
     } else {
       fdlog({ returnPerms })
-      helpers.send_success(res, returnPerms)
+      if (req.query?.owner && req.query?.owner !== req.freezrTokenInfo.requestor_id && req.freezrDataOwnerPermsDB) {
+        // NOTE : Thgis is not yet in CEPS
+        req.freezrDataOwnerPermsDB.query({ requestor_app: requestorApp, grantees: req.freezrTokenInfo.requestor_id, status: { $ne: 'removed' }, granted: true, outdated: { $ne: true }, revokeIsWip: { $ne: true } }, {}, function (err, returnOwnerPerms) {
+          if (err) {
+            helpers.send_failure(res, err, 'account_handler', exports.version, 'requestorApp')
+          } else {
+            if (returnOwnerPerms && returnOwnerPerms.length > 0) {
+              returnOwnerPerms.forEach(perm => {
+                const permCopy = {}
+                permCopy.owner_id = req.query?.owner
+                permCopy.requestor_app = perm.requestor_app
+                permCopy.name = perm.name
+                permCopy.table_id = perm.table_id
+                permCopy.type = perm.type
+                permCopy.description = perm.description
+                returnPerms.push(permCopy)
+              })
+            }
+            helpers.send_success(res, returnPerms)
+          }
+        })
+      } else {
+        helpers.send_success(res, returnPerms)
+      }
     }
   })
 }
@@ -1472,7 +1639,7 @@ exports.changeNamedPermissions = function (req, res) {
 }
 
 const permissionObjectFromManifestParams = function (requestorApp, manifestPerm) {
-  const ALLOWED_PERMISSION_TYPES = ['upload_pages', 'share_records', 'read_all', 'message_records', 'write_own', 'write_all', 'db_query', 'use_app']
+  const ALLOWED_PERMISSION_TYPES = ['upload_pages', 'share_records', 'read_all', 'message_records', 'write_own', 'write_all', 'db_query', 'use_app', 'use_serverless']
   const PERMISSION_FIELD_TYPES = {
     requestor_app: 'string',
     table_id: 'string', // but can also store an array, if table_ids is declared
@@ -1497,7 +1664,7 @@ const permissionObjectFromManifestParams = function (requestorApp, manifestPerm)
     felog('permissionObjectFromManifestParams', 'cannot make permission without a name ', { requestorApp, name })
     err = 'Cannot make permission without a name.'
   }
-  const DONT_NEED_TABLES = ['use_app', 'upload_pages']
+  const DONT_NEED_TABLES = ['use_app', 'upload_pages', 'use_serverless']
   if (!manifestPerm.table_id && !manifestPerm.table_ids && !DONT_NEED_TABLES.includes(manifestPerm.type)) {
     felog('permissionObjectFromManifestParams', 'cannot make permission without a table ', { manifestPerm, requestorApp, name })
     err = (err ? ' And ' : name + ': ') + 'Cannot make permission without a table_id or type. '
@@ -1603,7 +1770,7 @@ const updatePermissionRecordsFromManifest = function (freezrUserPermsDB, appName
             existingPermFromDb.granted = false
             freezrUserPermsDB.update(existingPermFromDb._id, existingPermFromDb, {}, cb)
           } else if (permissionsAreSame(cleanedManifestPerm, existingPermFromDb)) { // leave as is
-            if (existingPermFromDb.status === 'removed') {
+            if (existingPermFromDb.status === 'removed' || existingPermFromDb.status === 'outdated') {
               existingPermFromDb.status = 'pending' // ie no longer removed
               freezrUserPermsDB.update(existingPermFromDb._id, existingPermFromDb, {}, cb)
             } else {
@@ -1618,11 +1785,7 @@ const updatePermissionRecordsFromManifest = function (freezrUserPermsDB, appName
           }
         },
         function (err) {
-          if (err) {
-            callback(err)
-          } else {
-            callback(null)
-          }
+          callback(err)
         })
       })
     }
@@ -1640,7 +1803,6 @@ const objectFromList = function (objectList, param, value) {
 
 const createOrUpdateUserAppList = function (freezrUserAppListDB, appNameId, manifest, env, callback) {
   // ??? note - currently updates the app_display_name only (and marks it as NOT removed)
-
   fdlog('createOrUpdateUserAppList  ', { manifest })
 
   let appExists = false
@@ -1652,7 +1814,9 @@ const createOrUpdateUserAppList = function (freezrUserAppListDB, appNameId, mani
   async.waterfall([
     // 1 make sure data exists and that app exists
     function (cb) {
-      if (!appName) {
+      if (!appNameId) {
+        cb(helpers.missing_data('appNameId', 'account_handler', exports.version, 'add_app'))
+      } else if (!appName) {
         cb(helpers.missing_data('app_name', 'account_handler', exports.version, 'add_app'))
       } else if (!helpers.valid_appName(appName)) {
         cb(helpers.invalid_data('app_name: ' + appName, 'account_handler', exports.version, 'createOrUpdateUserAppList'))
@@ -1687,10 +1851,14 @@ const createOrUpdateUserAppList = function (freezrUserAppListDB, appNameId, mani
   })
 }
 const permissionsAreSame = function (p1, p2) {
-  return objectsaresame(p1, p2, ['granted', 'status', 'grantees', 'previousGrantees'])
+  return objectsaresame(p1, p2, ['outDated', 'revokeIsWip', 'granted', 'status', 'grantees', 'previousGrantees', '_date_created', '_date_modified', '_id'])
 }
 const objectsaresame = function (obj1, obj2, givenIgnorekeys = []) {
+  fdlog('compare ', { obj1, obj2 })
   const ignorekeys = [...givenIgnorekeys]
+
+  if ((obj1 === undefined || obj1 === null) && (obj2 === undefined || obj2 === null)) return true
+
   if (typeof obj1 !== typeof obj2) {
     return false
   }
@@ -1997,7 +2165,7 @@ const accountPageManifest = function (params) { // manifest parameters for accou
       page_title: 'Accounts Home (Freezr)',
       css_files: ['./@public/info.freezr.public/public/freezr_style.css', 'account_home.css'],
       page_url: 'account_home.html',
-      initial_query_func: list_all_user_apps,
+      initial_query_func: listAllUserApps,
       app_name: 'info.freezr.account',
       script_files: ['account_home.js']
     },
@@ -2007,18 +2175,37 @@ const accountPageManifest = function (params) { // manifest parameters for accou
       page_url: 'account_settings.html',
       initial_query_func: function (req, res) {
         if (req.freezrUserDS && req.freezrUserDS.fsParams && req.freezrUserDS.dbParams) {
-          req.freezrInternalCallFwd(null, { owner: req.freezrUserDS.owner, fsParamsType: req.freezrUserDS.fsParams.type, dbParamsType: req.freezrUserDS.dbParams.type })
+          req.freezrInternalCallFwd(null, { owner: req.freezrUserDS.owner, fsParamsType: req.freezrUserDS.fsParams.type, dbParamsType: req.freezrUserDS.dbParams.type, slParamsType: req.freezrUserDS.slParams?.type })
         } else {
           req.freezrInternalCallFwd(null, { owner: null, error: 'no user ds found' })
         }
       },
       script_files: ['account_settings.js']
     },
+    serverless: {
+      page_title: 'Account Services Settings (freezr)',
+      css_files: ['./@public/info.freezr.public/public/freezr_style.css', 'account_home.css'],
+      page_url: 'account_serverless.html',
+      initial_query_func: function (req, res) {
+        if (req.freezrUserDS) {
+          req.freezrInternalCallFwd(null, {
+            slParamsType: req.freezrUserDS.slParams?.type,
+            slRegion: req.freezrUserDS.slParams?.region,
+            accessKeyId: req.freezrUserDS.slParams?.accessKeyId ? ('***' + req.freezrUserDS.slParams.accessKeyId.slice(-3)) : null,
+            secretAccessKey: req.freezrUserDS.slParams?.secretAccessKey ? ('***' + req.freezrUserDS.slParams.secretAccessKey.slice(-3)) : null,
+            arnRole: req.freezrUserDS.slParams?.arnRole ? ('***' + req.freezrUserDS.slParams.arnRole.slice(-3)) : null
+          })
+        } else {
+          req.freezrInternalCallFwd(null, { owner: null, error: 'no user ds found' })
+        }
+      },
+      script_files: ['account_serverless.js']
+    },
     app: {
       page_title: 'Apps (freezr)' + (' - ' + params.sub_page),
       css_files: ['./@public/info.freezr.public/public/freezr_style.css', 'account_app_management.css'],
       page_url: 'account_app_' + params.sub_page + '.html',
-      // initial_query_func: exports.list_all_user_apps,
+      // initial_query_func: exports.listAllUserApps,
       other_variables: (params.target_app ? ('const targetApp = "' + params.target_app + '";') : '') + ' let transformRecord',
       script_files: ['./@public/info.freezr.public/public/mustache.js'],
       modules: ['account_app_' + params.sub_page + '.js']
@@ -2027,7 +2214,7 @@ const accountPageManifest = function (params) { // manifest parameters for accou
       page_title: 'Apps (freezr)' + (' - ' + params.sub_page),
       css_files: ['./@public/info.freezr.public/public/freezr_style.css', 'account_app_management.css'],
       page_url: 'account_confirmperm.html',
-      // initial_query_func: exports.list_all_user_apps,
+      // initial_query_func: exports.listAllUserApps,
       // other_variables: (params.target_app ? ('const targetApp = "' + params.target_app + '"') : ''),
       modules: ['account_confrimperm.js']
     },

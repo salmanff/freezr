@@ -172,10 +172,15 @@ exports.write_record = function (req, res) { // create update or upsert
 
   fdlog('write_record', 'ceps writeData at ' + req.url, req.query) // req.query , req.body
 
-  const isUpsert = (req.query.upsert === 'true')
+  const isOldFormat = !req.body?._entity
+  const write = isOldFormat ? (req.body || {} ): req.body._entity
+  const options = isOldFormat ? (req.query || {}) : req.body 
+
+
+  const isUpsert = (options.upsert === 'true' /* oldformat */ || options.upsert === true)
   fdlog('req.query ', req.query, { isUpsert })
-  const isUpdate = helpers.startsWith(req.url, '/ceps/update') || helpers.startsWith(req.url, '/feps/update') || (helpers.startsWith(req.url, '/feps/write') && req.query.upsert === 'true')
-  const replaceAllFields = isUpdate && (req.query?.replaceAllFields === 'true' || helpers.startsWith(req.url, '/ceps/update'))
+  const isUpdate = helpers.startsWith(req.url, '/ceps/update') || helpers.startsWith(req.url, '/feps/update') || (helpers.startsWith(req.url, '/feps/write') && isUpsert)
+  const replaceAllFields = isUpdate && (options.replaceAllFields === 'true' || options.replaceAllFields === true || helpers.startsWith(req.url, '/ceps/update'))
   const isCeps = helpers.startsWith(req.url, '/ceps/')
   const isQueryBasedUpdate = (!isCeps && isUpdate && !req.params.data_object_id && req.body.q && req.body.keys)
   if (req.params.data_object_start) {
@@ -184,8 +189,7 @@ exports.write_record = function (req, res) { // create update or upsert
   }
 
   fdlog('write rec ', { isUpdate, replaceAllFields }, 'query: ', req.body, 'body', req.query)
-  const write = req.body || {}
-  const dataObjectId = (isUpsert || isUpdate) ? req.params.data_object_id : (req.body._id ? (req.body._id + '') : null)
+  const dataObjectId = (isUpsert || isUpdate) ? req.params.data_object_id : (options._id ? (options._id + '') : null)
 
   const [granted, bestGrantType] = checkWritePermission(req)
 
@@ -321,6 +325,7 @@ exports.read_record_by_id = function (req, res) {
 
     // 2. get permissions if needbe, and remove fields that shouldnt be sent
     function (fetchedRecord, cb) {
+      fdlog('fetchedRecord', fetchedRecord)
       if (!fetchedRecord) {
         cb(appErr('no related records for ' + dataObjectId))
       } else if (req.freezrAttributes.own_record || readAll) { // ie own_record or has read_all.. redundant? own_record always gets readall
@@ -372,12 +377,12 @@ exports.read_record_by_id = function (req, res) {
     }
   ],
   function (err) {
-    // fdlog("got to end of read_record_by_id");
     if (err) {
       helpers.send_failure(res, err, 'app_handler', exports.version, 'read_record_by_id')
     } else if (requestFile) {
       helpers.send_success(res, { fileToken: getOrSetFileToken(req.freezrAttributes.owner_user_id, req.params.app_name, dataObjectId) })
     } else {
+      fdlog({ permittedRecord })
       helpers.send_success(res, permittedRecord)
     }
   })
@@ -407,7 +412,14 @@ exports.db_query = function (req, res) {
 
   const authErr = function (message) { return helpers.auth_failure('app_handler', exports.version, 'db_query', message + ' ' + req.params.app_table) }
 
-  if ((!req.body || helpers.isEmpty(req.body)) && req.query && !helpers.isEmpty(req.query)) req.body = { q: req.query } // in case of a GET statement (ie move query to body)
+  if ((!req.body || helpers.isEmpty(req.body)) && req.query && !helpers.isEmpty(req.query)) {
+    req.body = { q: req.query } // in case of a GET statement (ie move query to body)
+    // consider useing this for count and skip
+    // if (req.query._count) {
+    //   req.body.count = req.query._count
+    //   delete req.body.q._count
+    // }
+  }
 
   let gotErr = null
 
@@ -487,6 +499,10 @@ exports.db_query = function (req, res) {
     if (req.body.q._modified_after) {
       req.body.q._date_modified = { $gt: parseInt(req.body.q._modified_after) }
       delete req.body.q._modified_after
+    }
+    if (req.body.q._modified_before) {
+      req.body.q._date_modified = { $lt: parseInt(req.body.q._modified_before) }
+      delete req.body.q._modified_before
     }
     fdlog('In query to find', JSON.stringify(req.body.q), { sort }, 'count: ', req.body.count)
     let returnFields = null
@@ -945,7 +961,7 @@ exports.shareRecords = function (req, res) {
 
           if (req.body.grant) {
             allowedGrantees.forEach((grantee) => {
-              grantee = grantee.replace(/\./g, '_')
+              grantee = grantee.replace(/\./g, '_').trim()
               const granteeKey = (grantee === '_public' || grantee === '_privatelink') ? grantee : ((helpers.startsWith(grantee, '_privatefeed:')) ? grantee.substr(0, 12) : grantee)
               codeOrName = helpers.startsWith(grantee, '_privatefeed:') ? grantee.substr(13) : null
 
@@ -972,7 +988,7 @@ exports.shareRecords = function (req, res) {
             })
           } else { // revoke
             req.body.grantees.forEach((grantee) => {
-              grantee = grantee.replace(/\./g, '_')
+              grantee = grantee.replace(/\./g, '_').trim()
               const granteeKey = (grantee === '_public' || grantee === '_privatelink') ? grantee : (helpers.startsWith(grantee, '_privatefeed:')) ? grantee.substr(0, 12) : grantee
               // future - could keep all public id's and then use those to delete them later
               if (accessible[granteeKey] && accessible[granteeKey][fullPermName]) {
@@ -1000,9 +1016,10 @@ exports.shareRecords = function (req, res) {
           // check if public if has already been used
           if (req.body.publicid) {
             req.freezrPublicRecordsDB.query(req.body.publicid, {}, function (err, results) {
+              if (results.length > 0) console.log('check freezrPublicRecordsDB ', { original_app_table: results[0].original_app_table, table_id: req.body.table_id, original_record_id: results[0].original_record_id, recId: rec._id } )
               if (err) {
                 cb2(err)
-              } else if (results.length > 0 && (results[0].original_app_table !== req.body.table_id || results[0].original_record_id !== rec._id)) {
+              } else if (results.length > 0 && (results[0].original_app_table !== req.body.table_id || results[0].original_record_id.toString() !== rec._id.toString())) {
                 console.warn('req.body.publicid used - to recheck this ' + req.body.publicid + ' req.body.table_id', req.body.table_id, 'rec._id ', rec._id, results)
                 cb2(new Error('Another entity already has the id requested.'))
               } else {
@@ -1026,13 +1043,22 @@ exports.shareRecords = function (req, res) {
       if (req.body.grant) {
         let granteeList = grantedPermission.grantees || []
         allowedGrantees.forEach((grantee) => {
-          grantee = grantee.replace(/\./g, '_')
+          grantee = grantee.replace(/\./g, '_').trim()
           granteeList = helpers.addToListAsUnique(granteeList, grantee)
         })
         req.freezrUserPermsDB.update(grantedPermission._id.toString(), { grantees: granteeList }, { replaceAllFields: false }, function (err, results) {
           cb(err)
         })
         // note that the above live is cumulative.. it could be cleaned if it bloats
+      } else if (permDoesntNeedTableId) {
+        const granteeList = grantedPermission.grantees || []
+        allowedGrantees.forEach((grantee) => {
+          grantee = grantee.replace(/\./g, '_').trim()
+          if (granteeList.indexOf(grantee) >= 0) granteeList.splice(granteeList.indexOf(grantee), 1)
+        })
+        req.freezrUserPermsDB.update(grantedPermission._id.toString(), { grantees: granteeList }, { replaceAllFields: false }, function (err, results) {
+          cb(err)
+        })
       } else {
         // console.log - todo in future, create a more complex algorithm to check if all records shared with grantee have been removed and then remove the grantees
         // cirrently list contains all names of people with whome a record hasd been shared in the past, even if revoked later
@@ -1231,6 +1257,7 @@ const checkReadPermission = function (req, forcePermName) {
   let granted = false
   let readAll = false
   const relevantAndGrantedPerms = []
+  // onsole.log('granted perms ', req.freezrAttributes.grantedPerms)
   req.freezrAttributes.grantedPerms.forEach(perm => {
     if (['write_all', 'write_own', 'read_all', 'share_records'].includes(perm.type) &&
       // above is reduncant as only these threee types ar allowed, but future types may differ
@@ -1245,10 +1272,7 @@ const checkReadPermission = function (req, forcePermName) {
         readAll = readAll || ['write_all', 'read_all'].includes(perm.type)
       }
     }
-    // moved up 2023-05
-    // readAll = readAll || ['write_all', 'read_all'].includes(perm.type)
   })
-  // if (!granted) console.log('perm NOT granted in checkReadPermission for app table' + req.params.app_table, { granted, readAll, relevantAndGrantedPerms, attr: req.freezrAttributes })
 
   fdlog({ granted, readAll, relevantAndGrantedPerms })
   return [granted, readAll, relevantAndGrantedPerms]
@@ -1425,7 +1449,6 @@ NEW     message:
               recordAccessibleField = fetchedRecord._accessible
 
               fdlog('message initiate ', { fetchedRecord })
-              console.log('message initiate ', { fetchedRecord })
 
               // check permission
               if (messagingPerm && messagingPerm.return_fields && messagingPerm.return_fields.length > 0) {
@@ -1555,7 +1578,7 @@ NEW     message:
             cb(null)
           } else {
             async.forEach(validatedOtherHostMembers, function (recipient, cb2) {
-              console.log('transmitting to ', recipient)
+              fdlog('transmitting to ', recipient)
               transmitMessage(recipient, messageToKeep, function (err) {
                 if (err) {
                   console.warn('transmitted msg with ', { recipient, err })
@@ -1603,7 +1626,6 @@ NEW     message:
     case 'transmit':
       {
         fdlog('message transmit ', req.body)
-        console.log('message transmit ', req.body)
         // see if is in contact db and if so can get the details - verify it and then record
         // see if sender is in contacts - decide to keep it or not and to verify or not
         // record message in 'messages got' and then do a verify
@@ -1703,8 +1725,7 @@ NEW     message:
                   data = JSON.parse(data)
                   cb(null, data)
                 } catch (e) {
-                  felog('error parsing message in transmit', e)
-                  console.log('data chunks now -' + chunks + '- end chunks')
+                  felog('error parsing message in transmit', e, 'data chunks now -' + chunks + '- end chunks')
                   cb(e)
                 }
               })
@@ -1810,7 +1831,8 @@ NEW     message:
           // 1 basic checks
           function (cb) {
             if ((!messageIds || messageIds.length === 0) && !markAll) { // 2024: DECIDED no prems are needed to mark as read
-              cb(helpers.error(null, 'missing permission names in request'))
+              console.warn('missing permission IDs in request, ', { messageIds, markAll })
+              cb(helpers.error(null, 'missing permission IDs in request'))
             } else {
               cb(null)
             }
@@ -2165,7 +2187,7 @@ exports.create_file_record = function (req, res) {
       if (!req.body.options.convertPict) {
         cb(null, req.file.buffer)
       } else {
-        const picts = require('./services/pictures.js')
+        const picts = require('./utils/pictures.js')
         picts.convert(req.file, { width: req.body.options.convertPict.width, type: req.body.options.convertPict.type }, cb)
       }
     },

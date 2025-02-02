@@ -130,6 +130,12 @@ exports.generateAdminPage = function (req, res) {
       cssFiles = './@public/info.freezr.public/public/freezr_style.css'
       initialQueryFunc = getMainPrefsToShow
       break
+    case 'addsystemextension':
+      scriptFiles = ['./info.freezr.admin/addsystemextension.js']
+      pageTitle = 'freezr.info - Main Preferences'
+      cssFiles = ['./@public/info.freezr.public/public/freezr_style.css', './info.freezr.admin/addsystemextension.css']
+      initialQueryFunc = getMainPrefsToShow
+      break
     case 'register':
       scriptFiles = ['./info.freezr.admin/register.js']
       pageTitle = 'freezr.info - Register'

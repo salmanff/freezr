@@ -23,6 +23,7 @@ settings: {
       <br>
       <b>Current Database: </b><span id="dbParamsType"> {{dbParamsType}}</span>
       <br>
+      <b>Current Compute: </b><span id="slParamsType"> {{#slParamsType}} {{slParamsType}}{{/slParamsType}}{{^slParamsType}}None{{/slParamsType}}   </span><a href="/account/serverless">{{#slParamsType}} Edit paramaters {{slParamsType}}{{/slParamsType}}{{^slParamsType}}Create Parameters {{/slParamsType}}</a>
       <hr>
       <br>
     </div>

@@ -14,6 +14,8 @@ freezr.initPageScripts = function () {
   document.getElementById('app_url').innerHTML = autoInstallUrl
   document.getElementById('app_name2').innerHTML = autoInstallApp
   document.getElementById('install').onclick = function () {
+    document.getElementById('install').style.display = 'none'
+    document.getElementById('spinner').style.display = 'block'
     freezerRestricted.connect.ask('/v1/account/app_install_from_url.json', {
       app_url: autoInstallUrl,
       app_name: autoInstallApp
@@ -21,8 +23,9 @@ freezr.initPageScripts = function () {
       const d = freezr.utils.parse(returndata)
       if (error || d.err) {
         showError(error.message || d.err || 'Error installing!')
+        document.getElementById('spinner').style.display = 'none'
       } else {
-        window.location = '/account/app/settings/' + autoInstallApp + '?' + (action ? ('action=' + action + '&') : '') + 'message=You successfully installed the app.'
+        window.location = '/account/app/settings/' + autoInstallApp + '?' + (action ? ('action=' + action + '&') : '') + 'code=newinstall&message=You successfully installed the app.'
       }
     })
   }

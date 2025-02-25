@@ -807,6 +807,7 @@ const setupNewUserParams = function (req, res) {
             full_name: null,
             deleted: false,
             isAdmin: false,
+            isPublisher: false,
             fsParams,
             dbParams,
             _created_by_user: '_self_',
@@ -840,6 +841,7 @@ const setupNewUserParams = function (req, res) {
       req.session.logged_in_user_id = uid
       req.session.logged_in_date = new Date().getTime()
       req.session.logged_in_as_admin = false
+      req.session.logged_in_as_publisher = false
       req.session.device_code = deviceCode
 
       // res.cookie('app_token_' + userId, appToken, { path: '/admin' })

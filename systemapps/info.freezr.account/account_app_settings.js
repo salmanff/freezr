@@ -25,6 +25,9 @@ freezr.initPageScripts = function () {
       const StandAloneApps = await drawStandAloneApps(manOuter.manifest)
       dg.el('standAloneApps', { clear: true }, StandAloneApps)
 
+      const code = searchParams.get('code')
+      if (code === 'newinstall') showDeviceInstallOnTop(manOuter.manifest)
+
       setTimeout(async () => {
         const permsDiv = await showPermsIn(targetApp)
         dg.el('perms', { clear: true }, permsDiv, dg.hr())
@@ -65,18 +68,29 @@ const drawStandAloneApps = async function (manifest) {
       if (err) {
         e.target.innerText = 'Error getting code.'
       } else {
-        e.target.innerText = 'Your login url has been copied to the clipboard'
-        navigator.clipboard.writeText(resp.full_url)
+        navigator.clipboard.writeText(resp.full_url) // doesnt work on ios
+        e.target.innerText = 'Your login authentication url has been created'
+        e.target.appendChild(dg.div({
+          className: 'freezrButt',
+          style: { 'min-width': 'auto' },
+          onclick: function (e2) {
+            navigator.clipboard.writeText(resp.full_url)
+            e2.target.className = ''
+            e2.target.innerText = ' .. and copied to the clipboard.'
+          }
+        },
+        'Copy url'))
       }
       e.target.style.color = 'black'
       e.target.style.cursor = 'default'
       e.target.onclick = null
+      messages.style.maxLength = '300px'
       messages.innerHTML = 'An app code was created for your app: ' + resp.app_password + '. Your login url is <div id ="freezrNewLoginUrl">' + resp.full_url + '</div><br/><br/><br/>'
     })
   }
 
   otherFuncsDiv.appendChild(makeBox({
-    mainTextHTML: 'Click here to create and copy a (CEPS) login url for stand-alone apps',
+    mainTextHTML: 'Click here to create a (CEPS) login authentication url to use in stand-alone apps',
     mainTextFunc: genPasswordAndwrite
   }))
 
@@ -215,6 +229,33 @@ const isIos = function () {
   ].includes(navigator.platform) ||
   // iPad on iOS 13 detection
   (navigator.userAgent.includes('Mac') && 'ontouchend' in document)
+}
+const showDeviceInstallOnTop = function (manifest) {
+  if (isIos() && manifest.standAloneApps.ios && manifest.standAloneApps.ios.link) {
+    const appHeader = document.getElementById('appHeader')
+    const genPasswordAndSendToIos = function (e) {
+      console.log('genPasswordAndSendToIos manifest.standAloneApps.ios.link ', manifest.standAloneApps.ios.link)
+      genAppPassword(manifest.identifier, 180, function (err, resp) {
+        if (err) {
+          const messages = dg.el('freezrAppSettingsMessages')
+          console.warn(err)
+          messages.innerHTL = 'Error trying to get password.'
+        } else {
+          // onsole.log({ manifest })
+          window.open(manifest.standAloneApps.ios.link + '?url=' + resp.full_url, '_self')
+        }
+      })
+    }
+    const box = makeBox({
+      mainTextHTML: 'Add your credentials to the app on this device',
+      mainTextFunc: genPasswordAndSendToIos,
+      imgSrc: '/app_files/@public/info.freezr.public/public/static/ios_logo.png',
+      imgFunc: genPasswordAndSendToIos
+    })
+    const outer = document.createElement('center')
+    outer.appendChild(box)
+    appHeader.appendChild(outer)
+  }
 }
 
 const genAppPassword = function (appName, daysExpiry, callback) {

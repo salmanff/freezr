@@ -275,7 +275,7 @@ freezr.feps.publicquery = function (options, callback) {
     delete options.host
   }
   freezerRestricted.connect.send(url, options, callback, 'POST', 'application/json', readOptions)
-} 
+}
 freezr.feps.systemExtensions = function (options, callback) {
   // options can be: app_name, skip, count, userId, pid
   if (!options || !options.task) {

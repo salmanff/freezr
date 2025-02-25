@@ -802,11 +802,13 @@ exports.shareRecords = function (req, res) {
   async.waterfall([
     // 0 make basic checks and get the perm
     function (cb) {
-      if (req.body.publicid && (typeof req.body.record_id !== 'string' || ((!req.session.logged_in_as_admin && !req.session.logged_in_as_publisher) && !helpers.startsWith(req.body.publicid, ('@' + req.session.logged_in_user_id + '/'))))) { // implies: req.body.grantees.includes('_public') or 'privtefeed or privatelink'
+      if (req.body.publicid &&
+        (typeof req.body.record_id !== 'string' ||
+        ((!req.session.logged_in_as_admin && !req.session.logged_in_as_publisher) && !helpers.startsWith(req.body.publicid, ('@' + req.session.logged_in_user_id + '/' + requestorApp))))) { // implies: req.body.grantees.includes('_public') or 'privtefeed or privatelink'
         if (typeof req.body.record_id !== 'string') {
           cb(appErr('input error - cannot assign a public id to more than one entity - please include one record if under record_id'))
         } else {
-          cb(appErr('input error - non admin users should always use the users name in their publicid, starting with an @ sign.'))
+          cb(appErr('input error - non-admin and users who have no publishing rights  should always use the users name in their publicid, starting with an @ sign.'))
         }
         // todo - possible future conflict if a user signs up with a name which an admin wants to use for their url
       } else if (isHtmlMainPage && (!req.body.grantees.includes('_public') || typeof req.body.record_id !== 'string' || !helpers.endsWith(req.body.table_id, '.files') || !helpers.endsWith(req.body.record_id, 'html'))) {
@@ -1016,7 +1018,7 @@ exports.shareRecords = function (req, res) {
           // check if public if has already been used
           if (req.body.publicid) {
             req.freezrPublicRecordsDB.query(req.body.publicid, {}, function (err, results) {
-              if (results.length > 0) console.log('check freezrPublicRecordsDB ', { original_app_table: results[0].original_app_table, table_id: req.body.table_id, original_record_id: results[0].original_record_id, recId: rec._id } )
+              if (results.length > 0) console.log('check freezrPublicRecordsDB ', { original_app_table: results[0].original_app_table, table_id: req.body.table_id, original_record_id: results[0].original_record_id, recId: rec._id })
               if (err) {
                 cb2(err)
               } else if (results.length > 0 && (results[0].original_app_table !== req.body.table_id || results[0].original_record_id.toString() !== rec._id.toString())) {

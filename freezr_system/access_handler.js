@@ -548,8 +548,8 @@ exports.userLoginHandler = function (req, res, dsManager, next) {
           req.session.logged_in = true
           req.session.logged_in_user_id = userId
           req.session.logged_in_date = new Date().getTime()
-          req.session.logged_in_as_admin = u.isAdmin
-          req.session.logged_in_as_publisher = u.isPublisher
+          req.session.logged_in_as_admin = Boolean(u.isAdmin)
+          req.session.logged_in_as_publisher = Boolean(u.isPublisher)
           cb(null)
         } else {
           felog('userLoginHandler', 'wrong password - need to limit number of wring passwords - set a file in the datastore ;) ')
@@ -820,7 +820,7 @@ exports.getManifest = function (req, res, dsManager, next) {
         req.freezrRequestorManifest = { identifier: appName, pages: {} }
         cb(null)
       } else if (list.length > 1) {
-        appDb.delete_record(list[0]._id, {}, function (err, result) {
+        appDb.delete_record(list[1]._id, {}, function (err, result) {
           console.warn('DOUBLE MANIFEST ERROR SNBH', { appName, ownerId, err, result }) // hopefully a legacy mistake bug fiz - this shouldnt re-occur 
           req.freezrRequestorManifest = list[1].manifest
           fdlog('will send second manifest ', req.freezrRequestorManifest)

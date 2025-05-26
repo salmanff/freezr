@@ -93,53 +93,53 @@ const generatePageWithManifest = function (req, res, manifest) {
     if (pageParams.css_files) {
       if (typeof pageParams.css_files === 'string') pageParams.css_files = [pageParams.css_files]
       pageParams.css_files.forEach(function (cssFile) {
-        if (helpers.startsWith(cssFile, 'http')) {
-          helpers.app_data_error(exports.version, 'generatePage', req.params.app_name, 'Cannot have css files referring to other hosts')
-        } else {
+        // if (helpers.startsWith(cssFile, 'http')) {
+        //   helpers.app_data_error(exports.version, 'generatePage', req.params.app_name, 'Cannot have css files referring to other hosts')
+        // } else {
           if (fileHandler.fileExt(cssFile) === 'css') {
             options.css_files.push(cssFile)
           } else {
             helpers.app_data_error(exports.version, 'generatePage', req.params.app_name, 'Cannot have non js file used as css ' + pageParams.css_files)
           }
-        }
+        // }
       })
     }
-    const outsideScripts = []
+    // const outsideScripts = []
     if (pageParams.script_files) {
       if (typeof pageParams.script_files === 'string') pageParams.script_files = [pageParams.script_files]
       pageParams.script_files.forEach(function (jsFile) {
-        if (helpers.startsWith(jsFile, 'http')) {
-          outsideScripts.push(jsFile)
-        } else {
+        // if (helpers.startsWith(jsFile, 'http')) {
+        //   outsideScripts.push(jsFile)
+        // } else {
           // Check if exists? - todo and review - err if file doesn't exist?
           if (fileHandler.fileExt(jsFile) === 'js') {
             options.script_files.push(jsFile)
           } else {
             helpers.app_data_error(exports.version, 'generatePage', req.params.app_name, 'Cannot have non js file used as js.')
           }
-        }
+        // }
       })
     }
-    const outsideModules = []
+   //  const outsideModules = []
     if (pageParams.modules) {
       if (typeof pageParams.modules === 'string') pageParams.modules = [pageParams.modules]
       pageParams.modules.forEach(function (jsFile) {
-        if (helpers.startsWith(jsFile, 'http')) {
-          outsideModules.push(jsFile)
-        } else {
+        // if (helpers.startsWith(jsFile, 'http')) {
+        //   outsideModules.push(jsFile)
+        // } else {
           // Check if exists? - todo and review - err if file doesn't exist?
           if (fileHandler.fileExt(jsFile) === 'js' || fileHandler.fileExt(jsFile) === 'jsm') {
             options.modules.push(jsFile)
           } else {
             helpers.app_data_error(exports.version, 'generatePage', req.params.app_name, 'Cannot have non js file used as a js modules.')
           }
-        }
+        // }
       })
     }
 
-    if (outsideScripts.length > 0 || outsideModules.length > 0) {
-      fdlog('todo? re-implement outside-scripts permission??')
-    }
+    // if (outsideScripts.length > 0 || outsideModules.length > 0) {
+    //   fdlog('todo? re-implement outside-scripts permission??')
+    // }
     fileHandler.load_data_html_and_page(req, res, options)
   }
 }
@@ -163,7 +163,7 @@ freezrAttributes : {
 }
 
 */
-exports.write_record = function (req, res) { // create update or upsert
+exports.write_record = function (req, res) { // create update or upsert 
   // app.post('/ceps/write/:app_table', userDataAccessRights, app_handler.write_record);
   // app.put('/ceps/update/:app_table/:data_object_id', userDataAccessRights, app_handler.write_record)
   // app.post('/feps/write/:app_table', userDataAccessRights, app_handler.write_record);
@@ -210,8 +210,8 @@ exports.write_record = function (req, res) { // create update or upsert
         cb(helpers.invalid_data('app name not allowed: ' + req.freezrAttributes.requestor_app, 'account_handler', exports.version, 'write_record'))
       } else if (isCeps && (isUpsert || (isUpdate && !dataObjectId))) {
         cb(appErr('CEPs is not yet able to do upsert, and key only updates and query based updates.'))
-      } else if (dataObjectId && !isUpdate && !req.session.logged_in_as_admin && !req.session.logged_in_as_publisher && req.freezrRequesteeDB.dbParams.useUnifiedCollection) { // unified collection users cannot set id's or even upsert
-        cb(appErr('Regular users cannot set a custom id n unified collections'))
+      // } else if (dataObjectId && !isUpdate && !req.session.logged_in_as_admin && !req.session.logged_in_as_publisher && req.freezrRequesteeDB.dbParams.useUnifiedCollection) { // unified collection users cannot set id's or even upsert
+      //   cb(appErr('Regular users cannot set a custom id n unified collections'))
       } else if (!dataObjectId && !isUpsert && !isUpdate) { // Simple create object with no id
         cb(null, null)
       } else if (dataObjectId && (isUpsert || isUpdate)) { // isUpsert or update
@@ -275,6 +275,7 @@ exports.write_record = function (req, res) { // create update or upsert
       felog('snbh - unknown error writing one record at a time ', { write, writeConfirm })
       helpers.send_failure(res, new Error('unknown write error'), 'app_handler', exports.version, 'write_record')
     } else if (isUpdate || isUpsert) {
+      writeConfirm._id = dataObjectId
       helpers.send_success(res, writeConfirm)
     } else { // write new (CEPS)
       helpers.send_success(res, writeConfirm)
@@ -402,7 +403,7 @@ exports.db_query = function (req, res) {
   // app.get('/ceps/query/:app_table', userDataAccessRights, app_handler.db_query); (req.params contain query)
   // app.get('/feps/query/:app_table', userDataAccessRights, app_handler.db_query); (same as ceps)
   // app.post('/feps/query/:app_table', userDataAccessRights, app_handler.db_query);
-  //   body: permission_name, user_id (ie requestee id), q (query params), only_others, sort
+  //   body: permission_name, user_id (ie requestee id), q (query params), sort
 
   if (helpers.startsWith(req.params.app_table, 'info.freezr.admin') || req.freezrAttributes.requestor_app === 'info.freezr.admin' || helpers.startsWith(req.params.app_table, 'info.freezr.account')) {
     fdlog('should db_query used to make admin queries???')
@@ -479,13 +480,13 @@ exports.db_query = function (req, res) {
   if (gotErr) {
     felog('gotErr in db_query checking perms ', gotErr)
     helpers.send_failure(res, gotErr, 'app_handler', exports.version, 'db_query')
-  } else if ((thePerm?.sort_fields || req.body.sort) && req.freezrRequesteeDB.dbParams.useUnifiedCollection) {
-    helpers.send_failure(res, new Error('Cannot sort on unified collections'), 'app_handler', exports.version, 'db_query')
+  // } else if ((thePerm?.sort_fields || req.body.sort) && req.freezrRequesteeDB.dbParams.useUnifiedCollection) {
+  //   helpers.send_failure(res, new Error('Cannot sort on unified collections'), 'app_handler', exports.version, 'db_query')
   } else {
     //  console.log('todo - if type is not db_query then add relevant criteria to query')
 
     const skip = req.body.skip ? parseInt(req.body.skip) : 0
-    let count = req.body.count ? parseInt(req.body.count) : (req.params.max_count ? req.params.max_count : 100)
+    let count = req.body.count ? parseInt(req.body.count) : (req.params.max_count ? req.params.max_count : 500)
     if (thePerm && thePerm.max_count && count + skip > thePerm.max_count) {
       count = Math.max(0, thePerm.max_count - skip)
     }
@@ -515,7 +516,7 @@ exports.db_query = function (req, res) {
       const ret = {}
       for (const [key, value] of Object.entries(q)) {
         if (key === '$regex' && typeof value === 'string') {
-          ret[key] = new RegExp(value)
+          ret[key] = new RegExp(value, 'i')
         } else if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || !value) {
           ret[key] = value
         } else if (Array.isArray(value)) {

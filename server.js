@@ -2,9 +2,9 @@
 const VERSION = '0.0.211'
 
 // INITALISATION / APP / EXPRESS
-console.log('=========================  VERSION June 2024  =======================')
+console.log('=========================  VERSION Apr 2025  =======================')
 const express = require('express')
-const bodyParser = require('body-parser')
+// const bodyParser = require('body-parser')
 const multer = require('multer')
 const upload = multer().single('file')
 const cookieParser = require('cookie-parser')
@@ -23,7 +23,7 @@ const permHandler = require('./freezr_system/perm_handler.js')
 const publicHandler = require('./freezr_system/public_handler.js')
 const DS_MANAGER = require('./freezr_system/ds_manager.js')
 
-const systemExtensions = require('./freezr_system/systemextensions.js')
+const microservices = require('./freezr_system/microservices.js')
 
 try { // for simualting env vars on localhost.
   const envSimulatForLocalDev = require('./zProcessDotEnvSimulatorForLocalDev.js')
@@ -44,9 +44,13 @@ const LOG_DEBUGS = false
 const fdlog = function (...args) { if (LOG_DEBUGS) console.log(...args) }
 
 // SET UP
-app.use(bodyParser.json({ limit: 1024 * 1024 * 3, type: 'application/json' }))
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true }))
+
+// 2025-04 -> replaced bodyparsser (deprecated) with below...
+// app.use(bodyParser.json({ limit: 1024 * 1024 * 3, type: 'application/json' }))
 // stackoverflow.com/questions/26287968/meanjs-413-request-entity-too-large
-app.use(bodyParser.urlencoded({ extended: true, limit: 1024 * 1024 * 3, type: 'application/x-www-form-urlencoding' }))
+// app.use(bodyParser.urlencoded({ extended: true, limit: 1024 * 1024 * 3, type: 'application/x-www-form-urlencoding' }))
 app.use(cookieParser())
 app.enable('trust proxy') // for heroku -
 
@@ -291,9 +295,9 @@ const readWriteUserData = function (req, res, next) {
   req.freezrPrefs = freezrPrefs // needed for unifiedDb
   permHandler.readWriteUserData(req, res, dsManager, next)
 }
-const systemExtensionPerms = function (req, res, next) {
+const microservicePerms = function (req, res, next) {
   req.freezrPrefs = freezrPrefs // needed for unifiedDb
-  permHandler.systemExtensionPerms(req, res, dsManager, next)
+  permHandler.microservicePerms(req, res, dsManager, next)
 }
 const addUserAppsAndPermDBs = function (req, res, next) {
   req.freezrPrefs = freezrPrefs // needed for unifiedDb
@@ -611,13 +615,13 @@ const addAppUses = function (cookieSecrets) {
   app.get('/feps/fetchuserfiles/:app_name/:user_id/*', userAPIRights, addUserFs, appHandler.sendUserFileWithAppToken) // collection_name is files
 
   // Ugly hacks before using freezrAttributes in the funcs and msking sure it doesnt create any issues
-  const addAppFsForSystemExtensions = function (req, res, next) {
+  const addAppFsFormicroservices = function (req, res, next) {
     // nb - this is not needed for admin functions
     req.params.user_id = req.freezrAttributes.owner_user_id // req.session?.logged_in_user_id /// can be changed o 
     req.params.app_name = req.freezrAttributes?.requestor_app 
     accessHandler.addAppFsForApi(req, res, dsManager, next)
   }
-  const uploadIfNeedbe = function (req, res, next) { // used for systemExtensions api
+  const uploadIfNeedbe = function (req, res, next) { // used for microservices api
     function isEmpty (obj) {
       for (const prop in obj) {
         if (Object.hasOwn(obj, prop)) {
@@ -627,7 +631,7 @@ const addAppUses = function (cookieSecrets) {
       return true
     }
     if (isEmpty(req.body)) {
-      // onsole.log('addUserFsForSystemExtensions - uploading file')
+      // onsole.log('addUserFsFormicroservices - uploading file')
       upload(req, res, function (err) {
         if (err) {
           console.warn('multer err ', err)
@@ -639,26 +643,26 @@ const addAppUses = function (cookieSecrets) {
         }
       })
     } else {
-      fdlog('addUserFsForSystemExtensions - NO file')
+      fdlog('addUserFsFormicroservices - NO file')
       next()
     }
   }
-  const addUserFsForSystemExtensions = function (req, res, next) {
+  const addUserFsFormicroservices = function (req, res, next) {
     // not required for local ADMIN_FUNCTIONS but okay to keep
     req.params.user_id = req.freezrAttributes.owner_user_id //  req.freezrAttributes.owner_user_idreq.session?.logged_in_user_id
     req.params.app_name = req.freezrAttributes?.requestor_app
     req.freezrPrefs = freezrPrefs // Needed for unifiedDb
     permHandler.addUserFs(req, res, dsManager, next)
   }
-  const addPublicFsForSystemExtensions = function (req, res, next) {
-    if (systemExtensions.LOCAL_FUNCTIONS.includes(req.params.task)) {
+  const addPublicFsForMicroservices = function (req, res, next) {
+    if (microservices.LOCAL_FUNCTIONS.includes(req.params.task)) {
       req.freezrPrefs = freezrPrefs // Needed for unifiedDb
-      accessHandler.addPublicFsForSystemExtensions(req, res, dsManager, next)
+      accessHandler.addPublicFsForMicroservices(req, res, dsManager, next)
     } else {
       next()
     }
   }
-  app.use('/feps/systemextensions/:task', userAPIRights, uploadIfNeedbe, systemExtensionPerms, addAppFsForSystemExtensions, addPublicFsForSystemExtensions, addUserFsForSystemExtensions, systemExtensions.tasks) // first two are only ethere to help hasAtLeastOnePublicRecord
+  app.use('/feps/microservices/:task', userAPIRights, uploadIfNeedbe, microservicePerms, addAppFsFormicroservices, addPublicFsForMicroservices, addUserFsFormicroservices, microservices.tasks) // first two are only ethere to help hasAtLeastOnePublicRecord
 
   // permissions
   app.get('/v1/permissions/gethtml/:app_name', userAPIRights, addUserPermDBs, accountHandler.generatePermissionHTML)

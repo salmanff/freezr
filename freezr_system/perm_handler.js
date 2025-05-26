@@ -5,7 +5,7 @@ exports.version = '0.0.200'
 /* global User */
 
 const helpers = require('./helpers.js')
-const systemExtensions = require('./systemextensions.js')
+const microservices = require('./microservices.js')
 const async = require('async')
 
 // dsManager.getorInitDb({app_table: 'info.freezr.account.app_list', owner: freezrAttributes.owner_user_id}, {}, function(err, requesteeAppListDB) {})
@@ -128,7 +128,7 @@ exports.readWriteUserData = function (req, res, dsManager, next) {
   }
 }
 
-exports.systemExtensionPerms = async function (req, res, dsManager, next) {
+exports.microservicePerms = async function (req, res, dsManager, next) {
   // assume token info in in req.freezrTokenInfo => {requestor_id, app_name, loggedIn}
   fdlog('readWriteUserData ', { freezrTokenInfo: req.freezrTokenInfo, body: req.body })
 
@@ -147,8 +147,8 @@ exports.systemExtensionPerms = async function (req, res, dsManager, next) {
   }
 
   try {
-    if (systemExtensions.LOCAL_FUNCTIONS.includes(req.params.task)) {
-      if (!req.session.logged_in_as_admin && systemExtensions.ADMIN_FUNCTIONS.includes(req.params.action)) throw new Error('uploading systemExtensions can only be done by admin users')
+    if (microservices.LOCAL_FUNCTIONS.includes(req.params.task)) {
+      if (!req.session.logged_in_as_admin && microservices.ADMIN_FUNCTIONS.includes(req.params.action)) throw new Error('uploading microservices can only be done by admin users')
       // todo - consider adding permissions for users to invoke locally
     } else {
       const permDB = await dsManager.async.getUserPerms(freezrAttributes.owner_user_id, { freezrPrefs: req.freezrPrefs })
@@ -173,7 +173,7 @@ exports.systemExtensionPerms = async function (req, res, dsManager, next) {
     req.freezrAttributes = freezrAttributes
     next()
   } catch (e) {
-    felog('systemExtensionPerms', 'error in getting db', e)
+    felog('microservicePerms', 'error in getting db', e)
     res.sendStatus(401)
   }
 

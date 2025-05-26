@@ -397,9 +397,9 @@ const accountActionSetServicesParams = function (req, res) {
     },
 
     async () => {
-      const systemExtensions = require('./systemextensions.js')
+      const microservices = require('./microservices.js')
       if (req.params.action === 'setServicesParams' && slParams.type === 'aws' && !slParams.arnRole) {
-        const role = await systemExtensions.createAwsRole(slParams)
+        const role = await microservices.createAwsRole(slParams)
         if (role.error || !role.Arn) {
           console.warn('error setting role ', role)
           console.warn('error setting role - code is ', role?.error?.Error?.Code)
@@ -957,15 +957,16 @@ exports.install_app = function (req, res) {
       cb(null)
     },
 
-    // 8. if update has a systemExtensions perm then update 
+    // 8. if update has a microservices perm then update 
     async () => {
       const manifestPerms = (manifest && manifest.permissions && Object.keys(manifest.permissions).length > 0) ? JSON.parse(JSON.stringify(manifest.permissions)) : null
-      if (manifestPerms && manifestPerms.length > 0 && manifestPerms.filter(perm => perm.type === 'use_serverless').length > 0) {
-        const systemExtensions = require('./systemextensions.js')
-        const installed = await systemExtensions.upsertextensionsFuncsOnInstall(req, realAppName, manifestPerms, realAppPath)
+      if (manifestPerms && manifestPerms.length > 0 && manifestPerms.filter(perm => perm.type === 'use_microservice').length > 0) {
+        const microservices = require('./microservices.js')
+        const installed = await microservices.upsertServerlessFuncsOnInstall(req, realAppName, manifestPerms, realAppPath)
         if (installed.error) {
-          console.warn('installed setting perms ', installed)
-          return [helpers.error(installed.error || 'error creating systemExtensions perm'), null]
+          console.log('Todo - temp - need to send warning back that microservices were not installed .. error installing serverless -> installed setting perms ', installed)
+          return [null, null]
+          // return [helpers.error(installed.error || 'error creating microservices perm'), null]
         } else {
           return [null, null]
         }
@@ -1639,7 +1640,7 @@ exports.changeNamedPermissions = function (req, res) {
 }
 
 const permissionObjectFromManifestParams = function (requestorApp, manifestPerm) {
-  const ALLOWED_PERMISSION_TYPES = ['upload_pages', 'share_records', 'read_all', 'message_records', 'write_own', 'write_all', 'db_query', 'use_app', 'use_serverless']
+  const ALLOWED_PERMISSION_TYPES = ['upload_pages', 'share_records', 'read_all', 'message_records', 'write_own', 'write_all', 'db_query', 'use_app', 'use_microservice']
   const PERMISSION_FIELD_TYPES = {
     requestor_app: 'string',
     table_id: 'string', // but can also store an array, if table_ids is declared
@@ -1664,7 +1665,7 @@ const permissionObjectFromManifestParams = function (requestorApp, manifestPerm)
     felog('permissionObjectFromManifestParams', 'cannot make permission without a name ', { requestorApp, name })
     err = 'Cannot make permission without a name.'
   }
-  const DONT_NEED_TABLES = ['use_app', 'upload_pages', 'use_serverless']
+  const DONT_NEED_TABLES = ['use_app', 'upload_pages', 'use_microservice']
   if (!manifestPerm.table_id && !manifestPerm.table_ids && !DONT_NEED_TABLES.includes(manifestPerm.type)) {
     felog('permissionObjectFromManifestParams', 'cannot make permission without a table ', { manifestPerm, requestorApp, name })
     err = (err ? ' And ' : name + ': ') + 'Cannot make permission without a table_id or type. '

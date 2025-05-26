@@ -1,6 +1,6 @@
-/* 
-SystemExtensions.js
-serverless and other service addons
+/*
+microservices.js
+serverless and other local addons
 
 currently only with AWS - needs tobe abstracted to cover other serverless service providers
 
@@ -26,25 +26,28 @@ const fileHandler = require('./file_handler.js')
 const fs = require('fs')
 
 exports.version = '0.0.1'
-exports.LOCAL_FUNCTIONS = ['invokeextension', 'upsertextension', 'deleteextension']
-exports.ADMIN_FUNCTIONS = ['upsertextension', 'deleteextension']
+exports.LOCAL_FUNCTIONS = ['invokelocalservice', 'upsertlocalservice', 'deletemicroservice']
+exports.ADMIN_FUNCTIONS = ['upsertlocalservice', 'deletemicroservice']
 
 const fullFunctionName = function (ownerName, appName, pureFunctionName) {
   // full name is used on the serverless system just to differentiate between potential different versions and show it is a freezr service
+  // if (!ownerName || !appName || !pureFunctionName) console.log('oneof three params missing ', { ownerName, appName, pureFunctionName } )
   if (!ownerName || !appName || !pureFunctionName) return null
-  return ('freezr_' + ownerName + '_' + appName + '_' + pureFunctionName).replace(/\./g, '_')
+  const ret1 = ('freezr_' + ownerName + '_' + appName + '_' + pureFunctionName).replace(/\./g, '_')
+  return ret1.slice(0, 64)  // ('freezr_' + ownerName + '_' + appName + '_' + pureFunctionName).replace(/\./g, '_').slice(64) // aws contraint of 64 chars
 }
 
 exports.tasks = async function (req, res) {
   // onsole.log('tasks', { tasl: req.params.task, body: req.body, query: req.query, freezrAttributes: req.freezrAttributes })
   const credentials = req.freezrAttributes.slParams
 
-  if (req.params.task === 'invokeserverless' || req.params.task === 'invokeextension') {
-    const functionName = req.params.task === 'invokeextension'
-      ? req.body.system_extension_name
-      : fullFunctionName(req.freezrAttributes.owner_user_id, req.freezrAttributes.requestor_app, req.freezrAttributes.permission_name)
-    if (!functionName) {
-      console.warn('tasks err no func name')
+  if (req.params.task === 'invokeserverless' || req.params.task === 'invokelocalservice') {
+    const functionName = req.params.task === 'invokelocalservice'
+      ? req.body?.permission_name
+      : fullFunctionName(req.freezrAttributes.owner_user_id, req.freezrAttributes.requestor_app, req.body?.permission_name)
+    if (req.freezrAttributes.permission_name !== req.body?.permission_name) {
+      helpers.send_failure(res, new Error('permission name mismatch'), 'serverless', exports.version, 'tasks ' + req.params.task)
+    } else if (!functionName) {
       helpers.send_failure(res, new Error('invalid function name 1'), 'serverless', exports.version, 'tasks ' + req.params.task)
     } else {
       const payload = { inputParams: req.body.inputParams }
@@ -72,7 +75,7 @@ exports.tasks = async function (req, res) {
         helpers.send_failure(res, new Error('no response'), 'serverless', exports.version, 'tasks ' + req.params.task)
       } else {
         if (!resp.result) resp.result = {}
-        if (!resp.result.apiResponse) { resp.result.apiResponse = { error: 'internal error - no apiResponse provided' } }
+        if (!resp.result.apiResponse) { resp.result.apiResponse = { error: resp.result.error || 'internal error - no apiResponse provided' } }
         if (resp.result?.dbWrite) {
           resp.result.apiResponse.dbWrite = 'dbWrite not implemented yet'
         } else if (resp.result?.fileSave) {
@@ -88,21 +91,20 @@ exports.tasks = async function (req, res) {
       code = req.freezrAppFS ? await req.freezrAppFS.async.readAppFile(req.freezrAttributes.permission_name + '.zip', { doNotToString: true }) : null
     } catch (e) {
       req.freezrAppFSError = e
-      console.warn('error reading code', e)
     }
 
     if (!functionName) {
-      helpers.send_failure(res, new Error('invalid function name 2'), 'SystemExtensions', exports.version, 'tasks ' + req.params.task)
+      helpers.send_failure(res, new Error('invalid function name 2'), 'Microservices', exports.version, 'tasks ' + req.params.task)
     } else if (!code) {
       if (req.freezrAppFSError) {
-        helpers.send_failure(res, req.freezrAppFSError, 'SystemExtensions', exports.version, 'tasks ' + req.params.task)
+        helpers.send_failure(res, req.freezrAppFSError, 'Microservices', exports.version, 'tasks ' + req.params.task)
       } else {
         helpers.send_failure(res, { error: 'could not read function code' })
       }
     } else if (req.params.task === 'upsertserverless') {
       const resp = await upsertFunction(credentials, functionName, code)
       if (resp.error) {
-        helpers.send_failure(res, resp.error || new Error('unknown err'), 'SystemExtensions', exports.version, 'tasks ' + req.params.task)
+        helpers.send_failure(res, resp.error || new Error('unknown err'), 'Microservices', exports.version, 'tasks ' + req.params.task)
       } else {
         helpers.send_success(res, resp)
       }
@@ -112,7 +114,7 @@ exports.tasks = async function (req, res) {
     } else if (req.params.task === 'createinvokeserverless') { // serverless AWS
       const resp = await createFunction(credentials, functionName, code)
       if (resp.error) {
-        helpers.send_failure(res, resp.error, 'SystemExtensions', exports.version, 'tasks ' + req.params.task)
+        helpers.send_failure(res, resp.error, 'Microservices', exports.version, 'tasks ' + req.params.task)
       } else {
         req.params.task = 'invokeserverless'
         req.params.try2 = true
@@ -125,7 +127,7 @@ exports.tasks = async function (req, res) {
   } else if (req.params.task === 'deleteserverless') {
     const functionName = fullFunctionName(req.freezrAttributes.owner_user_id, req.freezrAttributes.requestor_app, req.freezrAttributes.permission_name)
     if (!functionName) {
-      helpers.send_failure(res, new Error('invalid function name 3'), 'SystemExtensions', exports.version, 'tasks ' + req.params.task)
+      helpers.send_failure(res, new Error('invalid function name 3'), 'Microservices', exports.version, 'tasks ' + req.params.task)
     } else {
       const resp = await deleteFunction(credentials, functionName)
       helpers.send_success(res, resp)
@@ -135,24 +137,23 @@ exports.tasks = async function (req, res) {
     helpers.send_success(res, { status: 'presumed success', role })
   } else if (req.params.task === 'deleterole') {
     helpers.send_failure(res, new Error('service not implemented yet'), 'serverless', exports.version, 'tasks ' + req.params.task)
-  } else if (req.params.task === 'upsertextension') {
-    const extensionName = req.body?.system_extension_name
+  } else if (req.params.task === 'upsertlocalservice') {
+    const microserviceName = req.body?.microserviceName
     if (!req.file) {
       helpers.send_failure(res, new Error('no file to upsert as a service'), 'serverless', exports.version, 'tasks ' + req.params.task)
-    } else if (!extensionName) {
+    } else if (!microserviceName) {
       helpers.send_failure(res, new Error('no service name provided'), 'serverless', exports.version, 'tasks ' + req.params.task)
-    } else if (extensionName.indexOf('_') < 0) {
+    } else if (microserviceName.indexOf('_') < 0) {
       helpers.send_failure(res, new Error('service name should have one _ and be a zip file'), 'serverless', exports.version, 'tasks ' + req.params.task)
     } else {
       // note only admins can do this
       // DO name checks -> should have one _ and be a zip file..
-      req.freezrPublicSystemExtensionsFS.writeToUserFiles(extensionName + '.zip', req.file.buffer, {}, (err) => {
+      req.freezrPublicMicroservicesFS.writeToUserFiles(microserviceName + '.zip', req.file.buffer, {}, (err) => {
         if (err) {
           helpers.send_failure(res, err, 'serverless', exports.version, 'tasks ' + req.params.task)
         } else {
-          exports.reInstallLocalService(req.freezrPublicSystemExtensionsFS, extensionName, function (err) {
+          exports.reInstallLocalService(req.freezrPublicMicroservicesFS, microserviceName, function (err) {
             if (err) {
-              console.warn('error extracting zip', err)
               helpers.send_failure(res, new Error('no file to upsert as a service'), 'serverless', exports.version, 'tasks ' + req.params.task)
             } else {
               helpers.send_success(res, { status: 'success' })
@@ -163,16 +164,16 @@ exports.tasks = async function (req, res) {
     }
   } else if (req.params.task === 'serviceexists') { // tbd
     helpers.send_failure(res, new Error('service not implemented yet'), 'serverless', exports.version, 'tasks ' + req.params.task)
-  } else if (req.params.task === 'deleteextension') { // tbd
-    const extensionName = req.body?.system_extension_name
-    if (!extensionName) {
+  } else if (req.params.task === 'deletemicroservice') { // tbd
+    const microserviceName = req.body?.microserviceName
+    if (!microserviceName) {
       helpers.send_failure(res, new Error('no service name provided'), 'serverless', exports.version, 'tasks ' + req.params.task)
     } else {
-      req.freezrPublicSystemExtensionsFS.removeFile(extensionName + '.zip', {}, (err) => {
+      req.freezrPublicMicroservicesFS.removeFile(microserviceName + '.zip', {}, (err) => {
         if (err) {
           helpers.send_failure(res, err, 'serverless', exports.version, 'tasks ' + req.params.task)
         } else {
-          const folderPath = 'systemextensions' + fileHandler.sep() + extensionName
+          const folderPath = 'usermicroservices' + fileHandler.sep() + microserviceName
           fs.rm(folderPath, { recursive: true }, (err) => {
             if (err) {
               helpers.send_failure(res, err, 'serverless', exports.version, 'tasks ' + req.params.task)
@@ -184,8 +185,7 @@ exports.tasks = async function (req, res) {
       })
     }
   } else { // tbd
-    console.log('other things todo')
-    helpers.send_failure(res, new Error('The system extension has not been created by the server admin yet'), 'systemextensions', exports.version, 'tasks ' + req.params.task)
+    helpers.send_failure(res, new Error('The system microservice has not been created by the server admin yet'), 'usermicroservices', exports.version, 'tasks ' + req.params.task)
   }
 }
 
@@ -216,7 +216,6 @@ exports.createAwsRole = async function (credentials) {
     const ret = await iamClient.send(command)
     return ret.Role
   } catch (e) {
-    console.warn('error creating role', e)
     return { error: e }
   }
 }
@@ -353,16 +352,16 @@ const invokeFunction = async function (credentials, functionName, payload) {
     const { Payload, LogResult } = await lambdaClient.send(invokeCommand)
     let result = Buffer.from(Payload).toString()
     const logs = Buffer.from(LogResult, 'base64').toString()
+    let error = null
     if (typeof result === 'string') {
       try {
         result = JSON.parse(result)
       } catch (e) {
-        console.warn('error parsing result', e)
+        error = e
       }
     }
-    return { logs, result }
+    return { logs, result, error }
   } catch (e) {
-    console.warn('error invoking code ', e.name)
     return { error: e }
   }
 }
@@ -370,33 +369,32 @@ const invokeFunction = async function (credentials, functionName, payload) {
 const invokeLocally = async function (req, functionName, payload) {
   // onsole.log('invokeLocally', { functionName, payload })
   try {
-    const moduleHandler = await import('../systemextensions/' + functionName + '/index.mjs')
-    const systemExtensionsRet = await moduleHandler.handler(payload, {})
-    return { result: systemExtensionsRet }
+    const moduleHandler = await import('../usermicroservices/' + functionName + '/index.mjs')
+    const microservicesRet = await moduleHandler.handler(payload, {})
+    return { result: microservicesRet }
   } catch (e) {
-    // console.warn('SystemExtensions module missing - going to see if it should be re-installed')
+    console.warn('Microservices module missing - going to see if it should be re-installed', { e })
     try {
-      const tryReInstall = await reInstalleLocalServiceAsync(req.freezrPublicSystemExtensionsFS, functionName)
+      const tryReInstall = await reInstalleLocalServiceAsync(req.freezrPublicMicroservicesFS, functionName)
       if (tryReInstall.error) throw new Error('could not re-install app')
-      const moduleHandler = await import('../systemextensions/' + functionName + '/index.mjs')
-      const systemExtensionsRet = await moduleHandler.handler(payload, {})
-      return { result: systemExtensionsRet }
+      const moduleHandler = await import('../usermicroservices/' + functionName + '/index.mjs')
+      const microservicesRet = await moduleHandler.handler(payload, {})
+      return { result: microservicesRet }
     } catch (e) {
       return { error: e }
     }
   }
 }
 
-exports.reInstallLocalService = function (freezrPublicSystemExtensionsFS, serviceName, cb) {
+exports.reInstallLocalService = function (freezrPublicMicroservicesFS, serviceName, cb) {
   const fileName = serviceName + '.zip'
   // onsole.log('reInstallLocalService', { serviceName, fileName, full: fileHandler.fullLocalPathTo(fileName) })
 
-  freezrPublicSystemExtensionsFS.getUserFile(fileName, { }, (err, data) => {
+  freezrPublicMicroservicesFS.getUserFile(fileName, { }, (err, data) => {
     if (err) {
-      console.warn('error reading file', err)
       return { error: err }
     } else {
-      const folderPath = 'systemextensions' + fileHandler.sep() + serviceName
+      const folderPath = 'usermicroservices' + fileHandler.sep() + serviceName
       fileHandler.extractZipToLocalFolder(data, folderPath, serviceName, function (err) {
         cb(null, { error: err, success: !err })
       })
@@ -427,14 +425,14 @@ exports.upsertServerlessFuncsOnInstall = async function (req, appNameId, manifes
 
   try {
     const existingPermList = await req.freezrUserPermsDB.async.query({ requestor_app: appNameId }, {})
-    existingPermList.forEach(aPerm => { if (aPerm.status === 'outDated' && aPerm.type === 'use_serverless') manifestPerms.unshift(aPerm) })
+    existingPermList.forEach(aPerm => { if (aPerm.status === 'outDated' && aPerm.type === 'use_microservice') manifestPerms.unshift(aPerm) })
   } catch (e) {
     return { error: e }
   }
 
   const errors = []
   for (const aPerm of manifestPerms) {
-    if (aPerm.type === 'use_serverless') {
+    if (aPerm.type === 'use_microservice') {
       let ret = {}
       const functionName = fullFunctionName(req.session.logged_in_user_id, appNameId, aPerm.name)
       if (!functionName) {
@@ -447,11 +445,10 @@ exports.upsertServerlessFuncsOnInstall = async function (req, appNameId, manifes
         try {
           code = fs.existsSync(fullZipPath) ? fs.readFileSync(fullZipPath) : null
         } catch (e) {
-          console.warn('error reading code', e)
           ret = { error: e }
         }
         if (code) ret = await upsertFunction(credentials, functionName, code)
-        if (!code && !ret.error) ret = { error: ('could not find code for ' + aPerm.function_name) }
+        if (!code && !ret.error) ret = { error: ('could not find code for ' + appNameId) }
       }
       if (ret.error) errors.push(ret.error)
     } else { /* ignore other perms */ }

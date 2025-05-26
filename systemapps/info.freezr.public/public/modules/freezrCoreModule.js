@@ -161,7 +161,6 @@ freezr.feps.postquery = function (...optionsAndCallback) {
   //   permission_name, userId (which is the requestee id)
   //   appName can be added optionally to check against the manifest permission (which also has it)
   //   q is any list of query parameters, sort is sort fields
-  //   only_others excludes own records
   //   count, skip
 
   const [options, callback] = freezr.utils.getOpCbFrom(optionsAndCallback)

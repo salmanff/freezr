@@ -77,15 +77,13 @@ exports.load_page_html = function (req, res, opt) {
       contents = contents.replace('{{FREEEZR-SCRIPT-NONCE}}', nonce) // 2nd instance
       contents = contents.replace('{{META_TAGS}}', opt.meta_tags ? opt.meta_tags : '')
 
-      contents = contents.replace('{{HTML-BODY}}', opt.page_html ? opt.page_html : 'Page Not found')
-
       let cssFiles = ''
       let thePath
       const userId = (helpers.is_system_app(opt.app_name)) ? null : opt.owner_id
       if (opt.css_files) {
         if (typeof opt.css_files === 'string') opt.css_files = [opt.css_files]
         opt.css_files.forEach(function (aFile) {
-          thePath = partUrlPathTo(userId, opt.app_name, aFile)
+          thePath = helpers.startsWith(aFile, 'http') ? aFile : partUrlPathTo(userId, opt.app_name, aFile)
           if (exports.fileExt(thePath) === 'css') {
             cssFiles = cssFiles + ' <link rel="stylesheet" href="' + thePath + '" type="text/css" />'
           } else {
@@ -93,38 +91,31 @@ exports.load_page_html = function (req, res, opt) {
           }
         })
       }
-      if (opt.full_css_files) {
-        opt.full_css_files.forEach(function (aFilePath) {
-          if (exports.fileExt(aFilePath) === 'css') {
-            cssFiles = cssFiles + ' <link rel="stylesheet" href="' + aFilePath + '" type="text/css" />'
-          } else {
-            felog('load_page_skeleton', 'ERROR - NON CSS FILE BEING USED FOR CSS for: ' + aFilePath + ' at ' + opt.owner_id + ' app:' + opt.app_name + ' page: ' + opt.page_url)
-          }
-        })
-      }
+      // if (opt.full_css_files) {
+      //   opt.full_css_files.forEach(function (aFilePath) {
+      //     if (exports.fileExt(aFilePath) === 'css') {
+      //       cssFiles = cssFiles + ' <link rel="stylesheet" href="' + aFilePath + '" type="text/css" />'
+      //     } else {
+      //       felog('load_page_skeleton', 'ERROR - NON CSS FILE BEING USED FOR CSS for: ' + aFilePath + ' at ' + opt.owner_id + ' app:' + opt.app_name + ' page: ' + opt.page_url)
+      //     }
+      //   })
+      // }
       contents = contents.replace('{{CSS_FILES}}', cssFiles)
 
       let scriptFiles = ''
       if (opt.script_files) {
         opt.script_files.forEach(function (pathToFile) {
-          thePath = partUrlPathTo(userId, opt.app_name, pathToFile)
-          scriptFiles = scriptFiles + '<script src="' + thePath + '" type="text/javascript"></script>'
+          const outsideScript = helpers.startsWith(pathToFile, 'http')
+          thePath = outsideScript ? pathToFile : partUrlPathTo(userId, opt.app_name, pathToFile)
+          scriptFiles = scriptFiles + '<script src="' + thePath  + '" ' + (outsideScript ? ('nonce="' + nonce + '" ') : '') + ' type="text/javascript"></script>'
+          // if (outsideScript) outsideScripts.push(thePath)
         })
       }
       if (opt.modules) {
         opt.modules.forEach(function (pathToFile) {
-          thePath = partUrlPathTo(userId, opt.app_name, pathToFile)
-          scriptFiles = scriptFiles + '<script src="' + thePath + '" type="module"></script>'
-        })
-      }
-      if (opt.full_path_scripts) {
-        opt.full_path_scripts.forEach(function (pathToFile) {
-          scriptFiles = scriptFiles + '<script src="' + pathToFile + '" type="text/javascript"></script>'
-        })
-      }
-      if (opt.full_path_modules) {
-        opt.full_path_modules.forEach(function (pathToFile) {
-          scriptFiles = scriptFiles + '<script src="' + pathToFile + '" type="module"></script>'
+          const outsideScript = helpers.startsWith(pathToFile, 'http')
+          thePath = outsideScript ? pathToFile : partUrlPathTo(userId, opt.app_name, pathToFile)
+          scriptFiles = scriptFiles + '<script src="' + thePath + '"' + (outsideScript ? ('nonce-' + nonce) : ' ') + ' type="module"></script>'
         })
       }
       contents = contents.replace('{{SCRIPT_FILES}}', scriptFiles)
@@ -134,6 +125,9 @@ exports.load_page_html = function (req, res, opt) {
 
       // to do - to make messages better
       contents = contents.replace('{{MESSAGES}}', JSON.stringify(opt.messages))
+
+      contents = contents.replace('{{HTML-BODY}}', opt.page_html ? opt.page_html : 'Page Not found')
+
       res.writeHead(200, { 'Content-Type': 'text/html' })
       res.end(contents)
     }
@@ -356,6 +350,7 @@ exports.getLocalManifest = function (partialPath, callback) {
         callback(helpers.error('file_handler.js', exports.version, 'getLocalManifest', 'Error reading manifest file for ' + partialPath + ': ' + JSON.stringify(err)))
       } else {
         try {
+          manifest = manifest.toString() // 202504 added .toString() for azure
           manifest = json.parse(manifest, null, true)
         } catch (e) {
           felog('getLocalManifest', 'could not parse app config at ' + partialPath)
@@ -511,7 +506,7 @@ exports.checkManifest = function (manifest, appName, appVersion, flags) {
         if (Object.prototype.hasOwnProperty.call(manifest.pages, page)) {
           if (exports.fileExt(manifest.pages[page].html_file) !== 'html') flags.add('warnings', 'config_file_bad_ext', { ext: 'html', filename: manifest.pages[page].html_file })
           if (manifest.pages[page].css_files) {
-            if (typeof manifest.pages[page].css_files === 'string') manifest.pages[page].css_files = [manifest.pages[page].css_files]
+            if (typeof manifest.pages[page].css_files === 'string') {manifest.pages[page].css_files = [manifest.pages[page].css_files]} 
             manifest.pages[page].css_files.forEach(
               function (oneFile) {
                 if (exports.fileExt(oneFile) !== 'css') flags.add('warnings', 'config_file_bad_ext', { ext: 'css', filename: oneFile })

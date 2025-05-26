@@ -18,6 +18,7 @@ const DB_CHANGE_COUNT_THRESHOLD = 50
 const pathSep = path.sep
 const ROOT_DIR = helpers.removeLastpathElement(__dirname) + pathSep
 const ENV_FILE_DIR = path.normalize(ROOT_DIR + 'node_modules' + pathSep + 'nedb-asyncfs' + pathSep + 'env' + pathSep)
+// const ENV_FILE_DIR = path.normalize(ROOT_DIR + 'freezr_system/environment/newNedb/nedb-asyncfs/env' + pathSep)
 
 function DATA_STORE_MANAGER () {
   const self = this
@@ -881,6 +882,7 @@ USER_DS.prototype.getorInitAppFS = function (appName, options, callback) {
 
 USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
   fdlog('initAppFS for app ' + appName + 'for owner ' + this.owner, options)
+  if (!options) options = {}
 
   if (!appName) {
     callback(new Error('no app name for ' + this.owner, { options }))
@@ -916,7 +918,7 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
       }
     } catch (e) {
       felog('ds.initAppFS', 'ds.fs failed for ' + owner + ' using fs ' + fsParams.name, e.message)
-      callback(new Error('Could not initiate dbfs file for fs type ' + fsParams.type))
+      return callback(new Error('Could not initiate dbfs file for fs type ' + fsParams.type))
     }
 
     ds.pathToFile = function (endpath) {
@@ -1380,33 +1382,35 @@ USER_DS.prototype.initAppFS = function (appName, options = {}, callback) {
     const initUserDirectories = function (ds, owner, cb) {
       fdlog('going to init directorries for user ' + userRootFolder + '/' + owner + '/apps/' + appName)
       try {
-        ds.fs.mkdirp(userRootFolder + '/' + owner + '/apps/' + appName, function (err) {
-          if (err) {
-            cb(err)
-          } else {
-            ds.fs.mkdirp((userRootFolder + '/' + owner + '/files/' + appName), function (err) {
-              if (err) {
-                cb(err)
-              } else {
-                ds.fs.mkdirp((userRootFolder + '/' + owner + '/db/' + appName), function (err) {
-                  if (err) {
-                    cb(err)
-                  } else {
-                    cb(err, ds)
-                  }
-                })
-              }
-            })
-          }
+        const initer = ds.fs?.initFS || function(cb) {  cb() }
+        initer(function (err) {
+          ds.fs.mkdirp(userRootFolder + '/' + owner + '/apps/' + appName, function (err) {
+            if (err) {
+              return cb(err)
+            } else {
+              ds.fs.mkdirp((userRootFolder + '/' + owner + '/files/' + appName), function (err) {
+                if (err) {
+                  return cb(err)
+                } else {
+                  ds.fs.mkdirp((userRootFolder + '/' + owner + '/db/' + appName), function (err) {
+                    if (err) {
+                      return cb(err)
+                    } else {
+                      return cb(err, ds)
+                    }
+                  })
+                }
+              })
+            }
+          })
         })
       } catch (err) {
-        console.warn('initUserDirectories err ', err)
         felog('err in initUserDirectories')
-        cb(err)
+        return cb(err)
       }
     }
-
-    if (ds.fs.initFS) {
+    // todo 202504 tested with setTimeout(() => { (to remvoe comment)
+    if (ds.fs?.initFS) {
       try {
         ds.fs.initFS(function (err) {
           if (err) felog('ds.initAppFS', ' err initing fs', err.message)

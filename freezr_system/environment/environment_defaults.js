@@ -884,7 +884,7 @@ const autoDbParams = function (callback) {
           type: 'mongodb',
           choice: 'cosmosForMongoString',
           connectionString: process.env.MONGO_STR,
-          unifiedDbName: process.env.UNIFIED_DB_NAME || 'freezrDb'
+          unifiedDbName: process.env.UNIFIED_DB_NAME || 'freezr'
         }
         if (!haveWorkingDb) foundDbParams = otherOptions.COSMOSMONGO_EXTERNAL.params
         haveWorkingDb = true

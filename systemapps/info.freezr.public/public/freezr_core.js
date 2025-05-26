@@ -57,7 +57,7 @@ freezr.feps.create = function (data, ...optionsAndCallback) {
   // non ceps options:
   //  data_object_id (ignored if updateRecord)
   //   upsert
-  //   host and accesstoken for third party servers
+  //   host and appToken (accesstoken) for third party servers
   const [options, callback] = freezr.utils.getOpCbFrom(optionsAndCallback)
   if (!data) {
     callback(new Error('No data to write.'))
@@ -71,6 +71,11 @@ freezr.feps.create = function (data, ...optionsAndCallback) {
   }
 }
 freezr.feps.write = function (data, ...optionsAndCallback) {
+  // non ceps options:
+  // data_object_id (ignored if updateRecord)
+  // upsert
+  // host and appToken (accesstoken) for third party servers
+  // owner_id permission_name
   const [options, callback] = freezr.utils.getOpCbFrom(optionsAndCallback)
   if (!data) {
     callback(new Error('No data to write.'))
@@ -124,15 +129,15 @@ freezr.ceps.getById = function (dataObjectId, options, callback) {
   }
 }
 freezr.feps.getById = function (dataObjectId, options = {}, callback) {
-  // additional feps options: permission_name and userId
+  // additional feps options: permission_name and owner_id
   if (!dataObjectId) {
     callback(new Error('No id sent.'))
   } else {
     const requesteeApp = options.requestee_app || freezrMeta.appName
     const appTable = options.app_table || (requesteeApp + (options.collection ? ('.' + options.collection) : ''))
     const permissionName = options.permission_name || null
-    const userId = options.user_id || null
-    const url = (options.host || '') + '/feps/read/' + appTable + '/' + dataObjectId + (userId ? ('/' + userId) : '') + '?' + (requesteeApp === freezrMeta.appName ? '' : ('requestor_app=' + freezrMeta.appName)) + (permissionName ? ('permission_name=' + permissionName) : '')
+    const ownerId = options.owner_id || null
+    const url = (options.host || '') + '/feps/read/' + appTable + '/' + dataObjectId + (ownerId ? ('/' + ownerId) : '') + '?' + (requesteeApp === freezrMeta.appName ? '' : ('requestor_app=' + freezrMeta.appName)) + (permissionName ? ('permission_name=' + permissionName) : '')
     const readOptions = { appToken: (options.appToken || null) }
     freezerRestricted.connect.read(url, null, callback, readOptions)
   }
@@ -166,11 +171,10 @@ freezr.ceps.getquery = function (...optionsAndCallback) {
 }
 freezr.feps.postquery = function (...optionsAndCallback) {
   // additional feps options:
-  //   permission_name, userId (which is the requestee id)
+  //   permission_name, owner_id (which is the requestee id)
   //   appName can be added optionally to check against the manifest permission (which also has it)
   //   q is any list of query parameters, sort is sort fields
-  //   only_others excludes own records
-  //   count, skip
+  //   count, skip, sort
 
   const [options, callback] = freezr.utils.getOpCbFrom(optionsAndCallback)
   const appTable = options.app_table || ((options.appName || freezrMeta.appName) + (options.collection ? ('.' + options.collection) : ''))
@@ -276,14 +280,14 @@ freezr.feps.publicquery = function (options, callback) {
   }
   freezerRestricted.connect.send(url, options, callback, 'POST', 'application/json', readOptions)
 }
-freezr.feps.systemExtensions = function (options, callback) {
-  // options can be: app_name, skip, count, userId, pid
+freezr.feps.microservices = function (options, callback) {
+  // optiosn must include task
   if (!options || !options.task) {
     callback(new Error('No options sent.'))
     return
   }
   // to check to make sure function naame is has no unallowed characters
-  const url = (options.host || '') + '/feps/systemextensions/' + options.task
+  const url = (options.host || '') + '/feps/microservices/' + options.task
   const writeOptions = { }
   if (options.appToken) {
     writeOptions.appToken = options.appToken
@@ -606,6 +610,9 @@ freezr.utils.refreshFileTokens = function (eltag = 'IMG', attr = 'src') {
       }
     }
   }
+}
+freezr.utils.appFilePathFrom = function (appFolderRelativePath) {
+  return '/app_files/@' + freezrMeta.userId + '/' + freezrMeta.appName + '/' + appFolderRelativePath
 }
 freezr.utils.publicPathFromId = function (fileId, requesteeApp, userId) {
   // returns the public file path based on the file id so it can be referred to in html.

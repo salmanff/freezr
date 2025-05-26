@@ -1,5 +1,5 @@
-// addsystemextension.js
-// allows admin users to add system extension
+// addlocalmicroservice.js
+// allows admin users to add microservice
 /* global freezerRestricted, freezr */
 
 freezr.initPageScripts = function () {
@@ -10,13 +10,14 @@ freezr.initPageScripts = function () {
     uploadArea.ondragleave = handleDragLeave
     uploadArea.ondrop = handleDrop
   }
-  document.getElementById('deleteExtension').onclick = function () {
-    const extensionName = document.getElementById('extensionName').innerText
-    console.log('deleting', { extensionName })
-    if (!extensionName) {
+
+  document.getElementById('deleteMicroservice').onclick = function () {
+    const microserviceName = document.getElementById('microserviceName').innerText
+    console.log('deleting', { microserviceName })
+    if (!microserviceName) {
       showError('Please enter a service name')
     } else {
-      freezr.feps.systemExtensions({ task: 'deleteextension', system_extension_name: extensionName }, function (error, returndata) {
+      freezr.feps.microservices({ task: 'deletemicroservice', microserviceName }, function (error, returndata) {
         if (error || returndata.error) {
           console.warn({ error, returndata })
           showError((error ? error.message : returndata.error))
@@ -57,8 +58,8 @@ const handleDrop = function (e) {
 
   const parts = file.name.split('.')
   parts.splice(parts.length - 1, 1)
-  let extensionName = parts.join('.')
-  extensionName = extensionName.split(' ')[0]
+  let microserviceName = parts.join('.')
+  microserviceName = microserviceName.split(' ')[0]
 
   if (!items || !file) {
     showError('Please Choose a file first.')
@@ -69,8 +70,8 @@ const handleDrop = function (e) {
   } else {
     const uploadData = new FormData()
     uploadData.append('file', file)
-    uploadData.append('system_extension_name', extensionName)
-    const url = '/feps/systemextensions/upsertextension'
+    uploadData.append('microserviceName', microserviceName)
+    const url = '/feps/microservices/upsertlocalservice'
 
     freezerRestricted.connect.send(url, uploadData, function (error, returndata) {
       if (error || returndata.error) {

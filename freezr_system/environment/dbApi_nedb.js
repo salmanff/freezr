@@ -5,6 +5,7 @@
 
 exports.version = '0.0.200'
 
+// const Datastore = require('./newNedb/nedb-asyncfs')
 const Datastore = require('nedb-asyncfs')
 const helpers = require('../helpers.js')
 

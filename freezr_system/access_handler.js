@@ -283,7 +283,7 @@ exports.addAppFsForApi = function (req, res, dsManager, next) {
   req.freezrAppFsIsApi = true
   addAppFs(req, res, dsManager, next)
 }
-exports.addPublicFsForSystemExtensions = function (req, res, dsManager, next) {
+exports.addPublicFsForMicroservices = function (req, res, dsManager, next) {
   const owner = 'public'
 
   req.freezr_server_version = exports.version
@@ -301,16 +301,16 @@ exports.addPublicFsForSystemExtensions = function (req, res, dsManager, next) {
       dsManager.getOrSetUserDS(owner, { freezrPrefs: req.freezrPrefs }, cb)
     },
     function (userDS, cb) {
-      userDS.getorInitAppFS('SystemExtensions', {}, cb)
+      userDS.getorInitAppFS('usermicroservices', {}, cb)
     },
     function (appFS, cb) {
-      req.freezrPublicSystemExtensionsFS = appFS
+      req.freezrPublicMicroservicesFS = appFS
       cb()
     }
 
   ], function (err) {
     if (err) {
-      console.warn('err in addPublicFsForSystemExtensions ', { err })
+      console.warn('err in addPublicFsForMicroservices ', { err })
       res.sendStatus(401)
     } else {
       next()

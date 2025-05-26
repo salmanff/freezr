@@ -33,6 +33,7 @@ const uploader = {
   },
   options: { }
 }
+window.uploader = uploader
 
 const click = {
   uploadAndRestoreData: function () {
@@ -130,6 +131,12 @@ const askToProcessNextRecord = function () {
   }
 }
 
+transformRecord = function (item) {
+  // to be populated
+  return item
+
+}
+
 const processNextRecord = function () {
   // process all records in file... then
   document.getElementById('check_record').style.display = 'none'
@@ -145,6 +152,7 @@ const processNextRecord = function () {
       data_object_id: record._id
     }
     delete record._id
+
 
     const url = '/feps/restore/' + appTable
     freezerRestricted.connect.send(url, { record, options }, restoreRecCallBack, 'POST', 'application/json')

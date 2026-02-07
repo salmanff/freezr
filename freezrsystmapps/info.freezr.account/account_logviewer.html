@@ -1,0 +1,83 @@
+<!-- account_logviewer.html
+freezr Account Log Viewer
+  logviewer: {
+    page_title: 'Log Viewer (freezr)',
+    css_files: ['/app/info.freezr.public/public/freezr_style.css', 'account_home.css', 'account_logviewer.css'],
+    page_url: 'account_logviewer.html',
+    script_files: ['account_logviewer.js']
+  }
+-->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">Log Viewer</span>
+    <a href="/account/home">Home</a>
+    <a href="/account/settings">Settings</a>
+    <a id="freezer_admin_butt" href="/admin/home">Admin</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div id="errorBox" class="errorBox"></div>
+
+    <div class="freezr-card">
+      <h3>📊 Log Viewer</h3>
+      
+      <div id="choosers">
+        <div class="top-row">
+          <div class="filter-group">
+            <label class="texttop">From</label>
+            <input type="date" class="input" id="startDate" style="width: auto;">
+          </div>
+          
+          <div class="filter-group">
+            <label class="texttop">To</label>
+            <input type="date" class="input" id="endDate" style="width: auto;">
+          </div>
+          
+          <div class="button-group-inline">
+            <div class="freezrButt" style="background: var(--freezr-text-muted);" id="setToday">Today</div>
+            <div class="freezrButt" style="background: var(--freezr-text-muted);" id="setLast7Days">Last 7 Days</div>
+          </div>
+          
+          <div class="button-group-inline">
+            <div class="freezrButt" id="getDataBtn">Get Data</div>
+          </div>
+        </div>
+        
+        <div class="filter-row">
+          <div class="filter-group">
+            <label class="texttop">User</label>
+            <select id="userFilter" class="input" style="width: auto; min-width: 150px;">
+              <option value="">All Users</option>
+            </select>
+          </div>
+          
+          <div class="filter-group">
+            <label class="texttop">Log Level</label>
+            <select id="levelFilter" class="input" style="width: auto; min-width: 150px;">
+              <option value="">All Levels</option>
+            </select>
+          </div>
+          
+          <div class="filter-group">
+            <label class="texttop">View Mode</label>
+            <select id="viewMode" class="input" style="width: auto; min-width: 150px;">
+              <option value="logs">Raw Logs</option>
+              <option value="summary">Summary</option>
+              <option value="timeline">Timeline</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="freezr-card">
+      <div id="dataShown">
+        <div class="no-data" style="text-align: center; color: var(--freezr-text-muted); padding: 2rem;">
+          👆 Select date range and click "Get Data" to fetch logs
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>

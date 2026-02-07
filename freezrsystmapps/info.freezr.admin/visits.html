@@ -1,0 +1,36 @@
+<!-- Admin Visit Logs -->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">Visit Logs</span>
+    <a href="/account/home">Home</a>
+    <a href="/admin/home">Admin</a>
+    <a href="/admin/list_users">User List</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div class="freezr-card">
+      <h3 style="margin-bottom: 1rem;">Authentication Issues</h3>
+      <div id="authDetails"></div>
+      <div id="getMoreAuth" class="fetch-more">Fetch more...</div>
+    </div>
+
+    <div class="freezr-card">
+      <h3 style="margin-bottom: 1rem;">Visitors</h3>
+      <div id="visitDetails"></div>
+      <div id="getMoreVisits" class="fetch-more">Fetch more...</div>
+    </div>
+  </div>
+</div>
+
+<style>
+.fetch-more {
+  margin-top: 1rem;
+  color: var(--freezr-accent);
+  cursor: pointer;
+  font-weight: 500;
+}
+.fetch-more:hover {
+  text-decoration: underline;
+}
+</style>

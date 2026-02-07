@@ -1,0 +1,148 @@
+<!--
+Self Registration - Full Options
+-->
+<div class="freezr-page" id="mainouter">
+  <nav class="freezr-nav">
+    <span class="freezr-nav-title">Self Registration</span>
+    <a href="/register/simple">Simple Registration</a>
+    <a href="/account/login">Login</a>
+    <a href="/public">Public Feed</a>
+    <a href="/">Public Home</a>
+  </nav>
+
+  <div class="freezr-content" id="maininner">
+    <div id="top_register_finish_01" style="text-align: center; margin-bottom: 1.5rem;">
+      <div class="freezr_hiders firstSetUp" style="font-size: 1.25rem; font-weight: 600;">
+        Congratulations! You have set up your freezr server.<br/>
+        <span style="font-weight: normal; font-size: 1rem; color: var(--freezr-text-muted);">Please choose your file system and database.</span>
+      </div>
+      <div class="freezr_hiders newParams" style="font-size: 1.25rem; font-weight: 600;">
+        You are set up on freezr as <span id="loggedInUserId" style="color: var(--freezr-accent);"></span>.<br/>
+        <span style="font-weight: normal; font-size: 1rem; color: var(--freezr-text-muted);">Please choose your file system and database.</span>
+      </div>
+      <div class="freezr_hiders unRegisteredUser"></div>
+    </div>
+
+    <div id="exp_warn_1" class="errorBox" style="padding: 1rem; margin-bottom: 1rem; max-width: 520px; margin-left: auto; margin-right: auto;">
+      freezr is an <b>Experimental Prototype.</b> Do not store important personal data on it... yet!
+    </div>
+    <div id="errorBox" class="errorBox freezr_hiders" style="margin-bottom: 1rem;"></div>
+
+    <div id="main_form_sections">
+      <!-- User Information Card -->
+      <div class="freezr-card freezr_hiders firstSetUp unRegisteredUser" style="max-width: 520px; margin: 0 auto 1.5rem;">
+        <h3 style="color: var(--freezr-accent); margin-bottom: 1rem;">User Information</h3>
+        <p style="color: var(--freezr-text-muted); margin-bottom: 1rem;">Enter a user name and password.</p>
+
+        <div style="margin-bottom: 1rem;">
+          <label class="texttop">User Name</label>
+          <input type="text" class="input" id="userId" name="userId" style="width: 100%;"/>
+        </div>
+        <div style="margin-bottom: 1rem;">
+          <label class="texttop">Password</label>
+          <input type="password" class="input" id="password" name="password" style="width: 100%;"/>
+        </div>
+        <div id="second-password" style="margin-bottom: 1rem;">
+          <label class="texttop">Confirm Password</label>
+          <input type="password" class="input" id="password2" name="password2" style="width: 100%;"/>
+        </div>
+        <div style="margin-bottom: 1rem;">
+          <label class="texttop">Email</label>
+          <input type="text" class="input" id="email" name="email" style="width: 100%;"/>
+        </div>
+
+        <div class="freezr_hiders firstSetUp" style="font-size: 13px; color: var(--freezr-accent); margin-top: 1rem;">
+          Remember there is no way to recover a forgotten password!<br/>
+          (There are no outside servers that store your data.)
+        </div>
+        <div class="freezr_hiders unRegisteredUser" style="font-size: 13px; color: var(--freezr-accent); margin-top: 1rem;">
+          There are no password recovery options on freezr yet.<br/>
+          So please remember your password.
+        </div>
+      </div>
+
+      <!-- File System Card -->
+      <div class="freezr-card" id="externalFs" style="max-width: 520px; margin: 0 auto 1.5rem;">
+        <h3 style="color: var(--freezr-accent); margin-bottom: 1rem;">Your File System</h3>
+
+        <div style="margin-bottom: 1rem;">
+          <select class="input" id="selector_FS" style="width: 100%;"></select>
+        </div>
+
+        <div id="msg_FS" style="color: var(--freezr-text-muted); margin-bottom: 1rem;"></div>
+
+        <div style="text-align: center; margin-bottom: 1rem;">
+          <div id="click_goAuthFS" class="freezrButt">Authenticate</div>
+        </div>
+
+        <div id="warning_FS" style="color: var(--freezr-accent); font-weight: 500;"></div>
+
+        <div id="click_showOauthOptions" style="color: var(--freezr-text-muted); cursor: pointer; text-decoration: underline; margin-top: 1rem;">
+          Click here for more (technical) options.
+        </div>
+
+        <div id="table_elements_FS" style="margin-top: 1rem;"></div>
+
+        <div id="oauth_elements_FS" style="display: none; margin-top: 1rem; font-size: 13px; color: var(--freezr-text-muted);">
+          <p style="margin-bottom: 1rem;">
+            The Authorization Code is retrieved automatically when you authenticate with your account.
+            If you are a developer, you can also find your access token and use it instead.
+          </p>
+          <p style="margin-bottom: 1rem;">
+            This freezr uses a default authentication service. However, you can choose another authenticator. 
+            You really need to trust the host of the authenticator, because it could potentially have access to all your data.
+          </p>
+          <div>
+            <label class="texttop">Authenticator URL</label>
+            <input type="text" class="input" id="fs_auth_Server" name="fs_auth_Server" 
+              value="https://freezr.info/public/oauth/oauth_start_oauth" style="width: 100%;"/>
+          </div>
+        </div>
+      </div>
+
+      <!-- Database Card -->
+      <div class="freezr-card" id="externalDb" style="max-width: 520px; margin: 0 auto 1.5rem;">
+        <h3 style="color: var(--freezr-accent); margin-bottom: 1rem;">Your Database</h3>
+
+        <div style="margin-bottom: 1rem;">
+          <select id="selector_DB" class="input" style="width: 100%;"></select>
+        </div>
+
+        <div id="msg_DB" style="color: var(--freezr-text-muted); margin-bottom: 1rem;"></div>
+        <div id="warning_DB" style="color: var(--freezr-accent); font-weight: 500;"></div>
+        <div id="table_elements_DB" style="margin-top: 1rem;"></div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div style="max-width: 520px; margin: 0 auto; text-align: center;">
+        <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; margin-bottom: 1rem;">
+          <span id="click_checkResource_UserId" class="freezrButt" style="display: none; background: var(--freezr-text-muted);">Check User ID</span>
+          <span id="click_checkResource_FS" class="freezrButt" style="background: var(--freezr-text-muted);">Check File System</span>
+          <span id="click_checkResource_DB" class="freezrButt" style="background: var(--freezr-text-muted);">Check Database</span>
+        </div>
+
+        <div style="color: var(--freezr-text-muted); margin-bottom: 1rem;">Or just...</div>
+
+        <div id="click_launch" class="freezrButt" style="width: 50%; font-size: 1.1rem; padding: 1rem;">
+          Launch freezr
+        </div>
+      </div>
+    </div>
+
+    <div id="launch_spinner" style="display: none; text-align: center; margin-top: 2rem;">
+      <img src="/app/info.freezr.public/public/static/ajaxloaderBig.gif" alt="Loading..."/>
+      <div style="margin-top: 1rem; color: var(--freezr-text-muted); font-size: 14px;">
+        Depending on the back end you have chosen, it might take a minute or two to set up your account.
+        Please be patient. 😎
+      </div>
+    </div>
+
+    <div id="exp_warn_2" class="errorBox" style="padding: 1rem; margin-top: 1.5rem; max-width: 500px; margin-left: auto; margin-right: auto;">
+      freezr is an <b>Experimental Prototype.</b> Do not store important personal data on it... yet.
+    </div>
+
+    <div class="freezr_hiders newParams" style="text-align: center; margin-top: 2rem;">
+      Want to get out? <a href="/account/logout">Click here to log out.</a>
+    </div>
+  </div>
+</div>

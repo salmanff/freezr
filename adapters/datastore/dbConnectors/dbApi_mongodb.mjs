@@ -1,0 +1,683 @@
+// freezr.info - dbApi_mongodb.mjs
+// API for accessing mongodb databases
+// todo -> should make these natively async rather than relying on _async converter in userDsMgr.mjs
+
+// todo - add createDb to add db paramters (as per CEPS)?
+
+import config from '../../../common/helpers/config.mjs'
+import { startsWith } from '../../../common/helpers/utils.mjs'
+import { MongoClient, ObjectId } from 'mongodb'
+
+export const version = '0.0.200'
+
+const ARBITRARY_FIND_COUNT_DEFAULT = 100
+
+// Helper functions (temporary - should be moved to common helpers)
+const error = (message) => {
+  throw new Error(message)
+}
+
+function MONGO_FOR_FREEZR (environment, ownerAppTable) {
+  // onsole.log('MONGO_FOR_FREEZR ', { environment, ownerAppTable })
+  // Note: environment must have dbParams
+  // onsole.log('todo - need to do checks to make sure oat exists and env exists')
+
+  this.env = environment
+  this.oat = ownerAppTable
+
+  // used for hasUnifiedStrategy
+  this.env.oatCopy = ownerAppTable
+
+  // if (this.env.dbParams.systemDb && this.env.dbParams.useUnifiedCollection && [null, 'null', undefined, 'undefined'].indexOf(this.oat.owner) > -1) throw helpers.error('Cannot have null or undefined owner')
+  // if (this.env.dbParams.systemDb && this.env.dbParams.dbUnificationStrategy !== 'db' && [null, 'null', undefined, 'undefined'].indexOf(this.oat.owner) > -1) throw helpers.error('Cannot have null or undefined owner')
+  if ([null, 'null', undefined, 'undefined'].indexOf(this.oat.owner) > -1) throw error('Cannot have null or undefined owner')
+  if (!ownerAppTable) throw error('Mongo collection failure - need ownerAppTable')
+  const appTable = ownerAppTable.app_table || (ownerAppTable.app_name + (ownerAppTable.collection_name ? ('_' + ownerAppTable.collection_name) : ''))
+  if (!appTable || !ownerAppTable.owner || ownerAppTable.owner === 'null' || ownerAppTable.owner === 'undefined') throw error('Mongo collection failure - need app name and an owner for ' + ownerAppTable.owner + '__' + ownerAppTable.app_name + '_' + ownerAppTable.collection_name)
+  
+  // console.log('setting mongo ', { DB_UNIFICATION: process?.env?.DB_UNIFICATION, dbUnificationStrategy: this.env.dbParams.dbUnificationStrategy, useUnifiedCollection: this.env.dbParams.useUnifiedCollection })
+  // console.log('setting mongo ', { DB_UNIFICATION: process?.env?.DB_UNIFICATION, dbUnificationStrategy: this.env.dbParams.dbUnificationStrategy, useUnifiedCollection: this.env.dbParams.useUnifiedCollection })
+  // if (this.env.dbParams.systemDb && (process?.env?.DB_UNIFICATION === 'collection' || this.env.dbParams.dbUnificationStrategy === 'all') && !this.env.dbParams.useUnifiedCollection) throw helpers.error('unifiedColl Mismatch 1')
+  // if (this.env.dbParams.systemDb && (process?.env?.DB_UNIFICATION === 'collection' || this.env.dbParams.dbUnificationStrategy === 'all') && this.env.dbParams.useUnifiedCollection) throw helpers.error('unifiedColl Mismatch 2')
+  // todo make similar checks for dbUnificationStrategy = db and user
+}
+
+MONGO_FOR_FREEZR.prototype.createIndex = function (indexParams, indexOptions, callback) {
+  if (this.env.dbParams.choice !== 'cosmosForMongoString') {
+    callback(null)
+  } else { // cosmosForMongoString
+    // see if it exists and if not create indeces...
+    // then on initi of app or when update manifest recreate indeces
+    const [collName, client, coll] = getCollFrom(this)
+    coll.createIndex(indexParams, indexOptions)
+      .then(response => {
+        return callback(null)
+      })
+      .catch(err => {
+        console.warn('got err in initDB in mongo db ', { collName, err })
+        return callback(err)
+      })
+      .finally(() => {
+        client.close()
+      })
+  }
+}
+MONGO_FOR_FREEZR.prototype.initDB = function (callback) {
+  // onsole.log('MONGO_FOR_FREEZR initDB ', { env: this.env })
+  if (this.env.dbParams.choice !== 'cosmosForMongoString') {
+    callback(null)
+  } else { // cosmosForMongoString
+    // see if it exists and if not create indeces...
+    // then on initi of app or when update manifest recreate indeces
+    const [collName, client, coll] = getCollFrom(this)
+    coll.createIndex({ _date_modified: -1 }, { background: true, unique: false })
+      .then(response => {
+        return callback(null)
+      })
+      .catch(err => {
+        console.warn('got err in initDB in mongo db ', { collName, err })
+        return callback(err)
+      })
+      .finally(() => {
+        client.close()
+      })
+  }
+}
+const hasUnifiedStrategy = function (env) {
+  if (!env.dbParams.dbUnificationStrategy || env.dbParams.dbUnificationStrategy === 'db') return false
+  if (env.dbParams.dbUnificationStrategy === 'all') return true
+  const notReservedid = config.RESERVED_IDS.indexOf(env.oatCopy.owner) < 0
+  // onsole.log('hasUnifiedStrategy is system app ' + env.oatCopy.app_name, { oat: env.oatCopy, notReservedid, systemapp: helpers.is_system_app(env.oatCopy.app_name || env.oatCopy.app_table), notReservedId: helpers.RESERVED_IDS.indexOf(env.oatCopy.owner) < 0 })
+  if (env.dbParams.dbUnificationStrategy === 'allButAdmin') return (notReservedid)
+  throw new Error('Unknown dbUnificationStrategy: ' + env.dbParams.dbUnificationStrategy)
+  // return (Boolean(env.dbParams.dbUnificationStrategy) && env.dbParams.dbUnificationStrategy !== 'db') ||
+  //    (env.dbParams.useUnifiedCollection && helpers.RESERVED_IDS.indexOf(env.owner) < 0) // ie unified collecions only valid for non-system users
+}
+
+/**
+ * Checks if an ID is autogenerated by MongoDB (ObjectId)
+ * @param {string|ObjectId} id - The ID to check
+ * @returns {boolean} - True if the ID is autogenerated, false otherwise
+ */
+const isAutogenerated = function (id) {
+  if (!id) return false
+  
+  // If it's already an ObjectId, it's autogenerated
+  if (id instanceof ObjectId) return true
+  
+  // If it's a string, check if it's a valid ObjectId
+  if (typeof id === 'string') {
+    // Check if it's a valid ObjectId format (24 hex characters)
+    if (!ObjectId.isValid(id)) return false
+    
+    // Check if the string representation of a new ObjectId matches the original string
+    // This helps distinguish between autogenerated ObjectIds and strings that just happen to have the correct format
+    try {
+      return new ObjectId(id).toString() === id;
+    } catch (e) {
+      return false;
+    }
+  }
+  
+  return false
+}
+
+/**
+ * Returns a revised ID with the prefix if needed
+ * @param {string|ObjectId} id - The original ID
+ * @param {Object} oat - The ownerAppTable object
+ * @returns {string|ObjectId} - The revised ID
+ */
+const getRevisedId = function (id, oat) {
+  if (!id) return id
+  
+  // If it's autogenerated, return as is
+  if (isAutogenerated(id)) return id
+  
+  // If it's a string and doesn't start with the prefix, add the prefix
+  if (typeof id === 'string') {
+    const prefix = oat.owner + '__' + fullOACName(oat, false) + '__'
+    if (!id.startsWith(prefix)) {
+      return prefix + id
+    }
+  }
+  
+  return id
+}
+
+MONGO_FOR_FREEZR.prototype.read_by_id = function (id, callback) {
+  // alternate...
+  // const theDb = this.db
+  // setTimeout(async () => {
+  //   try {
+  //     const result = await theDb.findOne({ _id: getRealObjectId(id) })
+  //     callback(null, result)
+  //   } catch (error) {
+  //     callback(error)
+  //   }
+  // }, 0)
+
+  const [collName, client, coll] = getCollFrom(this)
+  
+  // Apply unified strategy if needed
+  if (hasUnifiedStrategy(this.env)) {
+    id = getRevisedId(id, this.oat)
+  }
+  
+  const query = { _id: getRealObjectId(id) }
+
+  //if (this.env.dbParams.useUnifiedCollection) {
+  if (hasUnifiedStrategy(this.env)) {
+    query.__owner = this.oat.owner
+    query.__appTable = fullOACName(this.oat, false)
+  }
+  coll.findOne(query)
+    .then(response => {
+      return callback(null, response)
+    })
+    .catch(err => {
+      console.warn('got err in read db ', { collName, err })
+      return callback(err)
+    })
+    .finally(() => {
+      client.close()
+    })
+}
+MONGO_FOR_FREEZR.prototype.create = function (id, entity, options, callback) {
+  // onsole.log('dbApi_mongodb Create entity ', { entity })
+  
+  // Apply unified strategy if needed
+  if (hasUnifiedStrategy(this.env) && id) {
+    id = getRevisedId(id, this.oat)
+  }
+  
+  if (id) entity._id = getRealObjectId(id)
+  const [collName, client, coll] = getCollFrom(this)
+  const self = this
+  
+  // if (this.env.dbParams.useUnifiedCollection) {
+  if (hasUnifiedStrategy(this.env)) {
+      entity.__owner = this.oat.owner
+    entity.__appTable = fullOACName(this.oat, false)
+  }
+  coll.insertOne(entity)
+    .then(response => {
+      const theId = response?.insertedId
+      return callback(null, { success: true, _id: theId })
+    })
+    .catch(err => {
+      if (!options) options = {}
+      if (self.env.dbParams.choice === 'cosmosForMongoString' && !options.secondtry && err.errmsg?.indexOf('because it would have increased the total throughput')) {
+        // onsole.log('GOT azure related THROUHGPUT ERR  in mongo wit a bit')
+        setTimeout(() => {
+          console.warn('azure throughput issue - trying second time')
+          options.secondtry = true
+          return self.create(id, entity, options, callback)
+        }, 2000)
+      } else {
+        console.warn('got err in write db 1 ', { collName, err, id, entity })
+        return callback(err)
+      }
+    })
+    .finally(() => {
+      client.close()
+    })
+}
+MONGO_FOR_FREEZR.prototype.update_multi_records = function (idOrQuery, updatesToEntity, callback) {
+  let updateMultiple = true
+  if (typeof idOrQuery === 'string') {
+    updateMultiple = false
+    // Apply unified strategy if needed
+    if (hasUnifiedStrategy(this.env)) {
+      idOrQuery = getRevisedId(idOrQuery, this.oat)
+    }
+    idOrQuery = { _id: getRealObjectId(idOrQuery) }
+  } else if (ObjectId.isValid(idOrQuery)) {
+    updateMultiple = false
+    idOrQuery = { _id: idOrQuery }
+  } else if (idOrQuery._id) { // nb also ignores additional conditions in query
+    updateMultiple = false
+    if (!ObjectId.isValid(idOrQuery._id)) {
+      if (typeof idOrQuery._id === 'string') {
+        // Apply unified strategy if needed
+        if (hasUnifiedStrategy(this.env)) {
+          idOrQuery._id = getRevisedId(idOrQuery._id, this.oat)
+        }
+        idOrQuery._id = getRealObjectId(idOrQuery._id)
+      } else {
+        console.warn('Can only hjave objectids and strings when querying _id')
+      }
+    }
+  } else if (idOrQuery.$and || idOrQuery.$or) {
+    console.warn('currently cannot do $and and $or of _ids - need to add objectIds iteratively [???]')
+  }
+  const [collName, client, coll] = getCollFrom(this)
+
+  //if (this.env.dbParams.useUnifiedCollection) {
+  if (hasUnifiedStrategy(this.env)) {
+    idOrQuery.__owner = this.oat.owner
+    idOrQuery.__appTable = fullOACName(this.oat, false)
+    delete updatesToEntity.__owner
+    delete updatesToEntity.__appTable
+  }
+
+  // // onsole.log('in update_multi_records gort collName ', { collName })
+  // if (this.env.dbParams.useUnifiedCollection && (updatesToEntity.__owner || updatesToEntity.__appTable)) {
+  //   return callback(new Error('Cannot update owner and apptable'))
+  //   // todo - check for all with '_'??
+  // } else 
+  if (updateMultiple) {
+    coll.updateMany(idOrQuery, { $set: updatesToEntity }, { safe: true })
+      .then(response => {
+        return callback(null, { success: true, nModified: response?.modifiedCount })
+      })
+      .catch(err => {
+        console.warn('got err in write db 2  ', { collName, idOrQuery, err })
+        return callback(err)
+      })
+      .finally(() => {
+        client.close()
+      })
+  } else {
+    // onsole.log('dbApi_mongodb update_multi_records updateOne ', { collName, idOrQuery, updatesToEntity })
+    coll.updateOne(idOrQuery, { $set: updatesToEntity }, { safe: true })
+      .then(response => {
+        return callback(null, { success: true, nModified: response?.modifiedCount })
+      })
+      .catch(err => {
+        console.warn('got err in write in mongo db ', { collName, err })
+        return callback(err)
+      })
+      .finally(() => {
+        client.close()
+      })
+  }
+}
+MONGO_FOR_FREEZR.prototype.replace_record_by_id = function (id, updatedEntity, callback) {
+  const [collName, client, coll] = getCollFrom(this)
+  // onsole.log('in replace_record_by_id gort collName ', { collName, updatedEntity })
+  
+  // Apply unified strategy if needed
+  if (hasUnifiedStrategy(this.env)) {
+    id = getRevisedId(id, this.oat)
+  }
+  
+  const query = { _id: getRealObjectId(id) }
+  // if (this.env.dbParams.useUnifiedCollection) {
+  if (hasUnifiedStrategy(this.env)) {
+    query.__owner = this.oat.owner
+    query.__appTable = fullOACName(this.oat, false)
+    updatedEntity.__owner = this.oat.owner
+    updatedEntity.__appTable = fullOACName(this.oat, false)
+  }
+  coll.replaceOne(query, updatedEntity, { safe: true })
+    .then(response => {
+      return callback(null, { success: true, nModified: response?.modifiedCount })
+    })
+    .catch(err => {
+      console.warn('got err in replace_record_by_id in mongo db ', { collName, err })
+      return callback(err)
+    })
+    .finally(() => {
+      client.close()
+    })
+}
+MONGO_FOR_FREEZR.prototype.query = function (idOrQuery, options = {}, callback) {
+  const self = this
+  // onsole.log('mongo query ', idOrQuery)
+  let findMultiple = true
+  if (!idOrQuery) {
+    idOrQuery = {}
+  } else if (typeof idOrQuery === 'string') {
+    // Apply unified strategy if needed
+    if (hasUnifiedStrategy(this.env)) {
+      idOrQuery = getRevisedId(idOrQuery, this.oat)
+    }
+    idOrQuery = { _id: getRealObjectId(idOrQuery) }
+    findMultiple = false
+  } else if (idOrQuery._id) {
+    if (typeof (idOrQuery._id) === 'string') {
+      // Apply unified strategy if needed
+      if (hasUnifiedStrategy(this.env)) {
+        idOrQuery._id = getRevisedId(idOrQuery._id, this.oat)
+      }
+      idOrQuery._id = getRealObjectId(idOrQuery._id)
+    }
+    findMultiple = false
+  }
+  // if (this.env.dbParams.useUnifiedCollection) {
+  if (hasUnifiedStrategy(this.env)) {
+    idOrQuery.__owner = this.oat.owner
+    idOrQuery.__appTable = fullOACName(this.oat, false)
+  }
+  const [collName, client, coll] = getCollFrom(this)
+  if (findMultiple) {
+    coll.find(idOrQuery, options).sort(options.sort || null).limit(options.count || options.limit || ARBITRARY_FIND_COUNT_DEFAULT).skip(options.skip || 0).toArray()
+      .then(response => {
+        const origLen = response.length
+        // if (self.env.dbParams.useUnifiedCollection) response = response.filter(r => { return r.__owner === self.oat.owner && r.__appTable === fullOACName(self.oat, false) })
+        // if (self.env.dbParams.useUnifiedCollection && origLen !== response.length) throw new Error('fetched other peoples data ;( ')
+        if (hasUnifiedStrategy(self.env)) response = response.filter(r => { return r.__owner === self.oat.owner && r.__appTable === fullOACName(self.oat, false) })
+        if (hasUnifiedStrategy(self.env) && origLen !== response.length) throw new Error('fetched other peoples data ;( ')
+        return callback(null, response)
+      })
+      .catch(err => {
+        console.warn('got err in query in mongodb db ', { collName, idOrQuery, err })
+        return callback(err)
+      })
+      .finally(() => {
+        client.close()
+      })
+  } else {
+    coll.findOne(idOrQuery, options)
+      .then(response => {
+        if (response && hasUnifiedStrategy(self.env) && (response?.__owner !== self.oat.owner || response?.__appTable !== fullOACName(self.oat, false))) {
+          return callback(new Error('mismach of __owner or _apptable'))
+        } else {
+          return callback(null, (response ? [response] : []))
+        }
+      })
+      .catch(err => {
+        console.warn('got err in query in mongodb db ', { collName, idOrQuery, err })
+        return callback(err)
+      })
+      .finally(() => {
+        client.close()
+      })
+  }
+}
+MONGO_FOR_FREEZR.prototype.delete_record = function (idOrQuery, options = {}, callback) {
+  let deleteMultiple = true
+  if (typeof idOrQuery === 'string') {
+    // Apply unified strategy if needed
+    if (hasUnifiedStrategy(this.env)) {
+      idOrQuery = getRevisedId(idOrQuery, this.oat)
+    }
+    idOrQuery = { _id: getRealObjectId(idOrQuery) }
+    deleteMultiple = false
+  } else if (idOrQuery._id && typeof idOrQuery._id === 'string') {
+    // Apply unified strategy if needed
+    if (hasUnifiedStrategy(this.env)) {
+      idOrQuery._id = getRevisedId(idOrQuery._id, this.oat)
+    }
+    idOrQuery._id = getRealObjectId(idOrQuery._id)
+    deleteMultiple = false
+  }
+  const [collName, client, coll] = getCollFrom(this)
+  // if (this.env.dbParams.useUnifiedCollection) {
+  if (hasUnifiedStrategy(this.env)) {
+    idOrQuery.__owner = this.oat.owner
+    idOrQuery.__appTable = fullOACName(this.oat, false)
+  }
+  // onsole.log('in delete_record got collName ', { collName })
+  if (deleteMultiple) {
+    coll.deleteMany(idOrQuery, { })
+      .then(response => {
+        return callback(null, { success: true, nModified: response?.deletedCount })
+      })
+      .catch(err => {
+        console.warn('got err in delete in mongo db ', { collName, err })
+        return callback(err)
+      })
+      .finally(() => {
+        client.close()
+      })
+  } else {
+    coll.deleteOne(idOrQuery, { })
+      .then(response => {
+        return callback(null, { success: true, nModified: response?.deletedCount })
+      })
+      .catch(err => {
+        console.warn('got err in delete in mongo db ', { collName, err })
+        return callback(err)
+      })
+      .finally(() => {
+        client.close()
+      })
+  }
+  // this.db.remove(idOrQuery, { multi: true }, cb)
+}
+MONGO_FOR_FREEZR.prototype.getAllAppTableNames = function (appOrTableNameOrNames, callback) {
+  // onsole.log('app getAllAppTableNames in mongo' + appOrTableNameOrNames)
+
+  const self = this
+  const userId = this.oat.owner
+  if (typeof appOrTableNameOrNames === 'string') appOrTableNameOrNames = [appOrTableNameOrNames]
+
+  const appTablesFilter = function (dbList) {
+    let list = []
+    dbList.forEach(name => {
+      let collName = name?.replace(/_/g, '.')
+      if (name && startsWith(collName, userId)) {
+        collName = collName.slice(userId.length + 2)
+      }
+      if (appOrTableNameOrNames) {
+        appOrTableNameOrNames.forEach(requiredName => {
+          if (startsWith(collName, requiredName)) list.push(collName)
+        })
+      } else {
+        list.push(collName)
+      }
+    })
+    list = list.filter((v, i, a) => a.indexOf(v) === i)
+    return list
+  }
+
+  const [collName, client, coll, dbName, database] = getCollFrom(self)
+  // if (self.env.dbParams.useUnifiedCollection) {
+  if (hasUnifiedStrategy(self.env)) {
+    coll.distinct('__appTable', { __owner: self.oat.owner })
+      .then(response => {
+        return callback(null, appTablesFilter(response))
+      })
+      .catch(err => {
+        console.warn('got err in getAllAppTableNames in mongo db ', { dbName, collName, err })
+        return callback(err)
+      })
+      .finally(() => {
+        client.close()
+      })
+  } else {
+    // TODO _ To fix this
+    // onsole.log('getAllAppTableNames mongo ', { userId, appOrTableNameOrNames })
+    if (typeof appOrTableNameOrNames === 'string') appOrTableNameOrNames = [appOrTableNameOrNames]
+
+    // database.getCollectionNames()
+    database.listCollections().toArray()
+      .then(response => {
+        response = response.map(r => { return r.name })
+        return callback(null, appTablesFilter(response))
+      })
+      .catch(err => {
+        console.warn('got err in getCollectionNames in mongo db ', { err })
+        return callback(err)
+      })
+      .finally(() => {
+        client.close()
+      })
+  }
+}
+MONGO_FOR_FREEZR.prototype.stats = function (callback) {
+  // onsole.log('mongo for freezr - stats ')
+  const self = this
+  const [collName, client, coll] = getCollFrom(self)
+  // if (this.env.dbParams.useUnifiedCollection) {
+  if (hasUnifiedStrategy(this.env)) {
+    const idOrQuery = { __owner: this.oat.owner, __appTable: fullOACName(self.oat, false) }
+    const [collName, client, coll] = getCollFrom(self)
+    const LIMIT = 1000
+    const options = { size: 0, count: 0 }
+    const iterateStats = function (options) {
+      coll.find(idOrQuery).limit(LIMIT).skip(options.count).toArray()
+        .then(response => {
+          options.size += JSON.stringify(response).length
+          options.count += response.length
+          if (response.length < LIMIT) {
+            client.close()
+            return callback(null, { count: options.count, size: JSON.stringify(response).length })
+          } else {
+            return iterateStats(options)
+          }
+        })
+        .catch(err => {
+          console.warn('got err in query FOR STATS in mongodb db ', { collName, err })
+          return callback(err)
+        })
+        // .finally(() => {
+        // })
+    }
+
+    iterateStats(options)
+  } else if (coll.stats) { // old versions of mongodb
+    coll.stats()
+      .then(response => {
+        // return callback(null, response)
+        // onsole.log('got mongo stats ', { response })
+        return callback(null, { size: response.storageSize, originalStats: response })
+      })
+      .catch(err => {
+        console.warn('got err in stats for mongo db ', { collName, err })
+        return callback(err)
+      })
+      .finally(() => {
+        client.close()
+      })
+  } else {
+    // Code below doesnt work - need to fgure out 
+    // coll.aggregate([{ $collStats: { storageStats: { } } }]).toArray()
+    //   .then(stats => {
+    //     onsole.log(stats);
+    //     // You can access specific statistics like this:
+    //     // For the size of the collection in bytes
+    //     onsole.log("Size in bytes:", stats[0].storageStats.size)
+    //     // For the count of documents in the collection
+    //     onsole.log("all stats of documents:", stats[0].storageStats);
+    //     return callback(null, stats[0].storageStats)
+    //   }).catch(err => {
+    //     console.error("An error occurred:", err);
+    //   })
+    //   .finally(() => {
+    //     client.close()
+    //   })
+
+    //temporry inefficient method used:
+    const idOrQuery = { }
+    const [collName, client, coll] = getCollFrom(self)
+    const LIMIT = 1000
+    const options = { size: 0, count: 0 }
+    const iterateStats = function (options) {
+      coll.find(idOrQuery).limit(LIMIT).skip(options.count).toArray()
+        .then(response => {
+          options.size += JSON.stringify(response).length
+          options.count += response.length
+          if (response.length < LIMIT) {
+            client.close()
+            return callback(null, { count: options.count, size: JSON.stringify(response).length })
+          } else {
+            return iterateStats(options)
+          }
+        })
+        .catch(err => {
+          console.warn('got err in query FOR STATS in mongodb db ', { collName, err })
+          return callback(err)
+        })
+        // .finally(() => {
+        // })
+    }
+
+    iterateStats(options)
+  }
+}
+
+MONGO_FOR_FREEZR.prototype.persistCachedDatabase = function (cb) {
+  cb(null)
+}
+
+const fullOACName = function (ownerAppTable, addOwnerAtStart) { // addOwnerAtStart used for unified db
+  // onsole.log('mongo - fullOACName ownerAppTable ', ownerAppTable)
+
+  if (!ownerAppTable) console.warn('fullOACName', 'Mongp collection failure - need ownerAppTable')
+  if (!ownerAppTable) throw new Error('Mongo collection failure - need ownerAppTable')
+  const appTable = ownerAppTable.app_table || (ownerAppTable.app_name + (ownerAppTable.collection_name ? ('_' + ownerAppTable.collection_name) : ''))
+  if (!appTable || !ownerAppTable.owner) throw error('Mongo collection failure - need app name and an owner for ' + ownerAppTable.owner + '__' + ownerAppTable.app_name + '_' + ownerAppTable.collection_name)
+  return ((addOwnerAtStart ? (ownerAppTable.owner + '__') : '') + appTable).replace(/\./g, '_')
+}
+const dbConnectionString = function (envParams) {
+  // onsole.log('mongo - dbConnectionString envParams ', envParams)
+  if (envParams.dbParams.choice === 'mongoLocal') {
+    envParams.dbParams = {
+      type: 'mongoLocal',
+      port: '27017',
+      host: 'localhost',
+      pass: null,
+      user: null,
+      notAddAuth: true
+    }
+  }
+
+  // const DEFAULT_UNIFIED_DB_NAME = 'freezrdb'
+  // const unfiedDbName = envParams.dbParams.unifiedDbName || DEFAULT_UNIFIED_DB_NAME
+
+  // onsole.log('NEED TO Check maxIdleTimeMS todo?')
+  if (envParams.dbParams.connectionString) {
+    let connectionString = envParams.dbParams.connectionString + '&authSource=admin'
+    if (connectionString.indexOf('ssl=true') < 0) connectionString += '&ssl=true'
+    if (connectionString.indexOf('maxIdleTimeMS') < 0) connectionString += '&maxIdleTimeMS=30000'
+    // return envParams.dbParams.connectionString + '&authSource=admin' // &useUnifiedTopology=true
+    return connectionString
+  } else if (envParams.dbParams.mongoString) {
+    let connectionString = envParams.dbParams.mongoString + '&authSource=admin'
+    if (connectionString.indexOf('ssl=true') < 0) connectionString += '&ssl=true'
+    if (connectionString.indexOf('maxIdleTimeMS') < 0) connectionString += '&maxIdleTimeMS=30000'
+    return connectionString
+  } else {
+    let connectionString = 'mongodb://'
+    if (envParams.dbParams.user) connectionString += envParams.dbParams.user + ':' + envParams.dbParams.pass + '@'
+    connectionString += envParams.dbParams.host + ':' + (envParams.dbParams.host === 'localhost' ? '' : envParams.dbParams.port)
+    connectionString += '/' + (envParams.dbParams.notAddAuth ? '?' : '?authSource=admin&')
+    if (envParams.dbParams.choice === 'mongoLocal') connectionString += 'ssl=true&'
+    connectionString += 'maxIdleTimeMS=30000'
+    return connectionString
+  }
+}
+const getRealObjectId = function (objectId) {
+  // called after initiation for some systems. neb doesnt need This
+  let realId = objectId
+  if (typeof objectId === 'string') {
+    try {
+      realId = new ObjectId(objectId)
+    } catch (e) {
+      // onsole.log('getRealObjectId', 'Could not get mongo real_id - using text id for ' + objectId, e)
+    }
+  }
+  return realId
+}
+const UNIFIED_COLLECTION_NAME = 'allUserAppData'
+const DEFAULT_UNIFIED_DB_NAME = 'freezr'
+const getCollFrom = function (self) {
+  const uri = dbConnectionString(self.env)
+  const client = new MongoClient(uri)
+  // note self.env.dbParams.unifiedDbName is legacy and no longer used
+  // old version
+  // const useUnifiedDbName = self.env.dbParams.useUnifiedCollection || self.env.dbParams.unifiedDbName || !self.env.dbParams.useUserIdsAsDbName
+  // the next one worked with azure tracker
+  const useUnifiedDbName = hasUnifiedStrategy(self.env) || self.env.dbParams.unifiedDbName || !self.env.dbParams.useUserIdsAsDbName
+  const dbName = useUnifiedDbName
+    ? (process?.env?.UNIFIED_DB_NAME || self.env.dbParams.unifiedDbName || DEFAULT_UNIFIED_DB_NAME)
+    : self.oat.owner
+  // previously from string: uri.slice(uri.lastIndexOf('/') + 1, (uri.indexOf('?') >= 0 ? uri.indexOf('?') : uri.length))
+  const database = client.db(dbName)
+  // old version
+  // const useUnifiedCollName = (self.env.dbParams.useUnifiedCollection && (self.env.dbParams.dbUnificationStrategy === 'all' || helpers.RESERVED_IDS.indexOf(self.oat.owner) < 0)) //  !helpers.is_system_app(self.oat.app_table || self.oat.app_name))
+  // this one worked with azure tracker
+  const useUnifiedCollName = hasUnifiedStrategy(self.env) // (hasUnifiedStrategy(self.env) && (self.env.dbParams.dbUnificationStrategy === 'all' || helpers.RESERVED_IDS.indexOf(self.oat.owner) < 0)) //  !helpers.is_system_app(self.oat.app_table || self.oat.app_name))
+  const collName = useUnifiedCollName
+    ? UNIFIED_COLLECTION_NAME
+    : fullOACName(self.oat, useUnifiedDbName) // (useUnifiedCollName ? false : (!self.env.dbParams.useUserIdsAsDbName && !helpers.is_system_app(self.oat.app_table || self.oat.app_name))))
+  // onsole.log('mongo db coll ', { env: self.env, dbParams: self.env.dbParams, hasUnifiedStrategy: hasUnifiedStrategy(self.env), selfenvdbParamsuseUnifiedCollection: self.env.dbParams.useUnifiedCollection, notsysUser: helpers.RESERVED_IDS.indexOf(self.oat.owner) < 0, envdbParamsdbUnificationStrategy: self.env.dbParams.dbUnificationStrategy, useUnifiedCollName, useUnifiedDbName, collName, dbName, owner: self.oat.owner, systemapp: helpers.is_system_app(self.oat.app_table || self.oat.app_name) })
+  // onsole.log('got mongo uri ', { uri, OAT: self.oat, useUnifiedDbName, dbName, useUnifiedCollName, collName, systemapp: config.isSystemApp(self.oat.app_table || self.oat.app_name) })
+  return [collName, client, database.collection(collName), dbName, database]
+}
+
+// Interface
+export default MONGO_FOR_FREEZR

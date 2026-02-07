@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>{{PAGE_TITLE}}</title>
+
+  <!-- Meta -->
+  <meta http-equiv="content-type" content="text/html; charset=utf-8" />
+  {{FAVICON}}
+
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <meta name="mobile-web-app-capable"" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <meta http-equiv="Content-Security-Policy" content="child-src 'none'; frame-src 'none'; object-src 'none'">
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'nonce-{{FREEEZR-SCRIPT-NONCE}}'; style-src 'self' 'unsafe-inline'; child-src 'none'; frame-src 'none'; form-action 'self'; img-src * data:; default-src 'self'; {{NO_COMMS_CSP}}">
+    <!-- - 'script-src' permits scripts loaded from self, and those with a matching nonce.
+         - 'style-src' allows styles from self and unsafe-inline.
+         - 'child-src', 'frame-src' only permit 'none', blocking subframes and embedded resources.
+         - 'img-src' allows all images from all domains.
+         - 'form-action' restricts form submissions to self.
+         - 'default-src' restricts all unspecified resource types to self.
+         - '{{NO_COMMS_CSP}}': may be replaced with: connect-src 'self'; object-src 'none';  unless overridden by the app permission.
+           - This restricts which domains the page can connect to, disallows plugins/objects, and disables the use of eval() in scripts, unless app-specific permissions override it.
+         - 'unsafe-eval' may be added to te script-src by permission, in the future
+    -->
+     
+  <!-- Stylesheets -->
+  {{CSS_FILES}}
+  {{FREEZR_CORE_CSS}}
+
+  <!-- javascripts -->
+  <script nonce="{{FREEEZR-SCRIPT-NONCE}}">
+    var freezrMeta = {
+      appName: "{{APP_NAME}}",
+      appVersion: "{{APP_VERSION}}",
+      appDisplayName: "{{APP_DISPLAY_NAME}}",
+      appToken: null,
+      userId: "{{USER_ID}}",
+      adminUser: {{USER_IS_ADMIN}},
+      publisherUser: {{USER_IS_PUBLISHER}},
+      serverVersion: "{{FREEZR_SERVER_VERSION}}",
+      serverAddress: "{{SERVER_NAME}}",
+    }
+
+    var freezr_messages = {{MESSAGES}};
+
+    {{OTHER_VARIABLES}}
+
+    window.onload = async function() {
+      if (freezr) {
+        freezr.utils.addFreezerDialogueElements();
+        if (freezr.initPageScripts) await freezr.initPageScripts();
+        if (freezr_messages && freezr_messages.showOnStart) {freezerRestricted.menu.resetDialogueBox(); freezr.perms.getAllAppPermissions(freezerRestricted.menu.show_permissions)};
+      } else {
+        console.log("no freezr")
+      }
+    }
+  </script>
+
+    {{FREEZR_CORE_JS}}
+
+    {{SCRIPT_FILES}}
+
+</head>
+
+<body >{{HTML-BODY}}</body>
+
+</html>

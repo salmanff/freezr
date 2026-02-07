@@ -1,0 +1,384 @@
+/* publicFeed.css - Styles for the public feed page 2025-12 */
+
+/* Shared base styles (also in objectPage.css) */
+.freezr_public_outer {
+  font-family: "Lucida Sans Unicode", "Helvetica Neue", "Arial", sans-serif;
+  margin: 0 auto;
+  background-image: url(/app/info.freezr.public/public/static/freezr_texture.png);
+  background-repeat: repeat;
+  max-width: 650px;
+  min-height: 100vh;
+  padding: 20px;
+}
+@media screen and (max-width: 650px) {
+  .freezr_public_outer { padding: 15px 10px; }
+}
+@media screen and (min-width: 650px) {
+  .freezr_public_outer { padding: 15px 50px; }
+}
+
+.freezr_public_card {
+  padding: 15px;
+  border: 1px solid grey;
+  border-radius: 5px;
+  margin-bottom: 15px;
+  background-color: rgba(255, 255, 255, 0.85);
+  font-size: 14px;
+}
+
+/* Card with collapsible content */
+.freezr_public_card {
+  position: relative;
+  transition: max-height 0.4s ease-out;
+}
+
+.freezr_public_card.freezr_collapsed {
+  max-height: 380px;
+  overflow: hidden;
+}
+
+/* Expander container - acts as the fade overlay for collapsed cards */
+.freezr_expander_container {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 80px;
+  background: linear-gradient(to bottom, 
+    rgba(255,255,255,0) 0%, 
+    rgba(255,255,255,0.7) 30%, 
+    rgba(255,255,255,0.95) 70%, 
+    rgba(255,255,255,1) 100%);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.freezr_public_card.freezr_collapsed .freezr_expander_container {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.freezr_expander_btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  background: transparent;
+  color: #666;
+  border: none;
+  font-size: 12px;
+  font-weight: 400;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  letter-spacing: 0.3px;
+}
+
+.freezr_expander_btn:hover {
+  color: #2060ff;
+}
+
+.freezr_expander_btn .arrow {
+  display: inline-block;
+  font-size: 10px;
+  transition: transform 0.3s ease;
+}
+
+.freezr_public_card.freezr_expanded .freezr_expander_btn .arrow {
+  transform: rotate(180deg);
+}
+
+/* Collapse button for expanded cards - subtle centered link */
+.freezr_public_card.freezr_expanded .freezr_expander_container {
+  position: relative;
+  height: auto;
+  background: none;
+  opacity: 1;
+  pointer-events: auto;
+  justify-content: center;
+  margin-top: 12px;
+  padding: 8px 0;
+  border-top: 1px solid #eee;
+}
+
+.freezr_public_card.freezr_expanded .freezr_expander_btn {
+  color: #888;
+}
+
+.freezr_public_card.freezr_expanded .freezr_expander_btn:hover {
+  color: #2060ff;
+}
+
+/* Card content wrapper for animation */
+.freezr_card_content_wrapper {
+  position: relative;
+}
+
+/* Image handling inside cards */
+.freezr_public_card img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Hide expander for short cards */
+.freezr_public_card.freezr_short .freezr_expander_container {
+  display: none;
+}
+
+/* Card link styling */
+.freezr_public_card_link {
+  color: #2060ff;
+  text-decoration: none;
+}
+.freezr_public_card_link:hover {
+  text-decoration: underline;
+}
+
+/* Compact header for feed listing */
+.freezr_public_header_compact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #eee;
+  font-size: 12px;
+  color: #666;
+}
+
+.freezr_public_avatar_small {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.freezr_public_meta_inline {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  line-height: 1.4;
+}
+
+.freezr_public_owner_link,
+.freezr_public_app_link {
+  color: #555;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.freezr_public_owner_link:hover,
+.freezr_public_app_link:hover {
+  color: #2060ff;
+  text-decoration: underline;
+}
+
+.freezr_public_separator {
+  color: #bbb;
+}
+
+.freezr_public_date_inline {
+  color: #999;
+}
+
+/* Generic content fallback */
+.freezr_public_generic_content {
+  padding: 10px 0;
+}
+
+.freezr_public_card_title {
+  font-size: 16px;
+  font-weight: bold;
+  color: #333;
+  margin-bottom: 8px;
+}
+
+.freezr_public_card_description,
+.freezr_public_card_text {
+  font-size: 14px;
+  color: #444;
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+
+.freezr_public_json_preview {
+  background: #f5f5f5;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  padding: 10px;
+  margin-top: 10px;
+  overflow-x: auto;
+}
+
+.freezr_public_json_preview pre {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: "Monaco", "Consolas", "Courier New", monospace;
+  color: #555;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* Public Feed Page Styles */
+.freezr_public_message {
+  padding: 12px 15px;
+  border-radius: 5px;
+  margin-bottom: 15px;
+  font-size: 14px;
+}
+.freezr_public_message_error {
+  background-color: #ffe6e6;
+  border: 1px solid #cc0000;
+  color: #cc0000;
+}
+.freezr_public_message_info {
+  background-color: #e6f3ff;
+  border: 1px solid #0066cc;
+  color: #0066cc;
+}
+
+.freezr_public_feed_header {
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #ddd;
+}
+.freezr_public_feed_title {
+  margin-bottom: 15px;
+}
+.freezr_public_feed_title h1 {
+  margin: 0;
+  font-size: 24px;
+  color: #333;
+}
+.freezr_public_login_link {
+  float: right;
+  font-size: 12px;
+}
+.freezr_public_login_link a {
+  color: #2060ff;
+  text-decoration: none;
+}
+.freezr_public_login_link a:hover {
+  text-decoration: underline;
+}
+.freezr_public_filter_description {
+  font-size: 12px;
+  color: #666;
+  margin-top: 5px;
+  font-style: italic;
+}
+
+.freezr_public_search_container {
+  display: flex;
+  gap: 10px;
+}
+.freezr_public_search_input_wrapper {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.freezr_public_search_input {
+  width: 100%;
+  padding: 8px 28px 8px 12px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 14px;
+  background-color: rgba(255, 255, 255, 0.9);
+}
+.freezr_public_search_input:focus {
+  outline: none;
+  border-color: #2060ff;
+}
+.freezr_public_search_clear {
+  position: absolute;
+  right: 6px;
+  background: none;
+  border: none;
+  color: #999;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  opacity: 0.6;
+  transition: opacity 0.2s ease;
+}
+.freezr_public_search_clear:hover {
+  opacity: 1;
+  color: #666;
+}
+.freezr_public_search_button {
+  padding: 8px 20px;
+  background-color: #2060ff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.freezr_public_search_button:hover {
+  background-color: #1850dd;
+}
+
+.freezr_public_results {
+  margin-bottom: 20px;
+}
+
+.freezr_public_no_results {
+  text-align: center;
+  padding: 40px 20px;
+  color: #666;
+  font-size: 16px;
+  background-color: rgba(255, 255, 255, 0.85);
+  border-radius: 5px;
+  border: 1px solid #ddd;
+}
+
+.freezr_public_card_content {
+  padding: 10px 0;
+}
+
+.freezr_public_view_link {
+  color: #2060ff;
+  text-decoration: none;
+  font-size: 13px;
+}
+.freezr_public_view_link:hover {
+  text-decoration: underline;
+}
+
+.freezr_public_pagination {
+  text-align: center;
+  margin: 20px 0;
+}
+.freezr_public_more_button {
+  display: inline-block;
+  padding: 12px 30px;
+  background-color: #E2E2E2;
+  color: #2060ff;
+  text-decoration: none;
+  border-radius: 5px;
+  font-size: 14px;
+  font-weight: bold;
+}
+.freezr_public_more_button:hover {
+  background-color: #d5d5d5;
+}
+
+.freezr_public_feed_footer {
+  text-align: center;
+  padding-top: 15px;
+  border-top: 1px solid #ddd;
+  color: #888;
+  font-size: 12px;
+}
+

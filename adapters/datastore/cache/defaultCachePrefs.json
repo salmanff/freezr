@@ -1,0 +1,37 @@
+{
+  "ALL_USERS": {
+    "info_freezr_account_app_list": {
+      "cacheAll": true
+    }, 
+    "info_freezr_account_permissions": {
+      "cacheAll": true
+    }, 
+    "dev_ceps_contacts": {
+      "cacheAll": true
+    },
+    "dev_ceps_groups": {
+      "cacheAll": true
+    },
+    "dev_ceps_privatefeeds_codes": {
+      "cacheAll": true
+    },
+    "dev_ceps_messages_got": {
+      "cacheRecent": true
+    },
+    "dev_ceps_messages_sent": {
+      "cacheRecent": true
+    }
+  },
+  "USER_SPECIFIC": {
+    "fradmin": {
+      "info_freezr_admin_users": {
+        "cacheAll": true
+      },
+      "info_freezr_admin_app_tokens": {
+        "cacheAll": false,
+        "cacheRecent": false,
+        "cachePatterns": ["app_token"]
+      }
+    }
+  }
+}

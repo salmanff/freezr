@@ -1,0 +1,134 @@
+<!--
+freezr App Restore Data
+app: {
+  page_title: 'Restore Data (freezr)',
+  css_files: ['/app/info.freezr.public/public/freezr_style.css', 'account_app_restoredata.css', 'modules/drawJson.css'],
+  page_url: 'account_app_restoredata.html',
+  script_files: ['account_app_restoredata.js']
+}
+-->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">Restore Data</span>
+    <a href="/account/home">Home</a>
+    <a href="/account/settings">Settings</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div id="warnings" class="errorBox"></div>
+
+    <!-- File Upload Card -->
+    <div class="freezr-card" id="uploadCard">
+      <div class="card-header">
+        <h3>Upload Backup Files</h3>
+        <p class="card-description">Select one or more backup files created from the View Data page.</p>
+      </div>
+
+      <div id="upload_area" class="upload-area">
+        <div class="file-input-wrapper">
+          <input type="file" id="fileUploader" name="files[]" accept=".json" multiple />
+          <label for="fileUploader" class="file-input-label">
+            <span class="file-icon">📁</span>
+            <span class="file-text">Choose backup files...</span>
+          </label>
+        </div>
+        <div id="selectedFiles" class="selected-files"></div>
+        <button class="freezrButt" id="uploadAndRestoreData">Start Restore</button>
+      </div>
+    </div>
+
+    <!-- Loading Indicator -->
+    <div id="loading" class="loading-container" style="display: none;">
+      <img src="/app/info.freezr.public/public/static/ajaxloaderBig.gif" alt="Loading..."/>
+      <span>Processing...</span>
+    </div>
+
+    <!-- Backup Info Card (shown after file is parsed) -->
+    <div class="freezr-card" id="backupInfoCard" style="display: none;">
+      <div class="card-header">
+        <h3>Backup Information</h3>
+      </div>
+      <div id="currentFileName" class="current-file-name"></div>
+      <div id="backupInfo" class="backup-info"></div>
+      
+      <!-- Restore Mode Selection -->
+      <div class="restore-mode-section">
+        <label for="restoreMode">Restore Mode:</label>
+        <select id="restoreMode" class="restore-mode-select">
+          <option value="create" selected>Create New (new _id)</option>
+          <option value="update">Update Record (must exist)</option>
+          <option value="upsert">Upsert Record (create or update)</option>
+        </select>
+        <p class="mode-description" id="modeDescription">Creates new records with new IDs, ignoring the original _id.</p>
+      </div>
+    </div>
+
+    <!-- Progress Card -->
+    <div class="freezr-card" id="progressCard" style="display: none;">
+      <div class="card-header">
+        <h3>Restore Progress</h3>
+      </div>
+      <div class="progress-stats">
+        <div class="stat">
+          <span class="stat-label">Uploaded:</span>
+          <span class="stat-value" id="statUploaded">0</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Updated:</span>
+          <span class="stat-value" id="statUpdated">0</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Errors:</span>
+          <span class="stat-value error" id="statErrors">0</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Remaining:</span>
+          <span class="stat-value" id="statRemaining">0</span>
+        </div>
+      </div>
+      <div class="progress-bar-container">
+        <div class="progress-bar" id="progressBar"></div>
+      </div>
+      <div id="restoreLog" class="restore-log"></div>
+    </div>
+
+    <!-- Record Review Card -->
+    <div class="freezr-card" id="reviewCard" style="display: none;">
+      <div class="card-header">
+        <div class="review-header-row">
+          <h3>Review Record</h3>
+          <span id="restoreModeLabel" class="restore-mode-label mode-create">RESTORE MODE: CREATE NEW</span>
+        </div>
+        <p class="card-description">Review this record before restoring. Click "Edit" to modify, or use the buttons below.</p>
+      </div>
+      
+      <div id="currentRecordInfo" class="record-info"></div>
+
+      <!-- Action buttons ABOVE the record preview -->
+      <div class="review-actions">
+        <button class="freezrButt secondary" id="skipRecord">Skip</button>
+        <button class="freezrButt" id="addRecord">Add Record</button>
+        <button class="freezrButt" id="addAllRecords">Add All in File</button>
+        <button class="freezrButt" id="addAllFiles">Add All Files</button>
+      </div>
+      
+      <div id="currentRecord" class="record-preview"></div>
+    </div>
+
+    <!-- Confirmation Dialog (overlay) -->
+    <div id="confirmDialog" class="dialog-overlay" style="display: none;">
+      <div class="dialog-box">
+        <div class="dialog-header">
+          <h3 id="dialogTitle">Confirm</h3>
+        </div>
+        <div class="dialog-content" id="dialogContent"></div>
+        <div class="dialog-actions">
+          <button class="freezrButt secondary" id="dialogCancel">Cancel</button>
+          <button class="freezrButt" id="dialogConfirm">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>

@@ -1,0 +1,29 @@
+<!--
+  genericFreezrLayout.html
+  Generic layout wrapper for public object pages
+  Uses Mustache templating for dynamic values
+  CSS classes defined in freezr_style.css
+-->
+<div class="freezr_public_outer">
+  <div class="freezr_public_card">
+    <div class="freezr_public_header">
+      <div class="freezr_public_avatar">
+        <img src="/publicfiles/@{{_data_owner}}/info.freezr.account/profilePict.jpg" 
+             data-hide-on-error="true"
+             alt="{{_data_owner}}">
+      </div>
+      <div class="freezr_public_meta">
+        <div class="freezr_public_app_name">{{_app_name}}</div>
+        <div class="freezr_public_info">Published by <strong>{{_data_owner}}</strong></div>
+        <div class="freezr_public_info">{{__date_published}}</div>
+      </div>
+    </div>
+    
+    {{{innerHtml}}}
+  </div>
+  
+  <div class="freezr_public_home_link">
+    <a href="/public">← Back to Public Feed</a>
+  </div>
+</div>
+

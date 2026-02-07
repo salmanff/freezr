@@ -1,0 +1,111 @@
+<!-- Admin List Users admin_list_users.html -->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">User List</span>
+    <a href="/account/home">Account Home</a>
+    <a href="/admin/home">Admin Home</a>
+    <a href="/admin/register">Register User</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div class="freezr-card" id="user_list">
+      <h3 style="margin-bottom: 1rem;">
+        {{#data.length}}There are {{ data.length }} users{{/data.length}}
+        {{^data}}No users found{{/data}}
+      </h3>
+
+      {{#data.length}}
+      <div class="users-table">
+        <div class="users-header">
+          <div class="col-name">Name</div>
+          <div class="col-email">Email</div>
+          <div class="col-fs">File System</div>
+          <div class="col-db">Database</div>
+          <div class="col-limits">Usage</div>
+        </div>
+        {{#data}}
+        <div class="users-row">
+          <div class="col-name">
+            {{user_id}}
+            {{#isAdmin}}<span class="badge badge-admin">admin</span>{{/isAdmin}}
+            {{#isPublisher}}<span class="badge badge-pub">pub</span>{{/isPublisher}}
+          </div>
+          <div class="col-email">{{email_address}}</div>
+          <div class="col-fs">{{fsParams.type}}</div>
+          <div class="col-db">{{dbParams.type}}</div>
+          <div class="col-limits limitsForUsers" id="limitsAreaFor_{{user_id}}">
+            <span id="limitNumberFor_{{user_id}}">
+              {{#limits.totalSize}}{{limits.totalSizeMB}}MB{{/limits.totalSize}}
+              {{^limits.totalSize}}Not updated{{/limits.totalSize}}
+            </span>
+            <span id="click_UpdatelimitsFor_{{user_id}}" class="update-link">(update)</span>
+            {{#limits.totalSize}}<span class="time-info">{{limits.timeString}}</span>{{/limits.totalSize}}
+            <a href="/admin/resourceusage?user={{user_id}}">(details)</a>
+          </div>
+        </div>
+        {{/data}}
+      </div>
+      {{/data.length}}
+
+      {{^data}}
+      <p style="color: var(--freezr-text-muted);">Sorry, no users were found - This must be an error!</p>
+      {{/data}}
+    </div>
+  </div>
+</div>
+
+<style>
+.users-table {
+  display: grid;
+  gap: 0;
+  font-size: 14px;
+}
+.users-header, .users-row {
+  display: grid;
+  grid-template-columns: 180px 180px 100px 100px 1fr;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  align-items: center;
+}
+.users-header {
+  font-weight: 600;
+  color: var(--freezr-text-muted);
+  border-bottom: 1px solid var(--freezr-border);
+}
+.users-row {
+  border-bottom: 1px solid var(--freezr-border);
+}
+.users-row:last-child {
+  border-bottom: none;
+}
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: 0.25rem;
+}
+.badge-admin {
+  background: var(--freezr-accent);
+  color: white;
+}
+.badge-pub {
+  background: #10b981;
+  color: white;
+}
+.update-link {
+  color: var(--freezr-accent);
+  cursor: pointer;
+  margin-left: 0.5rem;
+}
+.update-link:hover {
+  text-decoration: underline;
+}
+.time-info {
+  color: var(--freezr-text-muted);
+  font-size: 12px;
+  margin-left: 0.5rem;
+}
+</style>

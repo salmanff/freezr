@@ -1,0 +1,55 @@
+<!-- account_login.html
+options:
+    page_title: "Login (Freezr)",
+    css_files: ['/app/info.freezr.public/public/freezr_style.css', 'public/account_login.css'],
+    page_url: 'public/account_login.html',
+    script_files: 'public/account_login.js'
+-->
+<div class="freezr-page">
+  <nav class="freezr-nav">
+    <span class="freezr-nav-title">Log In</span>
+    <a href="/public">Public Page</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div class="freezr-card" style="max-width: 480px; margin: 2rem auto;">
+      <h2 style="text-align: center; margin-bottom: 1.5rem; word-wrap: break-word;">
+        Log in to: <span id="freezr_server" style="color: var(--freezr-accent); display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom;"></span>
+      </h2>
+
+      <div id="errorBox" class="errorBox" style="margin-bottom: 1rem;"></div>
+
+      <div class="errorBox freezer_spacer" style="padding: 1rem; display: none; margin-bottom: 1rem;">
+        Security Warning: Do not use this page to login from a phone app. Only use this if you are on a web browser.
+      </div>
+
+      <form name="login" id="login">
+        <div style="margin-bottom: 1rem;">
+          <label class="texttop">User ID</label>
+          <input class="input" type="text" id="user_id" name="user_id" style="width: 100%;"/>
+        </div>
+        <div style="margin-bottom: 1.5rem;">
+          <label class="texttop">Password</label>
+          <input class="input" type="password" id="password" name="password" style="width: 100%;"/>
+        </div>
+      </form>
+
+      <div style="text-align: center;">
+        <div class="freezrButt" id="loginButt" style="width: 50%;">Log In</div>
+      </div>
+
+      <div style="margin-top: 2rem; text-align: center; display: none;" id="self_register_link">
+        <span style="color: var(--freezr-text-muted);">Or...</span>
+        <a href="/register/simple" style="margin-left: 0.5rem;">Register as a new user</a>
+      </div>
+
+      <div id="launch_spinner" style="display: none; text-align: center; margin-top: 2rem;">
+        <img src="/app/info.freezr.public/public/static/ajaxloaderBig.gif" alt="Loading..."/>
+        <div id="launchspintext" style="display: none; margin-top: 1rem; color: var(--freezr-text-muted); font-size: 14px;">
+          Depending on the back end you have chosen, it might take a minute or two to log in.
+          Please be patient. 😎
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

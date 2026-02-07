@@ -1,0 +1,351 @@
+/* drawJson.css - Styles for the JSON viewer/editor component */
+
+/* ============================================
+   JSON VIEWER STYLES (drawJson.js)
+   ============================================ */
+
+/* Record container */
+.json-record {
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: var(--freezr-radius-sm, 8px);
+  border: 1px solid var(--freezr-border, #e2e8f0);
+  margin-bottom: 1rem;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Actions bar - positioned top-right, overlapping content */
+.json-actions {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 10;
+  background: transparent;
+}
+
+.json-btn {
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--freezr-border, #e2e8f0);
+  border-radius: var(--freezr-radius-sm, 8px);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.json-btn-edit {
+  background: var(--freezr-accent, #6366f1);
+  color: white;
+  border-color: var(--freezr-accent, #6366f1);
+}
+
+.json-btn-edit:hover {
+  background: var(--freezr-accent-hover, #4f46e5);
+}
+
+.json-btn-delete {
+  background: white;
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.json-btn-delete:hover {
+  background: #fef2f2;
+  border-color: #dc2626;
+}
+
+.json-btn-save {
+  background: #059669;
+  color: white;
+  border-color: #059669;
+}
+
+.json-btn-save:hover {
+  background: #047857;
+}
+
+.json-btn-cancel {
+  background: white;
+  color: var(--freezr-text-muted, #64748b);
+  border-color: var(--freezr-border, #e2e8f0);
+}
+
+.json-btn-cancel:hover {
+  background: var(--freezr-bg, #f0f2f5);
+}
+
+/* Ignore button (restore mode) */
+.json-btn-ignore {
+  background: white;
+  color: #d97706;
+  border-color: #fde68a;
+}
+
+.json-btn-ignore:hover {
+  background: #fffbeb;
+  border-color: #d97706;
+}
+
+/* Confirm button (restore mode) */
+.json-btn-confirm {
+  background: #0891b2;
+  color: white;
+  border-color: #0891b2;
+}
+
+.json-btn-confirm:hover {
+  background: #0e7490;
+}
+
+/* Status messages */
+.json-status {
+  padding: 0;
+  font-size: 13px;
+  text-align: center;
+  transition: all 0.2s;
+}
+
+.json-status:not(:empty) {
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--freezr-border, #e2e8f0);
+}
+
+.json-status-error {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.json-status-warning {
+  background: #fffbeb;
+  color: #d97706;
+}
+
+.json-status-success {
+  background: #f0fdf4;
+  color: #059669;
+}
+
+.json-status-info {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+/* Fields container */
+.json-fields {
+  padding: 1rem;
+  padding-top: 0.5rem;
+  position: relative;
+}
+
+/* First field row needs extra right padding for action buttons */
+.json-fields .json-field:first-of-type {
+  padding-right: 150px;
+}
+
+/* Individual field row */
+.json-field {
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) 1fr;
+  gap: 0.75rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.json-field:last-child {
+  border-bottom: none;
+}
+
+.json-field-system {
+  background: rgba(0, 0, 0, 0.02);
+  margin: 0 -1rem;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+/* Key styling */
+.json-key {
+  font-weight: 500;
+  color: var(--freezr-text-muted, #64748b);
+  word-break: break-word;
+}
+
+/* Value container */
+.json-value-container {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Value type colors */
+.json-value-string {
+  color: #059669;
+}
+
+.json-value-number {
+  color: #d97706;
+}
+
+.json-value-boolean {
+  color: #2563eb;
+  font-weight: 500;
+}
+
+.json-value-null {
+  color: #9333ea;
+  font-style: italic;
+}
+
+.json-value-date {
+  color: #0891b2;
+}
+
+.json-value-object,
+.json-value-array {
+  color: var(--freezr-text-muted, #64748b);
+}
+
+/* Truncated strings */
+.json-truncated {
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+.json-truncated:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+/* Collapsible sections */
+.json-collapse-header {
+  cursor: pointer;
+  color: var(--freezr-text-muted, #64748b);
+  font-size: 13px;
+  padding: 0.25rem 0;
+  user-select: none;
+}
+
+.json-collapse-header:hover {
+  color: var(--freezr-accent, #6366f1);
+}
+
+.json-collapse-icon {
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+  font-size: 10px;
+}
+
+.json-collapse-content {
+  margin-left: 1rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--freezr-border, #e2e8f0);
+}
+
+/* Nested content */
+.json-nested {
+  margin-top: 0.25rem;
+}
+
+.json-nested-field {
+  display: grid;
+  grid-template-columns: minmax(80px, 150px) 1fr;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  font-size: 13px;
+}
+
+/* Array items */
+.json-array-item {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+
+.json-array-index {
+  color: var(--freezr-text-muted, #64748b);
+  font-size: 12px;
+  min-width: 2rem;
+}
+
+/* Edit mode */
+.json-edit-area {
+  padding: 1rem;
+}
+
+.json-edit-warning {
+  padding: 0.75rem 1rem;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: var(--freezr-radius-sm, 8px);
+  color: #92400e;
+  font-size: 13px;
+  margin-bottom: 1rem;
+  margin-top: 1.5rem;
+}
+
+.json-edit-textarea {
+  width: 100%;
+  min-height: 300px;
+  padding: 1rem;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  border: 1px solid var(--freezr-border, #e2e8f0);
+  border-radius: var(--freezr-radius-sm, 8px);
+  resize: vertical;
+  background: #1e1e1e;
+  color: #d4d4d4;
+}
+
+.json-edit-textarea:focus {
+  outline: none;
+  border-color: var(--freezr-accent, #6366f1);
+}
+
+.json-validation {
+  padding: 0.5rem 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.json-validation-valid {
+  color: #059669;
+}
+
+.json-validation-invalid {
+  color: #dc2626;
+}
+
+/* Deleted state */
+.json-deleted {
+  padding: 2rem;
+  text-align: center;
+  color: var(--freezr-text-muted, #64748b);
+  font-style: italic;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .json-field {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+
+  .json-key {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .json-nested-field {
+    grid-template-columns: 1fr;
+  }
+
+  .json-actions {
+    flex-wrap: wrap;
+  }
+}

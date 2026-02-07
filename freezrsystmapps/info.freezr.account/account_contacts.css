@@ -1,0 +1,207 @@
+/* account_contacts.css - Contacts page specific styles */
+
+/* Warnings now use .errorBox from freezr_style.css */
+#warnings:empty {
+  display: none;
+}
+
+/* Small helper text */
+.smallText {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--freezr-text-muted);
+  margin-top: -0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+/* Group display */
+.groupOuter {
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background: var(--freezr-bg);
+  border-radius: var(--freezr-radius-sm);
+}
+
+.group {
+  font-size: 15px;
+}
+
+.groupName {
+  font-weight: 600;
+  margin-right: 0.5rem;
+  color: var(--freezr-text);
+}
+
+.groupEdit {
+  cursor: pointer;
+  color: var(--freezr-accent);
+  margin-right: 0.5rem;
+}
+
+.groupMembers {
+  margin-right: 0.5rem;
+  font-style: italic;
+  color: var(--freezr-text-muted);
+}
+
+/* Contact grid */
+.gridlist {
+  max-width: 100%;
+  display: grid;
+  grid-template-columns: 1fr 1fr 2fr 1fr;
+  gap: 1rem;
+  color: var(--freezr-text);
+  border-top: 1px solid var(--freezr-border);
+  padding: 1rem 0;
+  align-items: center;
+}
+
+.grid-header {
+  border-top: 2px solid var(--freezr-border);
+  font-weight: 600;
+  color: var(--freezr-text-muted);
+  font-size: 13px;
+}
+
+/* Small action buttons in grid */
+.smallTextButt {
+  display: inline-block;
+  margin: 2px;
+  color: var(--freezr-accent);
+  text-align: center;
+  padding: 0.25rem 0.5rem;
+  background: var(--freezr-bg);
+  border-radius: var(--freezr-radius-sm);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.smallTextButt:hover {
+  background: var(--freezr-border);
+}
+
+/* Link styling */
+.alink {
+  color: var(--freezr-accent);
+  cursor: pointer;
+}
+
+.alink:hover {
+  text-decoration: underline;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .gridlist {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+    text-align: left;
+  }
+  
+  .grid-header {
+    display: none;
+  }
+  
+  .disappearing {
+    display: inline-block;
+  }
+}
+
+@media (min-width: 600px) {
+  .disappearing {
+    display: none;
+  }
+}
+
+@media (max-width: 407px) {
+  .revDisappearing {
+    display: none;
+  }
+}
+
+@media (min-width: 407px) {
+  .revDisappearing {
+    display: inline-block;
+  }
+}
+
+/* Overlay for forms */
+.overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  overflow-y: auto;
+  padding: 2rem;
+  box-sizing: border-box;
+}
+
+.overlay-content {
+  background: var(--freezr-card-bg);
+  border-radius: var(--freezr-radius);
+  box-shadow: var(--freezr-shadow-hover);
+  padding: 2rem;
+  max-width: 600px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  position: relative;
+  margin: auto;
+}
+
+.overlay-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: none;
+  border: none;
+  font-size: 2rem;
+  line-height: 1;
+  color: var(--freezr-text-muted);
+  cursor: pointer;
+  padding: 0;
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--freezr-radius-sm);
+  transition: background 0.2s, color 0.2s;
+}
+
+.overlay-close:hover {
+  background: var(--freezr-bg);
+  color: var(--freezr-text);
+}
+
+/* Blocking overlay for dialogs */
+.block_screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.3);
+  display: none;
+  z-index: 999;
+}
+
+#dialogue {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--freezr-card-bg);
+  padding: 2rem;
+  border-radius: var(--freezr-radius);
+  box-shadow: var(--freezr-shadow-hover);
+  display: none;
+  z-index: 1000;
+}

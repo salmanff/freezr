@@ -1,0 +1,47 @@
+<!--
+freezr Account Reset
+reset: {
+  page_title: 'Account Reset (freezr)',
+  css_files: ['/app/info.freezr.public/public/freezr_style.css', 'account_home.css'],
+  page_url: 'account_reset.html',
+  script_files: ['account_reset.js'],
+  initial_query_func: 'getResetData'
+}
+-->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">Account Reset</span>
+    <a href="/public">Public Page</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div id="errorBox" class="errorBox"></div>
+
+    <div class="freezr-card" style="border-left: 4px solid #dc2626;">
+      <h3 style="color: #dc2626;">⚠️ Danger Zone - Account Reset</h3>
+      <p><strong>Warning:</strong> This page is for advanced users only. Incorrect settings can break your account.</p>
+
+      <div id="main" style="max-width: 450px;">
+        <label class="texttop">Owner (user id):</label>
+        <div class="input" id="userId" style="background: var(--freezr-bg);">{{owner}}</div>
+        
+        <label class="texttop">File System:</label>
+        <input type="text" class="input" id="fsParamsType" name="fsParamsType" value="{{fsParamsType}}"/>
+      </div>
+    </div>
+
+    <div class="freezr-card" id="passEnterDiv">
+      <h3>Confirm Changes</h3>
+      <div style="max-width: 450px;">
+        <label class="texttop">Your freezr password:</label>
+        <input type="password" class="input" id="password" name="password"/>
+        
+        <div class="button-row">
+          <div id="click_recordAuthParams" class="freezrButt" style="background: #dc2626;">Record new parameters</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>

@@ -1,0 +1,402 @@
+/* freezr_style.css */
+
+/* ===== CSS Variables for consistent theming ===== */
+:root {
+  --freezr-bg: #f0f2f5;
+  --freezr-card-bg: #ffffff;
+  --freezr-text: #1a1a2e;
+  --freezr-text-muted: #64748b;
+  --freezr-accent: #6366f1;
+  --freezr-accent-hover: #4f46e5;
+  --freezr-border: #e2e8f0;
+  --freezr-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --freezr-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.12);
+  --freezr-radius: 12px;
+  --freezr-radius-sm: 8px;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  margin: 0;
+  padding: 0;
+  color: var(--freezr-text);
+  background: var(--freezr-bg);
+}
+
+/* ===== Page Layout ===== */
+.freezr-page {
+  min-height: 100vh;
+  background: var(--freezr-bg);
+}
+
+.freezr-content {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1.5rem 2rem 3rem;
+}
+
+/* ===== Navigation ===== */
+.freezr-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 2rem;
+	padding-right: 40px;
+  background: var(--freezr-card-bg);
+  box-shadow: var(--freezr-shadow);
+}
+
+.freezr-nav-title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--freezr-text);
+  margin-right: auto; /* pushes nav links to the right */
+}
+
+.freezr-nav a {
+  color: var(--freezr-text-muted);
+  text-decoration: none;
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.2s, color 0.2s;
+}
+
+.freezr-nav a:hover {
+  background: var(--freezr-bg);
+  color: var(--freezr-accent);
+}
+
+/* ===== Cards ===== */
+.freezr-card {
+  background: linear-gradient(rgba(255,255,255,0.25), rgba(255,255,255,0.25)), 
+              url(/app/info.freezr.public/public/static/freezr_texture.png);
+  background-size: cover;
+  background-position: center;
+  border-radius: var(--freezr-radius);
+  padding: 1.5rem;
+  box-shadow: var(--freezr-shadow);
+  margin-bottom: 1.5rem;
+  min-width: 150px;
+}
+
+.freezr-card h2, .freezr-card h3 {
+  margin-top: 0;
+  font-weight: 600;
+  color: var(--freezr-text);
+}
+
+/* ===== Page Title ===== */
+.freezr-page-title {
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: var(--freezr-text);
+  margin: 1.5rem 0 1rem;
+}
+
+/* ===== Buttons ===== */
+.freezrButt {
+  display: inline-block;
+  background: var(--freezr-accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--freezr-radius-sm);
+  font-size: 15px;
+  font-weight: 500;
+  text-decoration: none;
+  padding: 0.6rem 1.25rem;
+  cursor: pointer;
+  transition: background 0.2s, box-shadow 0.2s;
+}
+
+.freezrButt:hover {
+  background: var(--freezr-accent-hover);
+  box-shadow: var(--freezr-shadow-hover);
+}
+
+.freezer_butt {
+  display: inline-block;
+  color: var(--freezr-accent);
+  text-align: center;
+  min-width: 60px;
+  padding: 0.6rem 1rem;
+  margin: 5px;
+  background: var(--freezr-card-bg);
+  border: 1px solid var(--freezr-border);
+  border-radius: var(--freezr-radius-sm);
+  font-weight: 500;
+  cursor: pointer;
+  font-size: 15px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.freezer_butt:hover {
+  border-color: var(--freezr-accent);
+  box-shadow: var(--freezr-shadow);
+}
+
+.freezer_butt_small {
+  color: var(--freezr-accent);
+  text-align: center;
+  padding: 0.4rem 0.75rem;
+  margin: 5px;
+  background: var(--freezr-card-bg);
+  border: 1px solid var(--freezr-border);
+  border-radius: var(--freezr-radius-sm);
+  font-weight: 500;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+/* ===== Links ===== */
+a {
+  color: var(--freezr-accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* ===== Utility Classes ===== */
+.errorBox {
+  color: #dc2626;
+  font-size: 15px;
+  padding: 0.75rem 1rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: var(--freezr-radius-sm);
+  margin-bottom: 1rem;
+}
+
+.errorBox:empty {
+  display: none;
+}
+.floatingErrorBox {
+  color: #dc2626;
+  font-size: 15px;
+  padding: 0.75rem 1rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: var(--freezr-radius-sm);
+  margin-bottom: 1rem;
+  
+  position: fixed;
+  top: 50px;
+  left: 1rem;
+  right: 1rem;
+  z-index: 9999;
+  margin-bottom: 0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.successBox {
+  color: #15803d;
+  font-size: 15px;
+  padding: 0.75rem 1rem;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: var(--freezr-radius-sm);
+  margin-bottom: 1rem;
+}
+
+.successBox:empty {
+  display: none;
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.input,
+.inputbox {
+  padding: 0.75rem 1rem;
+  font-size: 16px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  background-color: var(--freezr-card-bg);
+  border-radius: var(--freezr-radius-sm);
+  border: 1px solid var(--freezr-border);
+  transition: border-color 0.2s;
+}
+
+.input:focus,
+.inputbox:focus {
+  outline: none;
+  border-color: var(--freezr-accent);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.freezer_clickable {
+  cursor: pointer;
+  color: var(--freezr-accent);
+  background-color: var(--freezr-card-bg);
+  border-radius: var(--freezr-radius-sm);
+  font-weight: 500;
+  padding: 5px 10px;
+}
+
+.server_input {
+  resize: none;
+  width: 60%;
+  min-width: 250px;
+  margin-top: 10px;
+  font-size: 15px;
+  padding: 0.5rem;
+  border: 1px solid var(--freezr-border);
+  border-radius: var(--freezr-radius-sm);
+}
+
+#freezr_server_login_butt {
+  background-color: var(--freezr-card-bg);
+  float: none;
+  width: 200px;
+  font-weight: 500;
+}
+
+.freezer_emphasis {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.freezer_list {
+  margin-bottom: 15px;
+}
+
+/* Legacy support - keeping old class for other pages */
+.freezer_top_app_menu {
+  padding-top: 3px;
+  font-size: 11px;
+  margin-bottom: -5px;
+}
+
+.freezer_app_page_title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.freezer_spacer {
+  margin-top: 10px;
+}
+
+.freezer_largeCheckBox {
+  width: 20px;
+  height: 20px;
+}
+
+.marginLeft {
+  margin-left: 20px;
+}
+
+.freezer_BoxTitle {
+  font-weight: 600;
+  margin-top: 10px;
+  color: var(--freezr-text);
+}
+
+.freezer_butt_pressed {
+  background-color: var(--freezr-bg);
+  color: var(--freezr-text-muted);
+  text-align: center;
+  min-width: 60px;
+  padding: 0.6rem 1rem;
+  margin: 5px;
+  border-radius: var(--freezr-radius-sm);
+  font-weight: 500;
+  cursor: default;
+}
+
+.freezer_butt_Text {
+  margin-top: 3px;
+  min-height: 45px;
+  font-weight: normal;
+}
+
+.freezer_dialogueTitle {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  margin-top: 0;
+  padding-top: 0.5rem;
+  color: var(--freezr-text);
+}
+
+.freezr_dialogueBordered {
+  margin-top: 10px;
+  border-top: 1px solid var(--freezr-border);
+}
+
+/* Legacy texture classes - kept for backward compatibility during transition */
+.freezer_texture_outer {
+  background-color: var(--freezr-bg);
+  text-align: center;
+  margin: 0;
+}
+
+.freezer_texture_inner {
+  text-align: left;
+  min-height: 100vh;
+  max-width: 1100px;
+  padding: 1.5rem 2rem 3rem;
+  margin: 0 auto;
+  /* texture image removed for modern look */
+}
+
+.big_butt {
+  margin: 10px;
+  color: #fff;
+  background: var(--freezr-accent);
+  text-align: center;
+  min-width: 60px;
+  padding: 1rem 1.5rem;
+  margin-left: 10%;
+  margin-right: 10%;
+  border-radius: var(--freezr-radius-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.big_butt:hover {
+  background: var(--freezr-accent-hover);
+}
+
+/* Reusable spinner - use .freezr-spinner on a div for inline spinner */
+.freezr-spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(0, 0, 0, 0.15);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: freezr-spinner-rotate 0.7s linear infinite;
+  vertical-align: middle;
+}
+.freezr-spinner-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: inherit;
+  pointer-events: none;
+}
+.freezr-spinner-overlay .freezr-spinner {
+  width: 28px;
+  height: 28px;
+  border-width: 3px;
+}
+.freezr-box-loading {
+  position: relative;
+  pointer-events: none;
+  opacity: 0.85;
+}
+@keyframes freezr-spinner-rotate {
+  to { transform: rotate(360deg); }
+}

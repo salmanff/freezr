@@ -1,0 +1,49 @@
+<!-- Admin Create Cloud Token createCloudToken.html -->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">Create Cloud Token</span>
+    <a href="/account/home">Account Home</a>
+    <a href="/admin/home">Admin</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div class="freezr-card" style="max-width: 520px; margin: 0 auto;">
+      <h3 style="margin-bottom: 1rem;">Create a Cloud Setup Token</h3>
+      
+      <p style="color: var(--freezr-text-muted); margin-bottom: 1.5rem; line-height: 1.6;">
+        This token is used to set up a remote freezr server. It must be added to the server
+        as <code style="background: var(--freezr-bg); padding: 0.2rem 0.4rem; border-radius: 4px;">FREEZR_SETUP_TOKEN</code> before setup. 
+        Tokens are valid until the end of the expiry date (UTC).
+      </p>
+
+      <div id="errorBox" class="errorBox" style="margin-bottom: 1rem;"></div>
+
+      <div style="display: flex; gap: 1rem; align-items: flex-end; margin-bottom: 1.5rem;">
+        <div style="flex: 1;">
+          <label class="texttop">Valid for (days)</label>
+          <input type="number" class="input" id="tokenDays" min="1" max="30" value="1"/>
+        </div>
+        <button id="generateToken" class="freezrButt">Generate Token</button>
+      </div>
+
+      <div style="margin-bottom: 1.5rem;">
+        <label class="texttop">Generated Token</label>
+        <div style="display: flex; gap: 0.5rem;">
+          <input type="text" class="input" id="setupToken" readonly style="flex: 1; font-family: monospace;"/>
+          <button id="copyToken" class="freezrButt" style="background: var(--freezr-text-muted);">Copy</button>
+        </div>
+      </div>
+
+      <div id="tokenInstructions" style="display: none; background: var(--freezr-bg); padding: 1rem; border-radius: var(--freezr-radius-sm);">
+        <div style="margin-bottom: 0.5rem;">
+          <strong>Set on server:</strong><br/>
+          <code style="word-break: break-all;">FREEZR_SETUP_TOKEN=<span id="tokenValue"></span></code>
+        </div>
+        <div>
+          <strong>Expires:</strong> <span id="tokenExpiry"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,129 @@
+<!-- account_settings.html
+options:
+settings: {
+  page_title: 'Account Settings (freezr)',
+  css_files: ['/app/info.freezr.public/public/freezr_style.css', 'account_home.css'],
+  page_url: 'account_settings.html',
+  script_files: ['account_settings.js']
+-->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">Account Settings <span id="user_id" style="font-weight: 400; font-size: 0.85em; color: #64748b;"></span></span>
+    <a href="/account/home">Home</a>
+    <a href="/account/contacts">Contacts</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div id="errorBox" class="floatingErrorBox"></div>
+
+    <div class="freezr-card" id="account_params">
+      <h3>System Configuration</h3>
+      <p><b>File System:</b> <span id="fsParamsType" data-system-fs="{{systemFs}}">{{fsParamsType}}</span></p>
+      <p><b>Intelligence (LLMs):</b> <span id="lmParamsType">[Coming Soon]</span></p>
+      <p><b>Database:</b> <span id="dbParamsType" data-system-db="{{systemDb}}">{{dbParamsType}}</span></p>
+      <p><b>Serverless (Compute):</b> <span id="slParamsType">{{#slParamsType}}{{slParamsType}}{{/slParamsType}}{{^slParamsType}}None{{/slParamsType}}</span>
+        <a href="/account/serverless">{{#slParamsType}}Edit parameters{{/slParamsType}}{{^slParamsType}}Create Parameters{{/slParamsType}}</a>
+      </p>
+    </div>
+
+    <div class="freezr-card">
+      <h3>Resource Usage</h3>
+      <p>View the storage your apps are using <a href="/account/resourceusage">here</a>.</p>
+    </div>
+
+    <div class="freezr-card">
+      <h3>Logs</h3>
+      <p>View how you used this site <a href="/account/logviewer">here</a>.</p>
+    </div>
+
+    <div class="freezr-card" id="pictOuter">
+      <h3>Profile Picture</h3>
+      <p> <i>Profile picture are publicly accessible!</i></p><br>
+      
+      <div id="outerGrid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; align-items: start;">
+        <div>
+          <div style="display: flex; justify-content: center; margin-bottom: 1rem;">
+            <div class="drop-area" id="upload_area">
+              Drop photo here
+            </div>
+          </div>
+          <div class="file-chooser-wrapper">
+            <div class="freezrButt" id="choosePict">Choose a file</div>
+            <input id="pictUploader" type="file" accept="image/*" style="display:none" name="pictUploader"/>
+            <span class="file-chooser-name" id="chosen_pict_name"></span>
+          </div>
+          <div id="uploadNowOuter" style="display:none; margin-top: 1rem;">
+            <div id="uploadPictNow" class="freezrButt">Upload</div>
+          </div>
+        </div>
+        <div id="profilePictOuter" style="text-align: center;">
+          <img id="profilePictInner" style="max-width: 200px; border-radius: 8px;" src="/@{{owner}}/info.freezr.account/profilePict.jpg" alt="No Picture Uploaded.">
+          <div style="margin-top: 1rem;">
+            <div class="freezrButt" id="profilePictDelete" style="background: #dc2626;">Delete</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="freezr-card" id="prefsOuter">
+      <h3>Sharing / Messaging Preferences</h3>
+      <form name="savePrefs" id="savePrefs">
+        <div style="margin-bottom: 0.75rem;">
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+            <input type="checkbox" class="freezer_largeCheckBox" name="userBlockMsgsToNonContacts" id="userBlockMsgsToNonContacts">
+            <span>Block sending messages to non-contacts (on other servers)</span>
+          </label>
+        </div>
+        <div style="margin-bottom: 1rem;">
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+            <input type="checkbox" class="freezer_largeCheckBox" name="userBlockMsgsFromNonContacts" id="userBlockMsgsFromNonContacts">
+            <span>Block receiving messages from non-contacts</span>
+          </label>
+        </div>
+        <input type="submit" class="freezrButt" value="Save Changes" id="savePrefsButt"/>
+      </form>
+    </div>
+
+    <div class="freezr-card" id="changePasswordOuter">
+      <h3>Change Password</h3>
+      <form name="changePassword" id="changePassword">
+        <div style="max-width: 350px;">
+          <label class="texttop">Current Password:</label>
+          <input type="password" class="input" id="oldPassword" name="password"/>
+          <label class="texttop">New Password:</label>
+          <input type="password" class="input" id="newPassword" name="newPassword"/>
+          <label class="texttop">Confirm New Password:</label>
+          <input type="password" class="input" id="password2" name="password2"/>
+          <div class="button-row">
+            <input type="submit" class="freezrButt" value="Change Password" id="ChangeButt"/>
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <div class="freezr-card" style="border-left: 4px solid #dc2626;">
+      <h3 style="color: #dc2626;">Danger Zone</h3>
+      
+      <div style="margin-bottom: 2rem;">
+        <h4>Remove Account</h4>
+        <p>Click below to be fully removed from this server. The server will remove all your credentials and all your data. You will not be able to sign back in.</p>
+        <form name="removeMe" id="removeMe">
+          <div style="max-width: 350px;">
+            <label class="texttop">Current Password:</label>
+            <input type="password" class="input" id="oldPasswordConfirm" name="oldPasswordConfirm"/>
+            <div class="button-row">
+              <input type="submit" class="freezrButt" style="background: #dc2626;" value="Remove Me Now" id="RemoveButt"/>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      <div>
+        <h4>Advanced Settings</h4>
+        <p>You can change your account settings <a href="/account/reset">here</a> - but this is very dangerous, so please do this only if you really know what you are doing.</p>
+      </div>
+    </div>
+
+  </div>
+</div>

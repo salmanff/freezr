@@ -1,0 +1,153 @@
+<!--
+freezr Account contacts
+contacts: {
+  page_title: 'CEPS Contacts',
+  page_url: 'account_contacts.html',
+  css_files: ['/app/info.freezr.public/public/freezr_style.css', 'account_home.css', 'account_contacts.css'],
+  script_files: ['account_contacts.js']
+}
+-->
+
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">Contacts & Groups</span>
+    <a href="/account/home">Home</a>
+    <a href="/account/settings">Account Settings</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div id="warnings" class="errorBox"></div>
+
+    <div class="freezr-card">
+      <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+        <button class="freezrButt" id="button_addnew_contact">Add a contact</button>
+        <button class="freezrButt" id="button_addnew_group">Create a group</button>
+        <button class="freezrButt" id="button_addnew_privatefeed">Add Private Feed</button>
+        <button class="freezrButt" id="button_addfrom_url">Add from URL</button>
+      </div>
+    </div>
+
+    <!-- Group Edit Mode Header (shown when editing group) -->
+    <div id="group_edit_header" class="freezr-card" style="display: none;">
+      <div style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
+        <button class="freezrButt" id="button_deleteGroup" style="background: #dc2626; order: -1;">Delete Group</button>
+        <div style="flex: 1; min-width: 200px;">
+          <label class="texttop">Group Name</label>
+          <div id="edit_group_name" class="input" contentEditable="true" style="max-width: 300px;"></div>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+          <button class="freezrButt" id="button_saveGroupName">Save Name</button>
+          <button class="freezrButt" id="button_cancelGroupEdit" style="background: var(--freezr-text-muted);">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Overlay for contact/group/url forms -->
+    <div id="overlay" class="overlay" style="display: none;">
+      <div class="overlay-content">
+        <button class="overlay-close" id="overlay_close">&times;</button>
+        
+        <div id="new_contact_area" style="display: none;">
+          <h3 id="addContactTitle">Add a New Contact</h3>
+          <div style="max-width: 400px;">
+            <label class="texttop">Nickname</label>
+            <div id="new_nickname" class="input" contentEditable="true"></div>
+            <p class="smallText">The name you see on your list</p>
+            
+            <label class="texttop">User name</label>
+            <div id="new_username" class="input" contentEditable="true"></div>
+            <p class="smallText">Leave blank if same as nickname</p>
+            
+            <label class="texttop">Server url</label>
+            <div id="new_serverurl" class="input" contentEditable="true"></div>
+            <p class="smallText">Leave blank if contact is on this server</p>
+            
+            <div id="new__id" class="input" contentEditable="true" style="display:none"></div>
+            
+            <div class="button-row">
+              <button class="freezrButt" id="button_contactSave">Save Contact</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="new_group_area" style="display: none;">
+          <h3>Add a New Group</h3>
+          <div style="max-width: 400px;">
+            <label class="texttop">Name</label>
+            <div id="new_name_group" class="input" contentEditable="true"></div>
+            <div class="button-row">
+              <button class="freezrButt" id="button_groupSave">Save Group</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="new_url_area" style="display: none;">
+          <h3>Add Contact from URL</h3>
+          <p>Paste a url given to you by another person... or to give your contact to someone else, copy this: <span id="urlContact" style="font-weight: 600;"></span> (<span id="button_copyUrl" style="color: var(--freezr-accent); cursor: pointer;">click to copy url</span> so you can send it to a friend.)</p>
+          
+          <div style="max-width: 400px;">
+            <label class="texttop">Paste url</label>
+            <div id="new_nickname_url" class="input" contentEditable="true"></div>
+            <div class="button-row">
+              <button class="freezrButt" id="button_urlSave">Check Url</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="new_privatefeed_area" style="display: none;">
+          <h3 id="privateFeedTitle">Create a Private Feed</h3>
+          <p>A private feed allows anyone with a code to access all the links with that specific code. Others may also post to your feed if you allow them to.</p>
+          
+          <div style="max-width: 400px;">
+            <label class="texttop">Feed name</label>
+            <div id="new_name_privatefeeds" class="input" contentEditable="true"></div>
+            
+            <label class="texttop">Feed url</label>
+            <div id="new_url_privatefeeds" class="input" contentEditable="true"></div>
+            <p class="smallText">Optional - Only used if feed is on another server</p>
+            
+            <label class="texttop">Feed code</label>
+            <div id="new_code_privatefeeds" class="input" contentEditable="true"></div>
+            <button class="freezrButt" id="button_regenerateCodeForPrivateFeed" style="margin: 0.5rem 0;">Generate new code</button>
+            
+            <label class="texttop">Edit Rights</label>
+            <select id="new_group_privatefeeds" class="input" style="width: auto; min-width: 200px;"></select>
+            <p class="smallText">Optional - Used to allow your contacts to post to this feed</p>
+            
+            <div id="new__id_privatefeeds" style="display:none"></div>
+            
+            <div class="button-row" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+              <button class="freezrButt" id="button_privateUrlSave">Save Private Feed</button>
+              <button class="freezrButt" id="button_privateFeedDelete" style="background: #dc2626; display: none;">Delete Feed</button>
+            </div>
+            <p id="button_visitFeedUrl" style="color: var(--freezr-accent); cursor: pointer; margin-top: 1rem; display: none;">Click here to visit the feed.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align: center;">
+      <img id="loader" src="/app/info.freezr.public/public/static/ajaxloaderBig.gif" style="display: none;"/>
+    </div>
+
+    <div id="group_table" class="freezr-card" style="display: none;">
+      <h3>Your Groups</h3>
+      <div id="groupGridDetails"></div>
+    </div>
+
+    <div id="privateFeeds_table" class="freezr-card" style="display: none;">
+      <h3>Your Private Feeds</h3>
+      <div id="privateFeedsGridDetails"></div>
+    </div>
+
+    <div id="contacts_table" class="freezr-card">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <h3 id="titleForContacts" style="margin: 0;">Your Contacts</h3>
+        <button class="freezrButt" id="button_exitEditMode" style="display: none;">Exit Edit Mode</button>
+      </div>
+      <div id="contactGridDetails" style="margin-top: 1rem;"></div>
+    </div>
+
+  </div>
+</div>

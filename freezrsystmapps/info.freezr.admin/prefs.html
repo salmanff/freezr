@@ -1,0 +1,92 @@
+<!-- Admin System Preferences prefs.html -->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">System Preferences</span>
+    <a href="/account/home">Home</a>
+    <a href="/admin/home">Admin</a>
+    <a href="/admin/list_users">User List</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div class="freezer_dialogueTitle setup" style="text-align: center; margin-bottom: 1rem; display: none;">
+      Congratulations - you have set up freezr
+    </div>
+
+    <form name="changePrefs" id="changePrefs">
+      <div id="errorBox" class="errorBox" style="margin-bottom: 1rem;"></div>
+
+      <!-- Logging -->
+      <div class="freezr-card">
+        <h3 style="margin-bottom: 1rem;">Logging</h3>
+        <label style="display: flex; align-items: flex-start; gap: 0.75rem; cursor: pointer;">
+          <input type="checkbox" name="logVisits" id="logVisitsId" value="logVisits" {{#log_visits}}checked{{/log_visits}} style="margin-top: 0.25rem;"/>
+          <span>Keep log of user visits to your server. (<a href="/admin/visits">View logs</a>)</span>
+        </label>
+      </div>
+
+      <!-- Public Landing Page -->
+      <div class="freezr-card">
+        <h3 style="margin-bottom: 1rem;">Public Landing Page</h3>
+        <label style="display: flex; align-items: flex-start; gap: 0.75rem; cursor: pointer; margin-bottom: 1rem;">
+          <input type="checkbox" name="redirectPublic" id="redirectPublicId" value="redirectPublic" {{#redirect_public}}checked{{/redirect_public}} style="margin-top: 0.25rem;"/>
+          <span>Redirect non-logged-in visitors to a public landing page</span>
+        </label>
+
+        <div style="margin-left: 1.75rem;">
+          <label class="texttop">Default Public URL</label>
+          <input class="input" id="defaultLandingUrl" name="defaultLandingUrl" value="{{#public_landing_page}}{{public_landing_page}}{{/public_landing_page}}" style="max-width: 400px;"/>
+        </div>
+
+        <div style="display:none">
+          <span id="oldChoice">{{public_landing_app}}</span>
+          <select id="defaultPublicAppId" style="display:none"><option value=" ">Default Page</option></select>
+        </div>
+      </div>
+
+      <!-- Other Users -->
+      <div class="freezr-card">
+        <h3 style="margin-bottom: 1rem;">User Registration</h3>
+        <label style="display: flex; align-items: flex-start; gap: 0.75rem; cursor: pointer; margin-bottom: 1rem;">
+          <input type="checkbox" name="allowSelfReg" id="allowSelfRegId" value="allowSelfReg" {{#allowSelfReg}}checked{{/allowSelfReg}} style="margin-top: 0.25rem;"/>
+          <span>Allow anyone to create an account on this server (self-registration)</span>
+        </label>
+
+        <div id="selfRegOptionsArea" style="display:none; margin-left: 1.75rem;">
+          <label style="display: flex; align-items: flex-start; gap: 0.75rem; cursor: pointer; margin-bottom: 1rem;">
+            <input type="checkbox" name="allowAccessToSysFsDb" id="allowAccessToSysFsDbId" value="allowAccessToSysFsDb" {{#allowAccessToSysFsDb}}checked{{/allowAccessToSysFsDb}} style="margin-top: 0.25rem;"/>
+            <span>Allow other users to use your file system and database</span>
+          </label>
+
+          <div>
+            <label class="texttop">Default Storage Limit (MB) per user</label>
+            <input class="input" id="selfRegDefaultMBStorageLimit" name="selfRegDefaultMBStorageLimit" {{#selfRegDefaultMBStorageLimit}}value="{{selfRegDefaultMBStorageLimit}}"{{/selfRegDefaultMBStorageLimit}} style="max-width: 200px;"/>
+          </div>
+        </div>
+
+        <div id="mongoArea" style="display: none;">
+          <div id="mongotextArea"></div>
+          <input type="checkbox" name="useUserIdsAsDbName" id="useUserIdsAsDbNameId" value="useUserIdsAsDbName" {{#useUserIdsAsDbName}}checked{{/useUserIdsAsDbName}} style="display:none;"/>
+          <input type="checkbox" name="useUnifiedCollection" id="useUnifiedCollectionId" value="useUnifiedCollection" {{#useUnifiedCollection}}checked{{/useUnifiedCollection}} style="display:none;"/>
+        </div>
+      </div>
+
+      <!-- Admin Confirmation -->
+      <div class="freezr-card changeNormal">
+        <h3 style="margin-bottom: 1rem;">Confirm Changes</h3>
+        <div style="margin-bottom: 1rem;">
+          <label class="texttop">Admin User Name</label>
+          <input type="text" class="input" id="user_id_dummy" name="user_id_dummy" style="max-width: 300px;"/>
+        </div>
+        <div style="margin-bottom: 1.5rem;">
+          <label class="texttop">Admin Password</label>
+          <input type="password" class="input" id="password" name="password" style="max-width: 300px;"/>
+        </div>
+
+        <div style="text-align: center;">
+          <input id="submitButt" class="freezrButt" type="submit" value="Update Preferences" style="width: 50%; cursor: pointer;"/>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>

@@ -1,0 +1,105 @@
+<!--
+  publicFeed.html
+  Public feed page showing all public records
+  Uses Mustache templating for dynamic values
+  CSS classes defined in freezr_style.css and publicFeed.css
+  JS in publicFeed.js handles card expansion
+-->
+
+<div class="freezr_public_outer">
+  
+  <!-- Error/Message Box -->
+  {{#error}}
+  <div class="freezr_public_message freezr_public_message_error">
+    {{error}}
+  </div>
+  {{/error}}
+  
+  {{#message}}
+  <div class="freezr_public_message freezr_public_message_info">
+    {{message}}
+  </div>
+  {{/message}}
+  
+  <!-- Header -->
+  <div class="freezr_public_feed_header">
+    <div class="freezr_public_feed_title">
+      <span class="freezr_public_login_link"><a href="/account/login">Login</a></span>
+      <h1>Public Posts</h1>
+      {{#filter_description}}
+      <div class="freezr_public_filter_description">{{filter_description}}</div>
+      {{/filter_description}}
+    </div>
+    
+    <!-- Search Box -->
+    <div class="freezr_public_search_container">
+      <div class="freezr_public_search_input_wrapper">
+        <input type="text" id="freezr_public_search_input" class="freezr_public_search_input" 
+               placeholder="Search... (use owner:name or app:name to filter)" 
+               value="{{current_search}}">
+        <button id="freezr_public_search_clear" class="freezr_public_search_clear" type="button" title="Clear search">×</button>
+      </div>
+      <button id="freezr_public_search_button" class="freezr_public_search_button">Search</button>
+    </div>
+  </div>
+  
+  <!-- Results -->
+  <div id="freezr_public_results" class="freezr_public_results">
+    {{#results}}
+    <div class="freezr_public_card">
+      <div class="freezr_public_header_compact">
+        <img class="freezr_public_avatar_small" 
+             src="/publicfiles/@{{_data_owner}}/info.freezr.account/profilePict.jpg" 
+             data-hide-on-error="true"
+             alt="">
+        <span class="freezr_public_meta_inline">
+          <a href="/public?owner={{_data_owner}}" class="freezr_public_owner_link">{{_data_owner}}</a>
+          <span class="freezr_public_separator">·</span>
+          <a href="/public?app={{_app_name}}" class="freezr_public_app_link">{{_app_name}}</a>
+          <span class="freezr_public_separator">·</span>
+          <span class="freezr_public_date_inline">{{__date_published}}</span>
+        </span>
+      </div>
+      
+      <div class="freezr_card_content_wrapper">
+        {{{_card}}}
+        
+        {{^_card}}
+        <div class="freezr_public_generic_content">
+          {{#title}}<div class="freezr_public_card_title">{{title}}</div>{{/title}}
+          {{#description}}<div class="freezr_public_card_description">{{{description}}}</div>{{/description}}
+          {{#text}}<div class="freezr_public_card_text">{{{text}}}</div>{{/text}}
+          {{#content}}<div class="freezr_public_card_text">{{{content}}}</div>{{/content}}
+          {{#body}}<div class="freezr_public_card_text">{{{body}}}</div>{{/body}}
+          {{#message}}<div class="freezr_public_card_text">{{{message}}}</div>{{/message}}
+          {{#_json_preview}}
+          <div class="freezr_public_json_preview">
+            <pre>{{_json_preview}}</pre>
+          </div>
+          {{/_json_preview}}
+        </div>
+        {{/_card}}
+      </div>
+      <!-- Expander button will be added by JS if needed -->
+    </div>
+    {{/results}}
+    
+    {{^results}}
+    <div class="freezr_public_no_results">
+      No public posts found.
+    </div>
+    {{/results}}
+  </div>
+  
+  <!-- Pagination -->
+  {{#has_more}}
+  <div class="freezr_public_pagination">
+    <a href="/public?{{next_url}}" class="freezr_public_more_button">Load More</a>
+  </div>
+  {{/has_more}}
+  
+  <!-- Footer -->
+  <div class="freezr_public_feed_footer">
+    <div class="freezr_public_info">Showing {{result_count}} of {{total_count}} public posts</div>
+  </div>
+</div>

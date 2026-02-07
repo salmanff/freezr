@@ -1,0 +1,107 @@
+<!--
+First Setup - Initial Admin Registration
+-->
+<div class="freezr-page" id="mainouter">
+  <nav class="freezr-nav">
+    <span class="freezr-nav-title">Initial Setup</span>
+  </nav>
+
+  <div class="freezr-content" id="maininner">
+    <div id="top_register_finish_01" style="text-align: center; margin-bottom: 1.5rem;">
+      <div class="freezr_hiders firstSetUp" style="font-size: 1.25rem; font-weight: 600;">
+        Congratulations! You have set up your freezr server.<br/>
+        <span style="font-weight: normal; font-size: 1rem; color: var(--freezr-text-muted);">Please choose your file system and database.</span>
+      </div>
+      <div class="freezr_hiders newParams" style="font-size: 1.25rem; font-weight: 600;">
+        You are set up on freezr as <span id="loggedInUserId" style="color: var(--freezr-accent);"></span>.<br/>
+        <span style="font-weight: normal; font-size: 1rem; color: var(--freezr-text-muted);">Please choose your file system and database.</span>
+      </div>
+      <div class="freezr_hiders unRegisteredUser" style="font-size: 1.25rem; font-weight: 600;">
+        Welcome to freezr.<br/>
+        <span style="font-weight: normal; font-size: 1rem; color: var(--freezr-text-muted);">Register your user name, password as well as your file system and database.</span>
+      </div>
+      <div class="freezr_hiders fh_errors" style="color: #dc2626; font-weight: 600;">
+        You have some serious issues on your freezr. Please review.
+      </div>
+      <div class="freezr_hiders fh_success fh_partsuccess" style="margin-top: 1rem;">
+        <div id="click_launch_01" class="freezrButt" style="display: inline-block; font-size: 1.1rem; padding: 1rem 2rem;">Launch freezr</div>
+      </div>
+      <div class="freezr_hiders fh_partsuccess fh_errors" id="close_instructions_01" style="font-size: 14px; color: var(--freezr-text-muted); margin-top: 0.5rem;">
+        To edit your settings press close on the top right.
+      </div>
+    </div>
+
+    <!-- User Information Card -->
+    <div class="freezr-card" style="max-width: 520px; margin: 0 auto 1.5rem;">
+      <h3 style="color: var(--freezr-accent); margin-bottom: 1rem;">User Information</h3>
+      <p style="color: var(--freezr-text-muted); margin-bottom: 1rem;">Please register yourself as the first admin user.</p>
+
+      <div style="margin-bottom: 1rem;">
+        <label class="texttop">User Name</label>
+        <input type="text" class="input" id="userId" name="userId" style="width: 100%;"/>
+      </div>
+      <div style="margin-bottom: 1rem;">
+        <label class="texttop">Password</label>
+        <input type="password" class="input" id="password" name="password" style="width: 100%;"/>
+      </div>
+      <div id="second-password" style="margin-bottom: 1rem;">
+        <label class="texttop">Confirm Password</label>
+        <input type="password" class="input" id="password2" name="password2" style="width: 100%;"/>
+      </div>
+      <div style="margin-bottom: 1rem;">
+        <label class="texttop">Setup Token</label>
+        <input type="text" class="input" id="setupToken" name="setupToken" style="width: 100%;"/>
+        <div style="font-size: 12px; color: var(--freezr-text-muted); margin-top: 0.25rem;">
+          Required unless running in development mode.
+        </div>
+      </div>
+
+      <div id="second-password2" style="font-size: 13px; color: var(--freezr-accent); margin-top: 1rem;">
+        Remember there is no way to recover a forgotten password!<br/>
+        (There are no outside servers that store your data.)
+      </div>
+    </div>
+
+    <!-- File System Card -->
+    <div class="freezr-card" id="externalFs" style="max-width: 520px; margin: 0 auto 1.5rem;">
+      <h3 style="color: var(--freezr-accent); margin-bottom: 1rem;">Your File System</h3>
+
+      <div style="margin-bottom: 1rem;">
+        <select id="selector_FS" class="input" style="width: 100%;"></select>
+      </div>
+
+      <div id="msg_FS" style="color: var(--freezr-text-muted); margin-bottom: 1rem;"></div>
+      <div id="warning_FS" style="color: var(--freezr-accent); font-weight: 500;"></div>
+      <div id="table_elements_FS" style="margin-top: 1rem;"></div>
+    </div>
+
+    <!-- Database Card -->
+    <div class="freezr-card" id="externalDb" style="max-width: 520px; margin: 0 auto 1.5rem;">
+      <h3 style="color: var(--freezr-accent); margin-bottom: 1rem;">Your Database</h3>
+
+      <div style="margin-bottom: 1rem;">
+        <select id="selector_DB" class="input" style="width: 100%;"></select>
+      </div>
+
+      <div id="msg_DB" style="color: var(--freezr-text-muted); margin-bottom: 1rem;"></div>
+      <div id="warning_DB" style="color: var(--freezr-accent); font-weight: 500;"></div>
+      <div id="table_elements_DB" style="margin-top: 1rem;"></div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div style="max-width: 520px; margin: 0 auto;">
+      <div id="errorBox" class="errorBox freezr_hiders" style="margin-bottom: 1rem;"></div>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; margin-bottom: 1rem;">
+        <span id="click_checkResource_FS" class="freezrButt" style="background: var(--freezr-text-muted);">Check File System</span>
+        <span id="click_checkResource_DB" class="freezrButt" style="background: var(--freezr-text-muted);">Check Database</span>
+      </div>
+
+      <div style="color: var(--freezr-text-muted); text-align: center; margin-bottom: 1rem;">Or just...</div>
+
+      <div id="click_launch" class="freezrButt" style="width: 100%; font-size: 1.1rem; padding: 1rem;">
+        Launch freezr
+      </div>
+    </div>
+  </div>
+</div>

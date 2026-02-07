@@ -1,0 +1,50 @@
+<!--
+freezr App Settings
+app: {
+  page_title: 'App Settings (freezr)',
+  css_files: ['/app/info.freezr.public/public/freezr_style.css', 'account_home.css'],
+  page_url: 'account_app_settings.html',
+  script_files: ['account_app_settings.js']
+}
+-->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">App Settings - <span id="app_name"></span></span>
+    <a href="/account/home">Home</a>
+    <a href="/account/settings">Settings</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div id="errorBox" class="errorBox"></div>
+    <div id="message" style="color: #dc2626;"></div>
+
+    <!-- Section 1: App Details -->
+    <div class="freezr-card" id="appDetailsCard">
+      <div id="appHeader">
+        <div style="text-align: center; padding: 2rem;">
+          <img src="/app/info.freezr.public/public/static/ajaxloaderBig.gif" alt="Loading..."/>
+        </div>
+      </div>
+      <div id="warnings" class="errorBox" style="margin-top: 1rem;"></div>
+    </div>
+
+    <!-- Section 2: Permissions -->
+    <div class="freezr-card" id="permsCard">
+      <h3 style="margin-bottom: 1rem;">Permissions</h3>
+      <div id="perms">
+        <div style="text-align: center; padding: 1rem;">
+          <img src="/app/info.freezr.public/public/static/ajaxloaderBig.gif" alt="Loading..." style="width: 32px; height: 32px;"/>
+        </div>
+      </div>
+    </div>
+
+    <!-- Section 3: App Credentials, Updates and Removals -->
+    <div class="freezr-card" id="actionsCard">
+      <h3 style="margin-bottom: 1rem;">Credentials, Updates & Removal</h3>
+      <div id="freezrAppSettingsMessages" style="margin-top: 1rem; font-size: 13px;"></div>
+      <div id="standAloneApps"></div>
+    </div>
+
+  </div>
+</div>

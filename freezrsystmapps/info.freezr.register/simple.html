@@ -1,0 +1,79 @@
+<!--
+Self Registration - Simple
+-->
+<div class="freezr-page" id="mainouter">
+  <nav class="freezr-nav">
+    <span class="freezr-nav-title">Registration</span>
+    <a href="/register/self">Detailed Registration</a>
+    <a href="/account/login">Login</a>
+    <a href="/public">Public Feed</a>
+    <a href="/">Public Home</a>
+  </nav>
+
+  <div class="freezr-content" id="maininner">
+    <div class="freezr-card" style="max-width: 520px; margin: 0 auto;">
+      <h2 style="text-align: center; margin-bottom: 1rem;">Freezr Simple Registration</h2>
+      
+      <p id="top_register_finish_01" style="color: var(--freezr-text-muted); margin-bottom: 1rem; line-height: 1.6;">
+        freezr encourages you to own and control your own data. You can learn more <a href="/">here</a>. 
+        You can install your own freezr server, or use your own data storage. 
+        If you want full control, register <a href="/register/self">here</a>.
+        Meanwhile, this server can host you with limited capacity <span id="storageCapacity"></span>.
+      </p>
+
+      <div id="exp_warn_1" class="errorBox" style="padding: 1rem; margin-bottom: 1rem;">
+        freezr is an <b>experimental prototype service.</b>
+      </div>
+
+      <div id="errorBox" class="errorBox freezr_hiders" style="margin-bottom: 1rem;"></div>
+
+      <h3 style="margin-bottom: 1rem;">Choose Your Account Info</h3>
+
+      <div id="main_form_sections" class="unRegisteredUser">
+        <div style="margin-bottom: 1rem;">
+          <label class="texttop">User ID</label>
+          <input class="input" id="userId" type="text" style="width: 100%;"/>
+        </div>
+        <div style="margin-bottom: 1rem;">
+          <label class="texttop">Password</label>
+          <input class="input" id="password" type="password" style="width: 100%;"/>
+        </div>
+        <div style="margin-bottom: 1rem;">
+          <label class="texttop">Confirm Password</label>
+          <input class="input" id="password2" type="password" style="width: 100%;"/>
+        </div>
+        <div style="margin-bottom: 1.5rem;">
+          <label class="texttop">Email</label>
+          <input class="input" id="email" type="text" style="width: 100%;"/>
+          <div style="font-size: 12px; color: var(--freezr-text-muted); margin-top: 0.25rem;">
+            Email will be used for password recovery in the future.
+          </div>
+        </div>
+      </div>
+
+      <div style="text-align: center;">
+        <div id="click_launch" class="freezrButt" style="width: 50%; font-size: 1.1rem; padding: 1rem;">
+          Launch freezr
+        </div>
+      </div>
+
+      <div id="appInatllMessage" style="text-align: center; margin-top: 1rem; font-weight: 600;"></div>
+
+      <div id="launch_spinner" style="display: none; text-align: center; margin-top: 2rem;">
+        <img src="/app/info.freezr.public/public/static/ajaxloaderBig.gif" alt="Loading..."/>
+        <div style="margin-top: 1rem; color: var(--freezr-text-muted); font-size: 14px;">
+          Depending on the back end, it might take a minute or two to set up your account.
+          Please be patient. 😎
+        </div>
+      </div>
+
+      <div id="exp_warn_2" class="errorBox" style="padding: 1rem; margin-top: 1.5rem;">
+        freezr is an <b>Experimental Prototype.</b>
+      </div>
+    </div>
+
+    <div class="freezr_hiders newParams" style="text-align: center; margin-top: 2rem;">
+      Want to get out? <a href="/account/logout">Click here to log out.</a>
+    </div>
+  </div>
+</div>

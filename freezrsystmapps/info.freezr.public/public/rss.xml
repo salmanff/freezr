@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+
+	<channel>
+		<title>{{page_title}}</title>
+		<link>{{server_name}}</link>
+		<description>freezr server RSS Feed</description>
+
+		{{#results}}
+		<item>
+			{{#title}}<title>{{title}}</title>{{/title}}
+			{{#pubDate}}<pubDate>{{pubDate}}</pubDate>{{/pubDate}}
+			{{#link}}<link>{{link}}</link>{{/link}}
+			{{#description}}<description>{{description}}</description>{{/description}}
+
+			{{#imgurl}}
+			<image>
+			  <url>{{imgurl}}</url>
+			  <title>{{imgtitle}}</title>
+			  <link>{{imgurl}}</link>
+			</image>
+			{{/imgurl}}
+
+		</item>
+	    {{/results}}
+	    {{^results}}{{/results}}
+
+	</channel>
+</rss>
+

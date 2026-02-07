@@ -1,0 +1,54 @@
+<!--
+freezr Account Reauthorise
+reauthorise: {
+  page_title: 'Account Reauthorise (freezr)',
+  css_files: ['/app/info.freezr.public/public/freezr_style.css', 'account_home.css'],
+  page_url: 'account_reauthorise.html',
+  script_files: ['account_reauthorise.js'],
+  initial_query_func: 'getReauthorizeData'
+}
+-->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">Account Recovery</span>
+    <a href="/public">Public Page</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div id="errorBox" class="errorBox"></div>
+
+    <div class="freezr-card" style="border-left: 4px solid #f59e0b;">
+      <h3>Re-authentication & Recovery</h3>
+      <p>Use this page to re-authenticate your file system or recover account access.</p>
+
+      <div id="main" style="max-width: 450px;">
+        <label class="texttop">Owner (user id):</label>
+        <div class="input" id="userId" style="background: var(--freezr-bg);">{{owner}}</div>
+        
+        <label class="texttop">File System:</label>
+        <input type="text" class="input" id="fsParamsType" name="fsParamsType" value="{{fsParamsType}}"/>
+        
+        <label class="texttop">Authenticator URL:</label>
+        <input type="text" class="input" id="fs_auth_Server" name="fs_auth_Server" value="https://freezr.info/public/oauth/oauth_start_oauth"/>
+
+        <div class="button-row">
+          <div id="click_goAuthFS" class="freezrButt">Re-Authorise</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="freezr-card" id="passEnterDiv">
+      <h3>Record New Parameters</h3>
+      <div style="max-width: 450px;">
+        <label class="texttop">Your freezr password:</label>
+        <input type="password" class="input" id="password" name="password"/>
+        
+        <div class="button-row">
+          <div id="click_recordAuthParams" class="freezrButt">Record new parameters</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>

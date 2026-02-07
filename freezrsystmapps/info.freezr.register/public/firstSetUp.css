@@ -1,0 +1,142 @@
+/*  firstSetUp.css - Registration and setup pages */
+
+/* Hidden elements that get shown by JS */
+.freezr_hiders {
+  display: none;
+}
+
+/* Legacy class support for JS toggling */
+.bigText {
+  font-size: 1.25rem;
+  margin-bottom: 1rem;
+  font-weight: 600;
+  width: 100%;
+  text-align: center;
+}
+
+.big_butt {
+  display: inline-block;
+  margin: 1rem auto;
+  padding: 1rem 2rem;
+  background: var(--freezr-accent);
+  color: white;
+  text-align: center;
+  border-radius: var(--freezr-radius-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.big_butt:hover {
+  background: var(--freezr-accent-hover);
+}
+
+.norm_text {
+  font-size: 14px;
+}
+
+.spacer {
+  height: 10px;
+  min-height: 10px;
+}
+
+.green {
+  color: var(--freezr-accent);
+}
+
+.bold {
+  font-weight: 600;
+}
+
+.red {
+  color: #dc2626;
+}
+
+.leftspace {
+  margin-left: 1rem;
+}
+
+.small_butt {
+  padding: 0.5rem 1rem;
+  min-width: 100px;
+  text-align: center;
+  margin: 0.5rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--freezr-border);
+  border-radius: var(--freezr-radius-sm);
+  background: var(--freezr-card-bg);
+  transition: background 0.2s;
+}
+
+.small_butt:hover {
+  background: var(--freezr-bg);
+}
+
+.butt_strng {
+  font-weight: 600;
+  color: white;
+  background: var(--freezr-accent);
+}
+
+.butt_weak {
+  font-weight: normal;
+  background: var(--freezr-bg);
+  color: var(--freezr-text-muted);
+}
+
+.no_butt {
+  text-decoration: underline;
+  color: var(--freezr-text-muted);
+  cursor: pointer;
+}
+
+.small_text {
+  font-size: 12px;
+  color: var(--freezr-text-muted);
+}
+
+.small_note {
+  font-size: 12px;
+  color: var(--freezr-text-muted);
+}
+
+/* Form grid for simple registration */
+.formgridMain {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.75rem 1rem;
+  align-items: center;
+}
+
+.formLabel {
+  text-align: right;
+  color: var(--freezr-text-muted);
+  font-size: 14px;
+}
+
+.formInput {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--freezr-border);
+  border-radius: var(--freezr-radius-sm);
+  font-size: 14px;
+  width: 100%;
+}
+
+.formInput:focus {
+  outline: none;
+  border-color: var(--freezr-accent);
+}
+
+.formLabelExplain {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--freezr-text-muted);
+  text-align: center;
+  margin-top: -0.5rem;
+}
+
+/* Authentication button */
+#click_goAuthFS {
+  min-width: 200px;
+}

@@ -1,0 +1,84 @@
+<!--
+freezr App View Data
+app: {
+  page_title: 'View App Data (freezr)',
+  css_files: ['/app/info.freezr.public/public/freezr_style.css', 'account_app_viewdata.css', 'modules/drawJson.css'],
+  page_url: 'account_app_viewdata.html',
+  script_files: ['account_app_viewdata.js']
+}
+-->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">View Edit and Backup Data - <span id="app_name"></span></span>
+    <a href="/account/home">Home</a>
+    <a id="appSettings" href="/account/app/settings">App Settings</a>
+    <a id="restoreLink" href="/account/app/restoredata">Restore Data</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div id="warnings" class="errorBox"></div>
+
+    <!-- Table Selection Card -->
+    <div class="freezr-card" id="headerChooser">
+      <div class="card-header">
+        <h3>Select Data Table</h3>
+      </div>
+      
+      <div class="table-selector">
+        <div class="selector-row">
+          <label class="selector-label">Table:</label>
+          <select id="collection_names" class="input table-select"></select>
+        </div>
+        
+        <div class="query-row">
+          <label class="selector-label">Query:</label>
+          <input type="text" id="queryFilter" class="input query-input" placeholder='e.g. {"field": "value"}' />
+          <span id="queryError" class="query-error"></span>
+        </div>
+        
+        <div class="action-buttons">
+          <button class="freezrButt" id="getCollectionData">Fetch Data</button>
+          <button class="freezrButt secondary" id="backUpData" style="display: none;">Back Up to File</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading Indicator -->
+    <div id="loading" class="loading-container" style="display: none;">
+      <img src="/app/info.freezr.public/public/static/ajaxloaderBig.gif" alt="Loading..."/>
+      <span>Loading data...</span>
+    </div>
+
+    <!-- Pagination Controls -->
+    <div id="paginationControls" class="pagination-card" style="display: none;">
+      <div class="pagination-info">
+        <span id="pageInfo">Page 1 of 1</span>
+        <span id="recordCount" class="record-count"></span>
+      </div>
+      <div class="pagination-nav">
+        <button id="prevPage" class="page-btn" disabled>&larr; Previous</button>
+        <div id="pageNumbers" class="page-numbers"></div>
+        <button id="nextPage" class="page-btn">Next &rarr;</button>
+        <button id="fetchMore" class="page-btn fetch-more" style="display: none;">Fetch More</button>
+        <button id="toggleCardView" class="page-btn card-toggle" style="display: none;">Show Card</button>
+      </div>
+    </div>
+
+    <!-- Data Display Area -->
+    <div id="all_data" class="data-container"></div>
+    
+    <!-- Bottom Pagination (when data is loaded) -->
+    <div id="bottomPagination" class="pagination-card bottom" style="display: none;">
+      <div class="pagination-nav">
+        <button id="prevPageBottom" class="page-btn" disabled>&larr; Previous</button>
+        <span id="pageInfoBottom">Page 1 of 1</span>
+        <button id="nextPageBottom" class="page-btn">Next &rarr;</button>
+      </div>
+    </div>
+
+    <!-- Backup Status Area -->
+    <div id="backup_status" class="backup-status" style="display: none;"></div>
+
+  </div>
+</div>

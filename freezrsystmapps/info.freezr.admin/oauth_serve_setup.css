@@ -1,0 +1,76 @@
+/* admin oauth_serve_setup */
+.bigText {
+    font-size: 20px;
+    margin-bottom: 5px;
+	font-weight: bold;
+	width:100%;
+	text-align: center;
+}
+.big_butt {
+    opacity: 0.9;
+    margin: 10px;
+    color: blue;
+    text-align: center;
+    min-width: 60px;
+    padding: 20px;
+    margin-left:10%;
+    margin-right:10%;
+    background-color: #E2E2E2;
+    border-radius: 5px;
+    font-weight: bold;
+    cursor: pointer;
+}
+.norm_text {
+    font-size: 14px; important!
+}
+.errorBox {
+    color: red;
+}
+.red{
+    color:red;
+}
+.green {
+    color:green;
+}
+.editbutt {
+    cursor: pointer;
+    color:blue;
+}
+
+.oauth-item {
+    background: var(--freezr-bg);
+    border-radius: var(--freezr-radius-sm);
+    padding: 1rem;
+    margin-bottom: 1rem;
+  }
+  .oauth-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+  }
+  .oauth-source {
+    font-weight: 600;
+    color: var(--freezr-accent);
+  }
+  .oauth-name {
+    flex: 1;
+  }
+  .oauth-actions {
+    display: flex;
+    gap: 0.75rem;
+  }
+  .action-link {
+    color: var(--freezr-accent);
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .action-link:hover {
+    text-decoration: underline;
+  }
+  .oauth-details {
+    font-size: 13px;
+    color: var(--freezr-text-muted);
+    display: grid;
+    gap: 0.25rem;
+  }

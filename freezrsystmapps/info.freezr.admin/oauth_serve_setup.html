@@ -1,0 +1,85 @@
+<!-- Admin OAuth Server Setup  oauth_serve_setup.html -->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">OAuth Server Setup</span>
+    <a href="/account/home">Account Home</a>
+    <a href="/admin/home">Admin Home</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div id="errorBox" class="errorBox" style="margin-bottom: 1rem;"></div>
+    <center id="loader" style="display:none"><img src="/app/info.freezr.public/public/static/ajaxloaderBig.gif" alt="Loading..."/></center>
+
+    <!-- Existing OAuth List -->
+    <div class="freezr-card" id="auth_list">
+      <h3 style="margin-bottom: 1rem;">Existing OAuth Authorizers</h3>
+      <p style="color: var(--freezr-text-muted); margin-bottom: 1rem;">
+        There are {{ data.length }} OAuth configurations
+      </p>
+
+      <div id="oauths">
+        {{#data}}
+        <div class="oauth-item">
+          <div class="oauth-header">
+            <span class="oauth-source" id="source_{{_id}}">{{source}}</span>
+            <span class="oauth-name" id="name_{{_id}}">{{name}}</span>
+            <span class="oauth-actions">
+              <span class="action-link" id="click_edit_{{_id}}">edit</span>
+              <span class="action-link" id="click_delete_{{_id}}">delete</span>
+              <span class="action-link" id="click_{{#enabled}}dis{{/enabled}}{{^enabled}}en{{/enabled}}able_{{_id}}">
+                {{#enabled}}disable{{/enabled}}{{^enabled}}enable{{/enabled}}
+              </span>
+            </span>
+          </div>
+          <div class="oauth-details">
+            <div><strong>Redirect URI:</strong> <span id="redirecturi_{{_id}}">{{redirecturi}}</span></div>
+            <div><strong>Type:</strong> <span id="type_{{_id}}">{{type}}</span></div>
+            <div><strong>Key:</strong> <span id="key_{{_id}}">{{key}}</span></div>
+            <div><strong>Secret:</strong> <span id="secret_{{_id}}">{{secret}}</span></div>
+          </div>
+        </div>
+        {{/data}}
+        {{^data}}
+        <p style="color: var(--freezr-text-muted);">No OAuth configurations found.</p>
+        {{/data}}
+      </div>
+    </div>
+
+    <!-- Create New OAuth -->
+    <div class="freezr-card" style="max-width: 600px;">
+      <h3 style="margin-bottom: 1.5rem;">Create New OAuth Configuration</h3>
+
+      <div style="margin-bottom: 1rem;">
+        <label class="texttop">Type</label>
+        <input type="text" class="input" id="oa_type" name="oa_type" value="dropbox" style="max-width: 300px;"/>
+        <div style="font-size: 12px; color: var(--freezr-text-muted); margin-top: 0.25rem;">dropbox or googleDrive</div>
+      </div>
+
+      <div style="margin-bottom: 1rem;">
+        <label class="texttop">App Name</label>
+        <input type="text" class="input" id="oa_name" name="oa_name"/>
+      </div>
+
+      <div style="margin-bottom: 1rem;">
+        <label class="texttop">Redirect URI</label>
+        <input type="text" class="input" id="oa_redirecturi" name="oa_redirecturi"/>
+      </div>
+
+      <div style="margin-bottom: 1rem;">
+        <label class="texttop">Client ID (App Key)</label>
+        <input type="text" class="input" id="oa_key" name="oa_key"/>
+      </div>
+
+      <div style="margin-bottom: 1.5rem;">
+        <label class="texttop">App Secret (optional)</label>
+        <input type="text" class="input" id="oa_secret" name="oa_secret"/>
+      </div>
+
+      <div style="text-align: center;">
+        <div id="makeOauth" class="freezrButt" style="width: 50%;">Create OAuth Permission</div>
+      </div>
+    </div>
+  </div>
+</div>
+

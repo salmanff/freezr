@@ -1,0 +1,41 @@
+<!--
+freezr App Auto-Install
+app: {
+  page_title: 'Auto Install (freezr)',
+  css_files: ['/app/info.freezr.public/public/freezr_style.css', 'account_home.css'],
+  page_url: 'account_app_autoinstall.html',
+  script_files: ['account_app_autoinstall.js']
+}
+-->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">Auto Install</span>
+    <a href="/account/home">Home</a>
+    <a href="/account/settings">Settings</a>
+    <a id="freezer_admin_butt" href="/admin/home">Admin</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div id="errorBox" class="errorBox"></div>
+
+    <div class="freezr-card" style="text-align: center;">
+      <h2 id="message"></h2>
+
+      <p style="font-size: 1.1rem; max-width: 600px; margin: 1rem auto;">
+        You will need to install the app on your freezr account to be able to sync data with it. 
+        Press the button below to install <strong id="app_name2"></strong> from: 
+        <span id="app_url" style="color: var(--freezr-accent);"></span>
+      </p>
+
+      <div style="margin: 2rem 0;">
+        <div id="install" class="freezrButt" style="font-size: 1.1rem; padding: 1rem 2rem;">
+          Install <span id="app_name"></span>
+        </div>
+      </div>
+
+      <img id="spinner" style="display:none" src="/app/info.freezr.public/public/static/ajaxloaderBig.gif" alt="Loading..."/>
+    </div>
+
+  </div>
+</div>

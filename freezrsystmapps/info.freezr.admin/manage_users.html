@@ -1,0 +1,176 @@
+<!-- Admin Manage Users manage_users.html -->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">Manage Users</span>
+    <a href="/account/home">Account Home</a>
+    <a href="/admin/home">Admin Home</a>
+    <a href="/admin/register">Register User</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content" id="user_management">
+    <div class="freezr-card">
+      <h3 style="margin-bottom: 1rem;">Manage Users</h3>
+
+      <!-- Action Status Area -->
+      <div id="actionStatus" class="action-status" style="display: none;">
+        <div class="status-content">
+          <div class="spinner"></div>
+          <div class="status-text"><span id="actionStatusText"></span></div>
+          <div class="status-subtext" id="actionStatusSubtext">This may take a few moments</div>
+        </div>
+      </div>
+
+      <!-- Results Display Area -->
+      <div id="actionResults" class="action-results" style="display: none;">
+        <div class="results-header">
+          <h4 id="resultsTitle">Action Results</h4>
+          <button id="refreshPageBtn" class="freezrButt" style="padding: 0.5rem 1rem;">Refresh Page</button>
+        </div>
+        <div id="resultsContent" class="results-content"></div>
+      </div>
+
+      <!-- Main Content Area -->
+      <div id="mainContent">
+        <!-- Action Buttons (on top) -->
+        <div class="action-buttons-container action-buttons-top">
+          <div class="action-buttons-row">
+            <!-- File Drop Area (narrow) -->
+            <div class="file-drop-area file-drop-narrow" id="appInstallDropArea">
+              <div class="drop-area-content">
+                <span class="drop-icon">📁</span>
+                <span class="drop-text">Drop app file for selected users</span>
+                <input type="file" id="appFileInput" accept=".zip,.app" style="display: none;"/>
+              </div>
+            </div>
+            <div class="selected-count-inline">
+              <span id="selectedCount">0</span> selected
+            </div>
+            <div class="action-buttons-inline">
+              <button class="freezrButt" id="btnDeleteSelected" style="background: var(--freezr-text-muted); opacity: 0.6;" disabled>Delete Selected</button>
+              <button class="freezrButt" id="btnResetPassword" disabled>Reset Password</button>
+              <button class="freezrButt" id="btnUpdateLimits" disabled>Update Limits</button>
+              <button class="freezrButt" id="btnChangeRights" disabled>Change Rights</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Select All + Users box -->
+        <div class="users-box">
+          <div class="search-bar">
+            <input type="text" id="searchUserInput" placeholder="Enter user name" autocomplete="off"/>
+            <button type="button" class="freezrButt" id="btnSearchOnServer">Search on Server</button>
+          </div>
+          <div class="select-all-container">
+            <label class="select-all-label">
+              <input type="checkbox" id="selectAllUsers"/>
+              <span>Select All (on this page)</span>
+            </label>
+          </div>
+
+          <!-- Users Grid (sortable headers, body filled by JS) -->
+          <div class="users-grid" id="usersGrid">
+            <div class="grid-header">
+              <div class="checkbox-col">Select</div>
+              <div class="name-col sortable" data-sort="user_id" title="Sort by name">Name <span class="sort-indicator" id="sortIndicator_user_id"></span></div>
+              <div class="email-col sortable" data-sort="email_address" title="Sort by email">Email <span class="sort-indicator" id="sortIndicator_email_address"></span></div>
+              <div class="fs-col sortable" data-sort="fsParams.type" title="Sort by file system">File System <span class="sort-indicator" id="sortIndicator_fsParams.type"></span></div>
+              <div class="db-col sortable" data-sort="dbParams.type" title="Sort by database">Database <span class="sort-indicator" id="sortIndicator_dbParams.type"></span></div>
+              <div class="storage-limit-col sortable" data-sort="limits.storage" title="Sort by storage limit">Storage Limit <span class="sort-indicator" id="sortIndicator_limits.storage"></span></div>
+              <div class="limits-col">Usage</div>
+            </div>
+            <div id="usersGridBody" class="grid-body">
+              <!-- Rows rendered by manage_users.js -->
+            </div>
+          </div>
+
+          <!-- Pagination (5 per page) -->
+          <div class="pagination-bar" id="paginationBar">
+            <button type="button" class="freezrButt pagination-btn" id="btnPrevPage" disabled>Previous</button>
+            <span class="pagination-info" id="paginationInfo">Page 1 of 1</span>
+            <button type="button" class="freezrButt pagination-btn" id="btnNextPage" disabled>Next</button>
+          </div>
+
+          <!-- Users fetched + Fetch More -->
+          <div class="fetch-more-bar">
+            <span id="usersFetchedCount">0 users fetched</span>
+            <button type="button" class="freezrButt" id="btnFetchMore">Fetch More</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Reset Password dialog -->
+<div id="resetPasswordDialog" class="reset-password-dialog" role="dialog" aria-labelledby="resetPasswordDialogTitle" aria-modal="true" style="display: none;">
+  <div class="reset-password-dialog-backdrop"></div>
+  <div class="reset-password-dialog-box">
+    <h4 id="resetPasswordDialogTitle">Reset password for <span id="resetPasswordUserName"></span></h4>
+    <div class="reset-password-form">
+      <label for="resetPasswordNewPassword">New password</label>
+      <div class="reset-password-generate-row">
+        <button type="button" class="freezrButt" id="btnGeneratePassword">Generate random</button>
+      </div>
+      <div class="reset-password-input-row">
+        <input type="password" id="resetPasswordNewPassword" autocomplete="new-password" placeholder="Enter new password"/>
+      </div>
+      <div id="resetPasswordGeneratedDisplay" class="reset-password-generated-display" style="display: none;">
+        <span class="reset-password-generated-label">Generated (copied to clipboard):</span>
+        <code id="resetPasswordGeneratedText" class="reset-password-generated-text"></code>
+      </div>
+      <p class="reset-password-hint">Warning - this will reset the password for the user and they will need to login with the new password.</p>
+    </div>
+    <div class="reset-password-dialog-actions">
+      <button type="button" class="freezrButt reset-password-cancel-btn" id="btnResetPasswordCancel">Cancel</button>
+      <button type="button" class="freezrButt freezrButt-primary reset-password-submit-btn" id="btnResetPasswordSubmit">Reset password</button>
+    </div>
+    <div id="resetPasswordError" class="reset-password-error" style="display: none;"></div>
+  </div>
+</div>
+
+<!-- Update Limits dialog -->
+<div id="updateLimitsDialog" class="reset-password-dialog" role="dialog" aria-labelledby="updateLimitsDialogTitle" aria-modal="true" style="display: none;">
+  <div class="reset-password-dialog-backdrop"></div>
+  <div class="reset-password-dialog-box">
+    <h4 id="updateLimitsDialogTitle">Update storage limit for <span id="updateLimitsUserName"></span></h4>
+    <div class="reset-password-form">
+      <label for="updateLimitsStorageInput">Storage limit (GB)</label>
+      <div class="reset-password-input-row">
+        <input type="number" id="updateLimitsStorageInput" min="0" step="1" placeholder="e.g. 5"/>
+      </div>
+      <p class="update-limits-hint">Enter the maximum storage in gigabytes. Leave empty or 0 for unlimited.</p>
+    </div>
+    <div class="reset-password-dialog-actions">
+      <button type="button" class="freezrButt reset-password-cancel-btn" id="btnUpdateLimitsCancel">Cancel</button>
+      <button type="button" class="freezrButt freezrButt-primary reset-password-submit-btn" id="btnUpdateLimitsSubmit">Update limit</button>
+    </div>
+    <div id="updateLimitsError" class="reset-password-error" style="display: none;"></div>
+  </div>
+</div>
+
+<!-- Change Rights dialog -->
+<div id="changeRightsDialog" class="reset-password-dialog" role="dialog" aria-labelledby="changeRightsDialogTitle" aria-modal="true" style="display: none;">
+  <div class="reset-password-dialog-backdrop"></div>
+  <div class="reset-password-dialog-box">
+    <h4 id="changeRightsDialogTitle">Change rights for <span id="changeRightsUserName"></span></h4>
+    <div class="reset-password-form">
+      <div class="change-rights-checkboxes">
+        <label class="change-rights-checkbox-label">
+          <input type="checkbox" id="changeRightsIsAdmin"/>
+          <span>Administrator</span>
+        </label>
+        <label class="change-rights-checkbox-label">
+          <input type="checkbox" id="changeRightsIsPublisher"/>
+          <span>Publisher</span>
+        </label>
+      </div>
+      <p class="update-limits-hint">Administrators have full system access. Publishers can publish apps to other users.<br/>Note: Admin rights can only be revoked here, not granted. Use the registration process to create new admins.</p>
+    </div>
+    <div class="reset-password-dialog-actions">
+      <button type="button" class="freezrButt reset-password-cancel-btn" id="btnChangeRightsCancel">Cancel</button>
+      <button type="button" class="freezrButt freezrButt-primary reset-password-submit-btn" id="btnChangeRightsSubmit">Update rights</button>
+    </div>
+    <div id="changeRightsError" class="reset-password-error" style="display: none;"></div>
+  </div>
+</div>

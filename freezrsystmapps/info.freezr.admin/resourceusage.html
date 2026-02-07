@@ -1,0 +1,22 @@
+<!-- Admin Resource Usage - same content as account_resourceusage.html, uses account app's JS/CSS -->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">Resource Usage</span>
+    <a href="/account/home">Account Home</a>
+    <a href="/admin/home">Admin Home</a>
+    <a href="/admin/list_users">List Users</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div id="errorBox" class="errorBox"></div>
+
+    <div class="freezr-card" id="resource_usage_card">
+      <h3>Storage Usage by App</h3>
+      <p id="resource_usage_intro">View storage usage. Use <code>?user=username</code> in the URL to view another user's usage.</p>
+      <div id="resource_usage_user_label" style="display: none; margin-bottom: 0.5rem; font-weight: 600; color: var(--freezr-accent);"></div>
+      <div id="app_list" style="margin-top: 1rem; position: relative; min-height: 60px;"></div>
+    </div>
+
+  </div>
+</div>

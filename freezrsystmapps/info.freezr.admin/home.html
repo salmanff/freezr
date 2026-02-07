@@ -1,0 +1,66 @@
+<!-- Admin Home -->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">Admin Home</span>
+    <a href="/account/home">Account Home</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div class="freezr-card">
+      <h3 style="margin-bottom: 1rem;">User Management</h3>
+      <div class="admin-buttons">
+        <a href="/admin/list_users" class="admin-btn">List Users</a>
+        <a href="/admin/manage_users" class="admin-btn">Manage Users</a>
+        <a href="/admin/register" class="admin-btn">Register a New User</a>
+      </div>
+    </div>
+
+    <div class="freezr-card">
+      <h3 style="margin-bottom: 1rem;">System Settings</h3>
+      <div class="admin-buttons">
+        <a href="/admin/prefs" class="admin-btn">System Preferences</a>
+        <a href="/account/logviewer" class="admin-btn">Review Visit Logs</a>
+        <a href="/admin/addlocalmicroservice" class="admin-btn">Add a Local Microservice</a>
+      </div>
+    </div>
+
+    <div class="freezr-card" style="border-left: 3px solid #f59e0b;">
+      <h3 style="margin-bottom: 1rem; color: #f59e0b;">Advanced Functions</h3>
+      <p style="color: var(--freezr-text-muted); font-size: 14px; margin-bottom: 1rem;">
+        Only use these if you know what you are doing.
+      </p>
+      <div class="admin-buttons">
+        <a href="/admin/oauth_serve_setup" class="admin-btn">Set up as OAuth Server</a>
+        <a href="/admin/createCloudToken" class="admin-btn">Create Cloud Setup Token</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.admin-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.admin-btn {
+  display: inline-block;
+  padding: 0.75rem 1.25rem;
+  background: var(--freezr-bg);
+  border-radius: var(--freezr-radius-sm);
+  color: var(--freezr-text);
+  text-decoration: none;
+  font-weight: 500;
+  text-align: center;
+  transition: background 0.2s, color 0.2s, transform 0.15s, box-shadow 0.15s;
+  box-shadow: var(--freezr-shadow);
+}
+.admin-btn:hover {
+  background: var(--freezr-accent);
+  color: white;
+  text-decoration: none;
+  transform: translateY(-1px);
+  box-shadow: var(--freezr-shadow-hover);
+}
+</style>

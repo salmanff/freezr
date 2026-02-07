@@ -1,0 +1,30 @@
+<!-- Admin Add Local Microservice addlocalmicroservice.html -->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">Add Microservice</span>
+    <a href="/account/home">Home</a>
+    <a href="/admin/home">Admin</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div class="freezr-card" style="max-width: 520px; margin: 0 auto;">
+      <h3 style="margin-bottom: 1rem;">Upload a New Service</h3>
+
+      <div id="errorBox" class="errorBox" style="margin-bottom: 1rem;"></div>
+
+      <div class="drop-area" id="upload_area">
+        <div style="font-size: 2rem; margin-bottom: 0.5rem;">📁</div>
+        <div>Drop service zip file here</div>
+      </div>
+    </div>
+
+    <div class="freezr-card" id="deleteSection" style="max-width: 520px; margin: 1.5rem auto; display: none;">
+      <h3 id="deleteservicetitle" style="margin-bottom: 1rem;">Delete an Existing Service</h3>
+      <div id="thirdPartyFunctionNamesList" style="margin-bottom: 1rem;"></div>
+      <button id="deletelocalfunction" class="freezrButt" style="background: #dc2626; display: none;">
+        Delete Local Function
+      </button>
+    </div>
+  </div>
+</div>

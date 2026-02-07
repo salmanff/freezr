@@ -1,0 +1,64 @@
+<!-- Admin Register User register.html -->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">Register User</span>
+    <a href="/account/home">Home</a>
+    <a href="/admin/home">Admin</a>
+    <a href="/admin/list_users">User List</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div class="freezr-card" style="max-width: 520px; margin: 0 auto;">
+      <h3 style="margin-bottom: 1.5rem;">Register New User</h3>
+
+      <div id="errorBox" class="errorBox" style="margin-bottom: 1rem;"></div>
+
+      <form name="register" id="register">
+        <div style="margin-bottom: 1rem;">
+          <label class="texttop">User ID</label>
+          <input type="text" class="input" id="user_id" name="user_id"/>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+          <label class="texttop">Full Name (optional)</label>
+          <input type="text" class="input" id="full_name" name="full_name"/>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+          <label class="texttop">Email Address (optional)</label>
+          <input type="text" class="input" id="email_address" name="email_address"/>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+          <label class="texttop">Password</label>
+          <input type="password" class="input" id="password" name="password"/>
+        </div>
+
+        <div style="margin-bottom: 1.5rem;">
+          <label class="texttop">Confirm Password</label>
+          <input type="password" class="input" id="password2" name="password2"/>
+        </div>
+
+        <div style="margin-bottom: 1.5rem; display: flex; flex-direction: column; gap: 0.75rem;">
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+            <input type="checkbox" name="isAdmin" id="isAdminId" value="isAdmin"/>
+            <span>User has admin privileges</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+            <input type="checkbox" name="isPublisher" id="isPublisherId" value="isPublisher"/>
+            <span>User can publish pages</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 0.5rem; opacity: 0.6;">
+            <input type="checkbox" name="useSysFsDb" id="useSysFsDbId" value="useSysFsDb" checked disabled/>
+            <span>User can use system file system and database</span>
+          </label>
+        </div>
+
+        <div style="text-align: center;">
+          <input class="freezrButt" type="submit" value="Register New User" style="width: 50%; cursor: pointer;"/>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>

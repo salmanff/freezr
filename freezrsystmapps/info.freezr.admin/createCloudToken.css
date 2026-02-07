@@ -1,0 +1,29 @@
+.noteText {
+  margin: 10px 0 20px 0;
+  color: #444;
+}
+
+.tokenForm,
+.tokenOutput {
+  margin: 15px 0;
+}
+
+.tokenForm input,
+.tokenOutput input {
+  margin-left: 10px;
+  padding: 4px 6px;
+}
+
+.tokenForm button,
+.tokenOutput button {
+  margin-left: 10px;
+}
+
+.tokenInstructions {
+  margin-top: 20px;
+  font-size: 0.95em;
+}
+
+.errorBox {
+  display: none;
+}

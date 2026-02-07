@@ -1,0 +1,31 @@
+<!--
+freezr Account Resource usage
+  resource_usage: {
+    page_title: 'Resource Usage (freezr)',
+    css_files: ['/app/info.freezr.public/public/freezr_style.css', 'account_home.css'],
+    page_url: 'account_resourceusage.html',
+    script_files: ['account_resourceusage.js', '/app/info.freezr.public/public/mustache.js'],
+    initial_query_func: 'getAppResources'
+  }
+-->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">Resource Usage</span>
+    <a href="/account/home">Home</a>
+    <a href="/account/settings">Settings</a>
+    <a id="freezer_admin_butt" href="/admin/home">Admin</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div id="errorBox" class="errorBox"></div>
+
+    <div class="freezr-card" id="resource_usage_card">
+      <h3>Storage Usage by App</h3>
+      <p id="resource_usage_intro">View the storage your apps are using on this server.</p>
+      <div id="resource_usage_user_label" style="display: none; margin-bottom: 0.5rem; font-weight: 600; color: var(--freezr-accent);"></div>
+      <div id="app_list" style="margin-top: 1rem; position: relative; min-height: 60px;"></div>
+    </div>
+
+  </div>
+</div>

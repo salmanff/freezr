@@ -1,0 +1,52 @@
+<!--
+options:
+    serverless: {
+      page_title: 'Account Serverless Settings (freezr)',
+      css_files: ['/app/info.freezr.public/public/freezr_style.css', 'account_home.css'],
+      page_url: 'account_serverless.html',
+      script_files: ['account_serverless.js'],
+      initial_query_func: 'getServerlessSettings'
+    }
+-->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">Serverless Settings <span id="user_id" style="font-weight: 400; font-size: 0.85em; color: #64748b;"></span></span>
+    <a href="/account/home">Home</a>
+    <a href="/account/settings">Settings</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div id="errorBox" class="errorBox"></div>
+    <div id="error" class="errorBox"></div>
+
+    <div class="freezr-card" id="changeServerlessOuter">
+      <h3>Serverless Compute Parameters</h3>
+      <p>Configure your AWS Lambda or other serverless compute settings.</p>
+
+      <form name="serverlssSettingsForm" id="serverlssSettingsForm">
+        <div style="max-width: 400px;">
+          <label class="texttop">Type (Currently only aws):</label>
+          <input type="text" class="input" id="slParamsType" name="slParamsType" value="{{slParamsType}}" placeholder="e.g., aws"/>
+          
+          <label class="texttop">Region:</label>
+          <input type="text" class="input" id="slRegion" name="slRegion" value="{{slRegion}}" placeholder="e.g., us-east-1"/>
+          
+          <label class="texttop">Access Key Id:</label>
+          <input type="text" class="input" id="accessKeyId" name="accessKeyId" value="{{accessKeyId}}"/>
+          
+          <label class="texttop">Secret Access Key:</label>
+          <input type="password" class="input" id="secretAccessKey" name="secretAccessKey" value="{{secretAccessKey}}"/>
+          
+          <label class="texttop">ARN Role:</label>
+          <input type="text" class="input" id="arnRole" name="arnRole" value="{{arnRole}}"/>
+          
+          <div class="button-row">
+            <div id="submitAllButt" class="freezrButt">Set Serverless Parameters</div>
+          </div>
+        </div>
+      </form>
+    </div>
+
+  </div>
+</div>

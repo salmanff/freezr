@@ -1,0 +1,37 @@
+{
+  "description": "Template for adding user credentials for integration testing - THIS FILE SHOULD GO UNDER /users_freezr/test_credentials/testUserCreds.json",
+  "notes": {
+    "usage": "These users must exist in the freezr system before running tests",
+    "multiUser": "Multiple users are defined to support multi-user testing scenarios"
+  },
+  "serverUrl": "http://localhost:3000",
+  "users": {
+    "primary": {
+      "user_id": "user1",
+      "password": "password",
+      "description": "Primary test user for basic CRUD operations"
+    },
+    "secondary": {
+      "user_id": "user2", 
+      "password": "password",
+      "description": "Secondary test user for multi-user and permission tests"
+    },
+    "admin": {
+      "user_id": "adminuser",
+      "password": "password",
+      "description": "Admin test user for admin-level operations"
+    }
+  },
+  "testAppConfig": {
+    "appName": "com.salmanff.apitester",
+    "appTable": "com.salmanff.apitester.table1",
+    "description": "App table used for CEPS endpoint testing"
+  },
+  "otherServerUrl": "http://localhost:8080",
+  "otherServerUsers": {
+    "primary": {
+      "user_id": "otherserveruser1",
+      "password": "password"
+    }
+  }
+}

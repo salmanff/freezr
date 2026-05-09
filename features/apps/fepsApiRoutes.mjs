@@ -8,9 +8,10 @@
 
 import { Router } from 'express'
 import multer from 'multer'
-import { createSetupGuard, createAuthGuard, createGetAppTokenInfoFromheaderForApi, createAddAppTokenInfoWithoutChecks } from '../../middleware/auth/basicAuth.mjs'
+import { createSetupGuard, createAuthGuard, createGetAppTokenInfoFromheaderForApi, createGetAppTokenInfoFromCookieForFiles } from '../../middleware/auth/basicAuth.mjs'
 import { getAllAppAppTablesAndSendWithManifest, createAddUserDs, createGetTargetManifest, createAddUserAppList, addDataOwnerToContext, createAddAppTableDbAndFsIfNeedbe, createAddStorageLimits, createAddUserFilesDbAndAppFS, defineFileAppTableFromAppName } from './middleware/appContext.mjs'
 import { createServerlessPerms, createAddAppFsFor3PFunctions, createAdd3PFunctionFS } from './middleware/serverlessContext.mjs'
+import { createGetLlmPerms } from './middleware/llmContext.mjs'
 import * as serverlessModule from '../../adapters/datastore/slConnectors/serverless.mjs'
 import { createAddOwnerPermsDbForLoggedInuser, createaddOwnerPermsDb, addRightsToTable } from '../../middleware/permissions/permissionContext.mjs'
 import { allRequestorAppPermissions } from '../../middleware/permissions/permissionHandlers.mjs'
@@ -20,6 +21,7 @@ import { createAddPublicManifestsDb } from '../account/middleware/accountContext
 import { createAccountApiController } from '../account/controllers/accountApiController.mjs'
 import { createCepsApiController } from './controllers/cepsfepsApiController.mjs'
 import { sendFailure } from '../../adapters/http/responses.mjs'
+import { apiRateLimit } from '../../middleware/auth/apiRateLimiter.mjs'
 
 /**
  * /feps
@@ -32,7 +34,7 @@ import { sendFailure } from '../../adapters/http/responses.mjs'
  * @param {object} dependencies.freezrStatus - Freezr status
  * @returns {Router} Express router with app API routes
  */
-export const createAppApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logManager }) => {
+export const createFepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logManager }) => {
   const router = Router()
 
   // ===== CREATE MIDDLEWARE INSTANCES =====
@@ -44,7 +46,7 @@ export const createAppApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logMa
   // getAndCheckAccountAppTokenInfo - gets token for later validation
   const getAndCheckAccountAppTokenInfo = createGetAppTokenInfoFromheaderForApi(dsManager, { ensureAppName: 'info.freezr.account' })
   const getAppTokenInfo = createGetAppTokenInfoFromheaderForApi(dsManager)
-  const getAppTokenInfoWithoutChecks = createAddAppTokenInfoWithoutChecks(dsManager)
+  const getAppTokenInfoFromCookie = createGetAppTokenInfoFromCookieForFiles(dsManager)
   
   // Context middleware - loads manifest and user data store
   // Order matters: need app list first, then manifest, then userDS
@@ -66,6 +68,24 @@ export const createAppApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logMa
   const serverlessPerms = createServerlessPerms(dsManager, freezrPrefs, freezrStatus, serverlessModule)
   const addAppFsFor3PFunctions = createAddAppFsFor3PFunctions(dsManager, freezrPrefs, freezrStatus)
   const add3PFunctionFS = createAdd3PFunctionFS(dsManager, freezrPrefs, freezrStatus, serverlessModule)
+  
+  // Middleware for LLM routes
+  const llmPerms = createGetLlmPerms(dsManager, freezrPrefs)
+  const uploadLlm = multer().array('file')
+  const uploadLlmIfNeeded = (req, res, next) => {
+    const isEmpty = (obj) => { for (const prop in obj) { if (Object.hasOwn(obj, prop)) return false } return true }
+    if (isEmpty(req.body)) {
+      uploadLlm(req, res, (err) => {
+        if (err) return sendFailure(res, err, 'uploadLlmIfNeeded', 400)
+        if (req.body.options && typeof req.body.options === 'string') {
+          try { req.body = JSON.parse(req.body.options) } catch (e) { return sendFailure(res, 'Invalid options JSON', 'uploadLlmIfNeeded', 400) }
+        }
+        next()
+      })
+    } else {
+      next()
+    }
+  }
   
   // Multer middleware for file uploads
   const upload = multer().single('file')
@@ -126,8 +146,8 @@ export const createAppApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logMa
    * 
    * TODO 
    */
-  router.get('/manifest/:target_app', setupGuard, loggedInGuard, getAppTokenInfo, addUserAppList, getTargetManifest, addUserDs, tokenUserHasFullAppApiRights, getAllAppAppTablesAndSendWithManifest)
-  // router.get('/manifest', setupGuard, loggedInGuard, getAppTokenInfo, addUserAppList, getTargetManifest, addUserDs, systemAppOrTargetAppRequest, getAllAppAppTablesAndSendWithManifest)
+  router.get('/manifest/:target_app', setupGuard, loggedInGuard, getAppTokenInfo, apiRateLimit, addUserAppList, getTargetManifest, addUserDs, tokenUserHasFullAppApiRights, getAllAppAppTablesAndSendWithManifest)
+  // router.get('/manifest', setupGuard, loggedInGuard, getAppTokenInfo, apiRateLimit, addUserAppList, getTargetManifest, addUserDs, systemAppOrTargetAppRequest, getAllAppAppTablesAndSendWithManifest)
 
   /**
    * GET /feps/permissions/getall/:app_name
@@ -137,8 +157,8 @@ export const createAppApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logMa
    * - Array of permission objects (if groupall not specified)
    * Modernized version of /v1/permissions/getall/:app_name
    */
-  router.get('/permissions/getall/:target_app', setupGuard, loggedInGuard, getAppTokenInfo, addUserPermDBs, tokenUserHasFullAppApiRights, allRequestorAppPermissions)
-  // router.get('/permissions/gethtml/:app_name', setupGuard, loggedInGuard, getAppTokenInfo, addUserPermDBs, accountHandler.generatePermissionHTML) // no logner used
+  router.get('/permissions/getall/:target_app', setupGuard, loggedInGuard, getAppTokenInfo, apiRateLimit, addUserPermDBs, tokenUserHasFullAppApiRights, allRequestorAppPermissions)
+  // router.get('/permissions/gethtml/:app_name', setupGuard, loggedInGuard, getAppTokenInfo, apiRateLimit, addUserPermDBs, accountHandler.generatePermissionHTML) // no logner used
 
   /**
    * PUT /permissions/change
@@ -175,7 +195,7 @@ export const createAppApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logMa
    * - _date_modified: date (record modified date)
    * - _date_created: date (record created date)
    */
-  router.post('/write/:app_table/:data_object_id', setupGuard, getAppTokenInfo, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTableAndFsIfNeedBe, cepsApiController.writeorUpsertRecord)
+  router.post('/write/:app_table/:data_object_id', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTableAndFsIfNeedBe, cepsApiController.writeorUpsertRecord)
   
   /**
    * POST /feps/write/:app_table
@@ -193,7 +213,7 @@ export const createAppApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logMa
    * - _date_modified: date (record modified date)
    * - _date_created: date (record created date)
    */
-  router.post('/write/:app_table', setupGuard, getAppTokenInfo, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTableAndFsIfNeedBe, cepsApiController.writeorUpsertRecord)
+  router.post('/write/:app_table', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTableAndFsIfNeedBe, cepsApiController.writeorUpsertRecord)
 
   /**
    * PUT /feps/update/:app_table/:data_object_id
@@ -211,7 +231,7 @@ export const createAppApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logMa
    * - nModified: number
    * - success: boolean
    */
-  router.put('/update/:app_table/:data_object_id', setupGuard, getAppTokenInfo, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTableAndFsIfNeedBe, cepsApiController.updateRecord)
+  router.put('/update/:app_table/:data_object_id', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTableAndFsIfNeedBe, cepsApiController.updateRecord)
   
   /**
    * PUT /feps/update/:app_table/:data_object_start/*
@@ -230,7 +250,7 @@ export const createAppApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logMa
    * - nModified: number
    * - success: boolean
    */
-  router.put('/update/:app_table/:data_object_start/*', setupGuard, getAppTokenInfo, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTableAndFsIfNeedBe, cepsApiController.updateRecord)
+  router.put('/update/:app_table/:data_object_start/*', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTableAndFsIfNeedBe, cepsApiController.updateRecord)
   
   /**
    * PUT /feps/update/:app_table
@@ -247,7 +267,7 @@ export const createAppApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logMa
    * - nModified: number
    * - success: boolean
    */
-  router.put('/update/:app_table', setupGuard, getAppTokenInfo, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTableAndFsIfNeedBe, cepsApiController.updateRecord)
+  router.put('/update/:app_table', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTableAndFsIfNeedBe, cepsApiController.updateRecord)
   
   /**
    * DELETE /feps/delete/:app_table
@@ -260,7 +280,7 @@ export const createAppApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logMa
    * - success: boolean
    * - deleteConfirm: object
    */
-  router.delete('/delete/:app_table', setupGuard, loggedInGuard, getAppTokenInfo, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTableAndFsIfNeedBe, cepsApiController.deleteRecords)
+  router.delete('/delete/:app_table', setupGuard, loggedInGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTableAndFsIfNeedBe, cepsApiController.deleteRecords)
   
   /**
    * DELETE /feps/delete/:app_table/:data_object_id
@@ -270,7 +290,7 @@ export const createAppApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logMa
    * - success: boolean
    * - deleteConfirm: object
    */
-  router.delete('/delete/:app_table/:data_object_id', setupGuard, loggedInGuard, getAppTokenInfo, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTableAndFsIfNeedBe, cepsApiController.deleteRecords)
+  router.delete('/delete/:app_table/:data_object_id', setupGuard, loggedInGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTableAndFsIfNeedBe, cepsApiController.deleteRecords)
   
   /**
    * DELETE /feps/delete/:app_table/:data_object_start/*
@@ -281,7 +301,7 @@ export const createAppApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logMa
    * - success: boolean
    * - deleteConfirm: object
    */
-  router.delete('/delete/:app_table/:data_object_start/*', setupGuard, loggedInGuard, getAppTokenInfo, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTableAndFsIfNeedBe, cepsApiController.deleteRecords)
+  router.delete('/delete/:app_table/:data_object_start/*', setupGuard, loggedInGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTableAndFsIfNeedBe, cepsApiController.deleteRecords)
   
     
   /**
@@ -297,7 +317,7 @@ export const createAppApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logMa
    * - _date_created: number
    * - _date_modified: number
    */
-  router.post('/restore/:app_table', setupGuard, loggedInGuard, getAppTokenInfo, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTableAndFsIfNeedBe, cepsApiController.restoreRecord)
+  router.post('/restore/:app_table', setupGuard, loggedInGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTableAndFsIfNeedBe, cepsApiController.restoreRecord)
   
   /**
    * PUT /feps/upload/:app_name
@@ -315,7 +335,7 @@ export const createAppApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logMa
    * Returns:
    * - _id: string (file record ID - path to file)
    */
-  router.put('/upload/:app_name', setupGuard, getAppTokenInfo, uploadIfNeeded, defineFileAppTableFromAppName, addDataOwnerToContext, 
+  router.put('/upload/:app_name', setupGuard, getAppTokenInfo, apiRateLimit, uploadIfNeeded, defineFileAppTableFromAppName, addDataOwnerToContext, 
      addOwnerPermDBs, 
      addRightsToTable, 
      addUserFilesDbAndAppFS, 
@@ -323,38 +343,37 @@ export const createAppApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logMa
     // nb addOwnerPermDBs left in in case of future upload perms
 
   /**
-   * GET /feps/getuserfiletoken/:permission_name/:app_name/:user_id/*
-   * Get a file token for accessing a user file
-   * 
-   * Query Parameters:
-   * - permission_name: Permission name (for validation)
-   * 
-   * Returns:
-   * - fileToken: string (token to use for file access)
+   * POST /feps/read_user_file_tree/:app_name
+   * JSON body (optional): subPath, readSubFolders, maxFiles, maxDepth, includeMetadata
+   * Same user-files root as PUT /feps/upload/:app_name (users_freezr/{user}/files/{app_name}/).
    */
-  router.get('/getuserfiletoken/:permission_name/:app_name/:user_id/*', setupGuard, defineFileAppTableFromAppName, getAppTokenInfo, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTableAndFsIfNeedBe, cepsApiController.getFileToken)
-  
+  router.post(
+    '/read_user_file_tree/:app_name',
+    setupGuard,
+    getAppTokenInfo,
+    defineFileAppTableFromAppName,
+    addDataOwnerToContext,
+    addOwnerPermDBs,
+    addRightsToTable,
+    addUserFilesDbAndAppFS,
+    cepsApiController.readUserFileTree
+  )
+
   /**
    * GET /feps/userfiles/:app_name/:user_id/*
-   * Serve a user file with file token validation
-   * 
-   * Query Parameters:
-   * - fileToken: File access token (required)
+   * Serve a user file, authenticated via path-scoped app_token cookie
    * 
    * Returns:
    * - File content (served directly)
-   * 
-   * Note: No authentication required - file token is validated in controller
    */
-  router.get('/userfiles/:app_name/:user_id/*', setupGuard, defineFileAppTableFromAppName, getAppTokenInfoWithoutChecks, async (req, res, next) => {
-    // Set data owner for appTable
+  router.get('/userfiles/:app_name/:user_id/*', setupGuard, defineFileAppTableFromAppName, getAppTokenInfoFromCookie, async (req, res, next) => {
     res.locals.freezr = {
       ...res.locals.freezr,
       data_owner_id: req.params.user_id
     }
     next()
   
-  }, addOwnerAppTableAndFsIfNeedBe, cepsApiController.sendUserFileWithFileorAppToken)
+  }, addOwnerAppTableAndFsIfNeedBe, cepsApiController.sendUserFile)
   // note: 2025-12 fetchuserfiles is not used anymore - use userfiles instead
 
   // ===== SERVERLESS ROUTES =====
@@ -387,13 +406,48 @@ export const createAppApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logMa
    * For file uploads (upsertlocalservice):
    * - file: The zip file containing the microservice code
    */
-  router.put('/serverless/:task', setupGuard, getAppTokenInfo, uploadIfNeeded, serverlessPerms, addAppFsFor3PFunctions, add3PFunctionFS, cepsApiController.serverlessTasks)
-  router.get('/serverless/:task', setupGuard, getAppTokenInfo, serverlessPerms, add3PFunctionFS, cepsApiController.serverlessTasks)
+  router.put('/serverless/:task', setupGuard, getAppTokenInfo, apiRateLimit, uploadIfNeeded, serverlessPerms, addAppFsFor3PFunctions, add3PFunctionFS, cepsApiController.serverlessTasks)
+  router.get('/serverless/:task', setupGuard, getAppTokenInfo, apiRateLimit, serverlessPerms, add3PFunctionFS, cepsApiController.serverlessTasks)
+
+  // ===== LLM ROUTES =====
+
+  /**
+   * PUT /feps/llm/ask
+   * Send a prompt to an LLM using the user's stored API keys
+   * Permission is resolved by type (use_llm) rather than by name.
+   * 
+   * Body (JSON or multipart with files):
+   * - prompt: The text prompt to send
+   * - options: Optional object with provider preferences, model, etc.
+   * - file(s): Optional file attachments (via multipart/form-data)
+   * 
+   * Returns:
+   * - success: boolean
+   * - response: The LLM response text
+   * - meta: Object with prompt echo, provider info
+   */
+  router.put('/llm/ask', setupGuard, getAppTokenInfo, apiRateLimit, uploadLlmIfNeeded, llmPerms, cepsApiController.llmAsk)
+
+  /**
+   * PUT /feps/llm/generate_image
+   * Generate an image using the user's stored LLM API keys.
+   * Respects user's default provider via getSelectedResource.
+   * OpenAI: raster PNG via dynamically-resolved image model. Anthropic: SVG via text API, converted to PNG via sharp.
+   *
+   * Body (JSON):
+   * - prompt: Text description of the image
+   * - provider: Optional provider override ('ChatGPT' or 'Claude'); defaults to user's default
+   * - model: Optional model override; adapter picks default if omitted
+   * - size: Optional image size (default '1024x1024')
+   * - quality: Optional quality level (default 'auto')
+   * - outputFormat: 'png' (default) or 'svg'
+   */
+  router.put('/llm/generate_image', setupGuard, getAppTokenInfo, apiRateLimit, llmPerms, cepsApiController.llmGenerateImage)
 
   return router
 }
 
 export default {
-  createAppApiRoutes
+  createFepsApiRoutes
 }
 

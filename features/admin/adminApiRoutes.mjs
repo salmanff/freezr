@@ -82,7 +82,7 @@ export const createAdminApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, log
    */
   router.get('/:action',
     (req, res, next) => {
-      const allowed = ['getuserappresources', 'list_users']
+      const allowed = ['getuserappresources', 'list_users', 'get_cache_prefs', 'get_cache_stats', 'get_mongo_connection_stats']
       if (!allowed.includes(req.params.action)) {
         return res.status(400).json({ success: false, error: 'Invalid admin GET action - internal error' })
       }
@@ -102,7 +102,7 @@ export const createAdminApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, log
  */
   router.post('/:action', 
     (req, res, next) => {
-      const allowed = ['change_main_prefs', 'reset_user_password', 'update_user_limits', 'change_user_rights', 'delete_users']
+      const allowed = ['change_main_prefs', 'reset_user_password', 'update_user_limits', 'change_user_rights', 'delete_users', 'set_cache_prefs', 'clear_all_caches']
       if (!allowed.includes(req.params.action)) {
         return res.status(400).json({ success: false, error: 'Invalid admin POST action - internal error' })
       }

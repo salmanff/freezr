@@ -14,6 +14,7 @@ import { createSetupGuard, createAuthGuard, createOrUpdateTokenGuardFromPage, cr
 import { createAddUserDSAndAppFS } from '../account/middleware/accountContext.mjs'
 import { createAddUserAppList, createGetTargetManifest, createAddTargetAppFS, createAddPublicSystemAppFS } from './middleware/appContext.mjs'
 import { systemAppOrTargetAppRequest } from '../../middleware/permissions/permissionCheckers.mjs'
+import { createAddOwnerPermsDbForLoggedInuser } from '../../middleware/permissions/permissionContext.mjs'
 import { createAppPageController } from './controllers/appPageController.mjs'
 import { createAppFileController } from './controllers/appFileController.mjs'
 import { sendFailure } from '../../adapters/http/responses.mjs'
@@ -38,7 +39,7 @@ export const createAppPageRoutes = ({ dsManager, freezrPrefs, freezrStatus }) =>
   // setupGuard - Verify freezr is configured
   const setupGuard = createSetupGuard(dsManager)
   // loggedInGuard - Redirect to login if not authenticated
-  const loggedInGuard = createAuthGuard('/account/login')
+  const loggedInGuard = createAuthGuard('/account/home')
   // createorUpdateTokenForPage - Token validation for pages (creates/updates token if needed)
   const createorUpdateTokenForPage = createOrUpdateTokenGuardFromPage(dsManager)
   // getAppTokenInfo - Gets token info for app from cookie (for API-like access / files)
@@ -51,6 +52,7 @@ export const createAppPageRoutes = ({ dsManager, freezrPrefs, freezrStatus }) =>
   const addUserDSAndAppFS = createAddUserDSAndAppFS(dsManager, freezrPrefs, freezrStatus)
   const addTargetAppFS = createAddTargetAppFS(dsManager, freezrPrefs, freezrStatus)
   const addPublicSystemAppFS = createAddPublicSystemAppFS(dsManager, freezrPrefs, freezrStatus)
+  const addOwnerPermsDb = createAddOwnerPermsDbForLoggedInuser(dsManager, freezrPrefs, freezrStatus)
 
   // ===== CREATE CONTROLLERS =====
   
@@ -66,7 +68,7 @@ export const createAppPageRoutes = ({ dsManager, freezrPrefs, freezrStatus }) =>
    * Replicates redirectToIndex from server.js
    */
   const redirectToIndex = (req, res) => {
-    console.log('redirectToIndex', req.path)
+    // onsole.log('redirectToIndex', req.path)
     res.redirect('/apps' + req.path + '/index')
   }
   
@@ -132,7 +134,7 @@ export const createAppPageRoutes = ({ dsManager, freezrPrefs, freezrStatus }) =>
    * @param {Object} res - Express response object
    */
   const servePageOrFile = (req, res) => {
-    // console.log('servePageOrFile', req.originalUrl)
+    // onsole.log('servePageOrFile', req.originalUrl)
     const resource = req.params.resource
     if (!resource) {
       return sendFailure(res, 'Resource path is required', 'appPageRoutes.mjs', 400)
@@ -166,7 +168,7 @@ export const createAppPageRoutes = ({ dsManager, freezrPrefs, freezrStatus }) =>
       return sendFailure(res, 'Resource path is required', 'appPageRoutes.mjs', 400)
     }
 
-    // console.log('serveTargetAppFile', { resource })
+    // onsole.log('serveTargetAppFile', { resource })
     // It's a file - set file param and call serveAppFile
     const appFS = res.locals.freezr?.appFS
     res.locals.freezr.permGiven = true
@@ -280,6 +282,7 @@ export const createAppPageRoutes = ({ dsManager, freezrPrefs, freezrStatus }) =>
     setTargetAppFromParams, // sed for manifest
     extractResourcePath, // Extract resource path from req.params[0] to req.params.resource
     conditionalTokenGuard, // Uses createorUpdateTokenForPage for pages, getAppTokenInfo for files
+    addOwnerPermsDb, // owner perms DB for CSP allow_self_frames check in generateAppPage
     addUserAppList, 
     getTargetManifest, // used for manifest
     addUserDSAndAppFS, // mostly used for appFS

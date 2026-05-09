@@ -141,7 +141,9 @@ const EXPIRY_DEFAULT_FOR_APPS = 6 * 30 * 24 * 60 * 60 * 1000 // 6 months
  * @param {string} appName - Application name
  * @param {Object} options - Additional options
  * @param {string} options.deviceCode - Device code
- * @param {number} [options.expiry] - Expiry timestamp (defaults to 30 days from now)
+ * @param {number} [options.expiry] - Caller-requested expiry timestamp (ms since epoch).
+ *   Server caps this at `now + EXPIRY_DEFAULT_FOR_APPS` — caller can request shorter,
+ *   never longer.
  * @param {boolean} [options.oneDevice=true] - Whether password is for one device only
  * @returns {Promise<Object>} Result with app_password and app_name
  */
@@ -152,9 +154,15 @@ export const generateAndSaveAppPasswordForUser = async (tokenDb, userId, appName
   }
   const {
     deviceCode,
-    expiry = new Date().getTime() + EXPIRY_DEFAULT_FOR_APPS,
+    expiry: callerExpiry,
     oneDevice = false
-  } = options 
+  } = options
+  // Cap caller-requested expiry at server policy. Caller may request shorter,
+  // but cannot exceed `now + EXPIRY_DEFAULT_FOR_APPS`. Also fixes a latent bug
+  // where the previous destructuring default never fired when the caller passed
+  // `null` (only `undefined` triggers destructuring defaults).
+  const cappedExpiry = new Date().getTime() + EXPIRY_DEFAULT_FOR_APPS
+  const expiry = (callerExpiry && callerExpiry < cappedExpiry) ? callerExpiry : cappedExpiry
 
   if (!userId) {
     throw new Error('Missing user id')
@@ -173,6 +181,7 @@ export const generateAndSaveAppPasswordForUser = async (tokenDb, userId, appName
   // Prepare record data
   const recordData = {
     logged_in: false,
+    token_type: 'oauth',
     source_device: deviceCode,
     owner_id: userId,
     requestor_id: userId,
@@ -196,6 +205,7 @@ export const generateAndSaveAppPasswordForUser = async (tokenDb, userId, appName
     console.error('🔑 Error creating app password record:', error)
     throw error
   }
+
 
   // onsole.log('🔑 returning generateAndSaveAppPasswordForUser result:', { app_password, app_name: appName })
   return {

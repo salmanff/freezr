@@ -18,9 +18,10 @@
          - 'img-src' allows all images from all domains.
          - 'form-action' restricts form submissions to self.
          - 'default-src' restricts all unspecified resource types to self.
-         - '{{NO_COMMS_CSP}}': may be replaced with: connect-src 'self'; object-src 'none';  unless overridden by the app permission.
-           - This restricts which domains the page can connect to, disallows plugins/objects, and disables the use of eval() in scripts, unless app-specific permissions override it.
-         - 'unsafe-eval' may be added to te script-src by permission, in the future
+         - '{{NO_COMMS_CSP}}': may be replaced with: connect-src 'self'; object-src 'none';  unless overridden by the external_fetch permission.
+           - This restricts which domains the page can connect to and disallows plugins/objects.
+         - 'unsafe-eval' may be added to script-src via the unsafe_eval permission.
+         - External scripts may be allowed via the external_scripts permission (relaxes script-src).
     -->
      
   <!-- Stylesheets -->
@@ -39,6 +40,7 @@
       publisherUser: {{USER_IS_PUBLISHER}},
       serverVersion: "{{FREEZR_SERVER_VERSION}}",
       serverAddress: "{{SERVER_NAME}}",
+      notifications: {{NOTIFICATIONS}},
     }
 
     var freezr_messages = {{MESSAGES}};

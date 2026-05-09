@@ -1,0 +1,164 @@
+.freezr_app_cards_grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+  padding: 0;
+}
+
+.freezr_app_card {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 16px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: box-shadow 0.15s;
+}
+.freezr_app_card:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.freezr_app_card_header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.freezr_app_card_logo {
+  width: 60px;
+  height: 60px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+.freezr_app_card_logo_placeholder {
+  width: 60px;
+  height: 60px;
+  background: #e0e0e0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 700;
+  color: #666;
+}
+
+.freezr_app_card_title_block {
+  min-width: 0;
+  flex: 1;
+}
+.freezr_app_card_name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.freezr_app_card_author {
+  font-size: 13px;
+  color: #888;
+}
+
+.freezr_app_card_desc {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #444;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.freezr_app_card_notes {
+  margin: 0;
+  font-size: 13px;
+  color: #666;
+  font-style: italic;
+  line-height: 1.4;
+}
+
+.freezr_app_card_footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #888;
+  margin-top: auto;
+}
+.freezr_app_card_version {
+  background: #f0f0f0;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-weight: 600;
+}
+.freezr_app_card_download {
+  margin-left: auto;
+  padding: 4px 12px;
+  border-radius: 4px;
+  background: #0066cc;
+  color: #fff;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+}
+.freezr_app_card_download:hover {
+  background: #0052a3;
+}
+
+.freezr_public_apps_loading {
+  text-align: center;
+  padding: 40px 0;
+  color: #888;
+  font-size: 15px;
+}
+
+.freezr_app_group {
+  display: flex;
+  flex-direction: column;
+}
+
+.freezr_app_older_toggle {
+  font-size: 12px;
+  color: #0066cc;
+  cursor: pointer;
+  padding: 4px 16px 8px;
+  user-select: none;
+}
+.freezr_app_older_toggle:hover {
+  text-decoration: underline;
+}
+
+.freezr_app_older_list {
+  padding: 0 16px 8px;
+}
+.freezr_app_version_summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 12px;
+  color: #666;
+  border-top: 1px solid #eee;
+}
+.freezr_app_version_notes {
+  flex: 1;
+  font-style: italic;
+  color: #888;
+}
+.freezr_app_version_dl {
+  color: #0066cc;
+  text-decoration: none;
+  font-size: 14px;
+}
+.freezr_app_version_dl:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 640px) {
+  .freezr_app_cards_grid {
+    grid-template-columns: 1fr;
+  }
+}

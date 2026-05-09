@@ -11,11 +11,11 @@ export class AuthRateLimiter {
   constructor(options = {}) {
     // Rate limiting rules (can be updated via setRules)
     this.rules = {
-      maxAttemptsPerIp: options.maxAttemptsPerIp || 5,
-      maxAttemptsPerDevice: options.maxAttemptsPerDevice || 5,
-      maxAttemptsPerUser: options.maxAttemptsPerUser || 10,
+      maxAttemptsPerIp: options.maxAttemptsPerIp || 20,
+      maxAttemptsPerDevice: options.maxAttemptsPerDevice || 20,
+      maxAttemptsPerUser: options.maxAttemptsPerUser || 20,
       windowMs: options.windowMs || 60 * 1000,                    // 1 minute window
-      blockDurationMs: options.blockDurationMs || 5 * 60 * 1000,  // 5 minute block
+      blockDurationMs: options.blockDurationMs || 2 * 60 * 1000,  // 5 minute block
     }
     
     // PLUGGABLE STORAGE: use provided store or default to in-memory
@@ -251,7 +251,7 @@ export class AuthRateLimiter {
     // Check if IP is explicitly blocked
     const ipBlock = this.store.get(this._blockKey('ip', ip))
     if (ipBlock && now < ipBlock) {
-      // console.log('ip_blocked checkBlock called ', ip, ipBlock, now)
+      // onsole.log('ip_blocked checkBlock called ', ip, ipBlock, now)
       return { 
         allowed: false, 
         retryAfter: Math.ceil((ipBlock - now) / 1000), 
@@ -334,7 +334,7 @@ export class AuthRateLimiter {
   clearAll() {
     // This only works for in-memory store
     // For CacheManager, would need to implement pattern-based deletion
-    console.log('[AuthRateLimiter] Clearing all rate limit data')
+    // onsole.log('[AuthRateLimiter] Clearing all rate limit data')
   }
 
   /**

@@ -45,9 +45,7 @@ const getManifestAndRefreshWarnings = async function () {
   const StandAloneApps = await drawStandAloneApps(manOuter.manifest)
   dg.el('standAloneApps', { clear: true }, StandAloneApps)
 
-  const searchParams = new URLSearchParams(window.location.search)
-  const code = searchParams.get('code')
-  if (code === 'newinstall') showDeviceInstallOnTop(manOuter.manifest)
+  showTopIosInstallPrompt(manOuter.manifest)
 
   // Only set permissions once
   if (!hasSetPermissions) {
@@ -99,7 +97,7 @@ const getManifestAndRefreshWarnings = async function () {
 freezr.initPageScripts = async function () {
   const searchParams = new URLSearchParams(window.location.search)
   const messageEl = dg.el('message')
-  if (messageEl) messageEl.innerHTML = searchParams.get('message') || ''
+  if (messageEl) messageEl.textContent = searchParams.get('message') || ''
   const appNameEl = dg.el('app_name')
   if (appNameEl) appNameEl.innerHTML = targetApp
   
@@ -234,6 +232,7 @@ const drawStandAloneApps = async function (manifest) {
       refreshChromeCreds.firstChild.firstChild.addEventListener('error', replaceWithFreezrEmptyLogo)
 
       otherFuncsDiv.appendChild(refreshChromeCreds)
+      wireTopChromeExtensionPrompt(manifest, refreshChromeCreds)
     }
     //
     // && (manifest.standAloneApps.ios || manifest.standAloneApps.android
@@ -359,35 +358,153 @@ const isIos = function () {
   // iPad on iOS 13 detection
   (navigator.userAgent.includes('Mac') && 'ontouchend' in document)
 }
-const showDeviceInstallOnTop = function (manifest) {
-  if (isIos() && manifest.standAloneApps.ios && manifest.standAloneApps.ios.link) {
-    const appHeader = document.getElementById('appHeader')
-    const genPasswordAndSendToIos = async function (e) {
-      const box = e.target.closest('.freezrBox')
-      setBoxLoading(box, true)
-      try {
-        const resp = await genAppPassword(manifest.identifier, 180)
-        if (resp?.error) {
-          showAppSettingsMessage(resp.error || 'Error trying to get password.', true)
-        } else {
-          window.open(manifest.standAloneApps.ios.link + '?url=' + resp.full_url, '_self')
+const appDisplayName = function (manifest) {
+  return manifest.display_name || manifest.identifier
+}
+
+const makeTopInstallBox = function (params) {
+  const { message, imgSrc, onclick } = params
+  const box = dg.div(
+    {
+      className: 'freezrBox topInstallPromptBox',
+      style: {
+        cursor: 'pointer',
+        width: '100%',
+        'max-width': '720px',
+        margin: '0 auto 1.25rem auto',
+        padding: '1.25rem',
+        display: 'flex',
+        'align-items': 'center',
+        'justify-content': 'center',
+        gap: '1rem',
+        'background-color': '#fff8e1',
+        border: '3px solid #ffa726',
+        'border-radius': '12px',
+        'box-shadow': '0 2px 10px rgba(0,0,0,0.08)',
+        'box-sizing': 'border-box',
+        'text-align': 'left'
+      },
+      onclick
+    },
+    imgSrc
+      ? dg.img({
+          src: imgSrc,
+          style: {
+            width: '56px',
+            height: '56px',
+            'border-radius': '8px',
+            'flex-shrink': '0'
+          },
+          onclick
+        })
+      : null,
+    dg.div(
+      {
+        className: 'topInstallPromptText',
+        style: {
+          'font-size': '1.25rem',
+          'font-weight': '700',
+          color: 'var(--freezr-text)',
+          flex: '1',
+          'line-height': '1.3',
+          'min-width': '0',
+          'word-wrap': 'break-word'
         }
-      } catch (err) {
-        console.error('🔑 genPasswordAndSendToIos error:', err)
-        showAppSettingsMessage(err?.message || 'Error trying to get password.', true)
+      },
+      message
+    )
+  )
+  return box
+}
+
+const showTopIosInstallPrompt = function (manifest) {
+  if (!(isIos() && manifest.standAloneApps && manifest.standAloneApps.ios && manifest.standAloneApps.ios.link)) return
+  const topPrompt = document.getElementById('topInstallPrompt')
+  if (!topPrompt) return
+  if (document.getElementById('topIosInstallPrompt')) return // already shown
+
+  const onClick = async function (e) {
+    const box = e.target.closest('.freezrBox')
+    setBoxLoading(box, true)
+    try {
+      const resp = await genAppPassword(manifest.identifier, 180)
+      if (resp?.error) {
+        showAppSettingsMessage(resp.error || 'Error trying to get password.', true)
+      } else {
+        window.open(manifest.standAloneApps.ios.link + '?url=' + resp.full_url, '_self')
       }
-      setBoxLoading(box, false)
+    } catch (err) {
+      console.error('🔑 showTopIosInstallPrompt error:', err)
+      showAppSettingsMessage(err?.message || 'Error trying to get password.', true)
     }
-    const box = makeBox({
-      mainTextHTML: 'Add your credentials to the app on this device',
-      mainTextFunc: genPasswordAndSendToIos,
-      imgSrc: '/app/info.freezr.public/public/static/ios_logo.png',
-      imgFunc: genPasswordAndSendToIos
-    })
-    const outer = document.createElement('center')
-    outer.appendChild(box)
-    appHeader.appendChild(outer)
+    setBoxLoading(box, false)
   }
+
+  const box = makeTopInstallBox({
+    message: 'Click here to allow the ' + appDisplayName(manifest) + ' app to access your data on the server',
+    imgSrc: '/app/info.freezr.public/public/static/ios_logo.png',
+    onclick: onClick
+  })
+  box.id = 'topIosInstallPrompt'
+  topPrompt.appendChild(box)
+}
+
+const wireTopChromeExtensionPrompt = function (manifest, refreshChromeCreds) {
+  const topPrompt = document.getElementById('topInstallPrompt')
+  if (!topPrompt) return
+
+  const messageDefault = 'Click here to allow the ' + appDisplayName(manifest) + ' extension to access your data on the server'
+  const messageLogin = 'Click here to log in to the ' + appDisplayName(manifest) + ' extension (and allow it to access your data on the server)'
+
+  const topBox = makeTopInstallBox({
+    message: messageDefault,
+    imgSrc: '/app/info.freezr.account/app2app/' + manifest.identifier + '/static/logo.png',
+    onclick: function () {
+      // Delegate to the bottom box which the chrome extension wires up with its own handler
+      const bottom = document.getElementById('freezrChromeExtensionCredsReplace')
+      const target = bottom?.firstChild?.nextSibling
+      if (!target) return
+      if (typeof target.onclick === 'function') target.onclick({ target: target })
+      else target.click()
+    }
+  })
+  topBox.id = 'topChromeExtensionPrompt'
+  topBox.style.display = 'none'
+  const topImg = topBox.querySelector('img')
+  if (topImg) topImg.addEventListener('error', replaceWithFreezrEmptyLogo)
+  topPrompt.appendChild(topBox)
+
+  const syncFromBottom = function () {
+    const bottomVisible = refreshChromeCreds.style.display !== 'none'
+    // Restore 'flex' (not '') so the row layout from makeTopInstallBox is preserved
+    // — clearing it would fall back to the default block, stacking image above text.
+    topBox.style.display = bottomVisible ? 'flex' : 'none'
+
+    const bottomTextEl = refreshChromeCreds.firstChild?.nextSibling
+    const topTextEl = topBox.querySelector('.topInstallPromptText')
+    if (!bottomTextEl || !topTextEl) return
+    const bottomText = (bottomTextEl.innerText || '').trim()
+    if (bottomText === 'Log in') {
+      topTextEl.innerText = messageLogin
+    } else if (bottomText === 'Credentials registered successfully!') {
+      topTextEl.innerText = 'Credentials registered successfully!'
+      topBox.style.cursor = 'default'
+      topBox.onclick = null
+      const img = topBox.querySelector('img')
+      if (img) img.onclick = null
+    } else {
+      topTextEl.innerText = messageDefault
+    }
+  }
+
+  const styleObserver = new MutationObserver(syncFromBottom)
+  styleObserver.observe(refreshChromeCreds, { attributes: true, attributeFilter: ['style'] })
+
+  const contentObserver = new MutationObserver(syncFromBottom)
+  contentObserver.observe(refreshChromeCreds, { childList: true, subtree: true, characterData: true })
+
+  // In case the chrome extension already toggled visibility before we attached the observer
+  syncFromBottom()
 }
 
 const genAppPassword = async function (appName, daysExpiry) {

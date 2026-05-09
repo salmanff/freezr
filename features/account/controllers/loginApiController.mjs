@@ -10,15 +10,20 @@
 import { LoginService } from '../services/loginService.mjs'
 import { sendApiSuccess, sendFailure, sendAuthFailure } from '../../../adapters/http/responses.mjs'
 import { getOrSetAppTokenForLoggedInUser } from '../../../middleware/tokens/tokenHandler.mjs'
+import helpers from '../../../common/helpers/utils.mjs'
 
 /**
  * Update session with user data
  * 
+ * NOTE: device_code is generated here at login time (not before) to keep 
+ * pre-login visits fully stateless. Sessions are only created/persisted 
+ * when a user actually logs in.
+ * 
  * @param {Object} session - Express session object
  * @param {Object} user - User data from authentication
- * @param {string} deviceCode - Device code
+ * @param {Object} helpers - Helpers module with randomText function
  */
-const updateSession = (session, user, deviceCode) => {
+const updateSession = (session, user) => {
   // console.log('🔑 Updating session for user:', user.user_id)
   
   // TODO: FIX session.regenerate() - it's not sending the new session cookie to browser
@@ -29,7 +34,14 @@ const updateSession = (session, user, deviceCode) => {
   session.logged_in_date = new Date().getTime()
   session.logged_in_as_admin = Boolean(user.isAdmin)
   session.logged_in_as_publisher = Boolean(user.isPublisher)
-  session.device_code = deviceCode
+  
+  // Generate device_code at login time (keeps pre-login visits stateless)
+  // NOTE: "device_code" is a legacy name - it's really a "login_instance_id" since
+  // sessions are destroyed on logout. It binds app tokens to this specific login session
+  // for security (prevents token reuse across sessions) and provides an audit trail.
+  if (!session.device_code) {
+    session.device_code = helpers.randomText(20)
+  }
 
   return
   
@@ -72,8 +84,8 @@ const createHandleLogin = (dsManager) => async (req, res) => {
     if (result.success) {
       res.locals.flogger.debug('login ✅ Authentication successful for user:', result.user.user_id)
       
-      // Update session with user data
-      updateSession(req.session, result.user, req.session.device_code)
+      // Update session with user data (device_code generated here at login time)
+      updateSession(req.session, result.user, helpers)
   
       // Generate app token
       const tokenDb = dsManager.getDB({

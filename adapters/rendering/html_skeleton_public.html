@@ -10,8 +10,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
     <meta name="mobile-web-app-capable"" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black">
-    <meta http-equiv="Content-Security-Policy" content="script-src 'self'; object-src 'none'">
-    <!-- permittive CSP policy for public pages -->
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'nonce-{{FREEEZR-SCRIPT-NONCE}}'; form-action 'self'; object-src 'none';">
+    <!-- Public page CSP: scripts locked to nonce, forms to self only, plugins blocked.
+         Iframes, images, styles, fetch are intentionally permissive — this is public content.
+         Session cookie is httpOnly (JS can't read it). App token cookies are path-restricted
+         and not sent to /public. Iframes can't read parent cookies (same-origin policy). -->
 
     {{META_TAGS}}
 
@@ -30,8 +33,10 @@
       publisherUser: {{USER_IS_PUBLISHER}},
       serverVersion: "{{FREEZR_SERVER_VERSION}}",
       serverAddress: "{{SERVER_NAME}}",
+      notifications: [],
     }
   </script>
+  
   {{SCRIPT_FILES}}
 
 </head>

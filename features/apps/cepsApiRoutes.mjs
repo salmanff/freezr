@@ -13,8 +13,9 @@ import { createCepsApiController } from './controllers/cepsfepsApiController.mjs
 import { currentAppPermissions } from '../../middleware/permissions/permissionHandlers.mjs'
 import { createAddUserContactsDb, createAddMessageDb } from '../account/middleware/accountContext.mjs'
 import { createAddPublicRecordsDB } from '../public/middleware/publicContext.mjs'
-import { createAddAppTableFromBodyAndCheckTokenOwner, addDataOwnerToContext, addRequestorAsDataOwner, createAddAppTableDbAndFsIfNeedbe, createAddStorageLimits, createAddValidationDbs } from './middleware/appContext.mjs'
+import { createAddAppTableFromBodyAndCheckTokenOwner, addDataOwnerToContext, addRequestorAsDataOwner, createAddAppTableDbAndFsIfNeedbe, createAddStorageLimits, createAddValidationDbs, createAddUserPrefs, createAddMessageContextFromBody } from './middleware/appContext.mjs'
 import { sendFailure } from '../../adapters/http/responses.mjs'
+import { apiRateLimit } from '../../middleware/auth/apiRateLimiter.mjs'
 
  /**
  * /ceps
@@ -34,7 +35,7 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
   // ===== CREATE MIDDLEWARE INSTANCES =====
   // Guards (use pure checks from basicAuth.mjs + generic guard creators)
   // setupGuard - Verify freezr is configured
-  const setupGuard = createSetupGuard(dsManager)
+  const setupGuard = createSetupGuard(dsManager, freezrPrefs)
   // getAppTokenInfo - gets token for API requests and sets res.locals.freezr.tokenInfo
   const getAppTokenInfo = createGetAppTokenInfoFromheaderForApi(dsManager, freezrPrefs, freezrStatus)
   const addOwnerPermDBs = createaddOwnerPermsDb(dsManager, freezrPrefs, freezrStatus)
@@ -45,6 +46,8 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
   const addAppTableFromBodyAndCheckTokenOwner = createAddAppTableFromBodyAndCheckTokenOwner(dsManager, freezrPrefs)
   const addMessageDb = createAddMessageDb(dsManager, freezrPrefs, freezrStatus)
   const addValidationDBs = createAddValidationDbs(dsManager, freezrPrefs, freezrStatus)
+  const addUserPrefs = createAddUserPrefs(dsManager, freezrPrefs)
+  const addMessageContextFromBody = createAddMessageContextFromBody(dsManager, freezrPrefs, freezrStatus)
 
   // ===== CREATE CONTROLLERS =====
   const cepsApiController = createCepsApiController({ dsManager, freezrPrefs, freezrStatus })
@@ -77,7 +80,7 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * - _id: string (record ID)
    * - success: boolean
    */
-  router.post('/write/:app_table', setupGuard, getAppTokenInfo, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, cepsApiController.writeorUpsertRecord)
+  router.post('/write/:app_table', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, cepsApiController.writeorUpsertRecord)
 
   /**
    * GET /ceps/read/:app_table/:data_object_id
@@ -86,7 +89,7 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * Returns:
    * - Record object
    */
-  router.get('/read/:app_table/:data_object_id', setupGuard, getAppTokenInfo, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, cepsApiController.readRecordById)
+  router.get('/read/:app_table/:data_object_id', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, cepsApiController.readRecordById)
 
   /**
    * GET /ceps/query/:app_table
@@ -101,7 +104,7 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * Returns:
    * - Array of matching records
    */
-  router.get('/query/:app_table', setupGuard, getAppTokenInfo, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, cepsApiController.dbQuery)
+  router.get('/query/:app_table', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, cepsApiController.dbQuery)
 
   /**
    * POST /ceps/query/:app_table
@@ -116,7 +119,7 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * Returns:
    * - Array of matching records
    */
-  router.post('/query/:app_table', setupGuard, getAppTokenInfo, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, cepsApiController.dbQuery)
+  router.post('/query/:app_table', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, cepsApiController.dbQuery)
   
 
 
@@ -133,7 +136,7 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * - nModified: number
    * - success: boolean
    */
-  router.put('/update/:app_table/:data_object_id', setupGuard, getAppTokenInfo, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, cepsApiController.updateRecord)
+  router.put('/update/:app_table/:data_object_id', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, cepsApiController.updateRecord)
 
   /**
    * DELETE /ceps/delete/:app_table/:data_object_id
@@ -142,8 +145,8 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * Returns:
    * - success: boolean
    */
-  router.delete('/delete/:app_table/:data_object_id', setupGuard, getAppTokenInfo, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, addPublicRecordsDB, cepsApiController.deleteRecords)
-  router.delete('/delete/:app_table/:data_object_start/*', setupGuard, getAppTokenInfo, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, addPublicRecordsDB, cepsApiController.deleteRecords)
+  router.delete('/delete/:app_table/:data_object_id', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, addPublicRecordsDB, cepsApiController.deleteRecords)
+  router.delete('/delete/:app_table/:data_object_start/*', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, addPublicRecordsDB, cepsApiController.deleteRecords)
 
   /**
    * GET /ceps/perms/get
@@ -155,7 +158,7 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * Returns:
    * - Array of permission objects
    */
-  router.get('/perms/get', setupGuard, getAppTokenInfo, addDataOwnerToContext, addOwnerPermDBs, currentAppPermissions)
+  router.get('/perms/get', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, currentAppPermissions)
 
   /**
    * GET /ceps/perms/validationtoken/:action
@@ -196,7 +199,7 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * - requestor_host: string
    * - expiration: number
    */
-  router.post('/perms/validationtoken/:action', setupGuard, getAppTokenInfo, addValidationDBs, cepsApiController.CEPSValidator)
+  router.post('/perms/validationtoken/:action', setupGuard, getAppTokenInfo, apiRateLimit, addValidationDBs, cepsApiController.CEPSValidator)
 
   /**
    * POST /ceps/perms/share_records
@@ -214,23 +217,39 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * - success: boolean
    * - recordsToChange: Array of affected records
    */
-  router.post('/perms/share_records', setupGuard, getAppTokenInfo, addPublicRecordsDB, addUserContactsDb, addAppTableFromBodyAndCheckTokenOwner, addRequestorAsDataOwner, addOwnerPermDBs, cepsApiController.shareRecords)
+  router.post('/perms/share_records', setupGuard, getAppTokenInfo, apiRateLimit, addPublicRecordsDB, addUserContactsDb, addAppTableFromBodyAndCheckTokenOwner, addRequestorAsDataOwner, addOwnerPermDBs, addUserPrefs, cepsApiController.shareRecords)
+
+  // ===== MESSAGING ROUTES =====
+  // Split into authenticated (initiate, mark_read) and unauthenticated (transmit, verify) tracks.
+  // transmit and verify are server-to-server calls with no Bearer token -- security is via nonce exchange.
+  // Uses /:action param so the controller's switch(req.params.action) continues to work.
 
   /**
-   * POST /ceps/message/:action
-   * Handle messaging actions (initiate, transmit, verify, mark_read)
-   * 
-   * Actions:
-   * - initiate: Initiate a message to recipients
-   * - transmit: Transmit a message (public endpoint)
-   * - verify: Verify a message transmission
-   * - mark_read: Mark messages as read
-   * 
-   * Body: Varies by action
-   * 
-   * Returns: Varies by action
+   * POST /ceps/message/initiate
+   * Initiate a message to recipients (authenticated - requires Bearer token)
+   * Sender's app calls this on sender's PDS. The PDS then handles transmit/verify with recipient PDS.
    */
-  router.post('/message/:action', setupGuard, getAppTokenInfo, addDataOwnerToContext, addOwnerPermDBs,  addUserContactsDb, addMessageDb, addAppTableFromBodyAndCheckTokenOwner, cepsApiController.messageActions)
+  router.post('/message/initiate', setupGuard, (req, res, next) => { req.params.action = 'initiate'; next() }, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addUserContactsDb, addMessageDb, addAppTableFromBodyAndCheckTokenOwner, cepsApiController.messageActions)
+
+  /**
+   * POST /ceps/message/mark_read
+   * Mark messages as read (authenticated - requires Bearer token)
+   */
+  router.post('/message/mark_read', setupGuard, (req, res, next) => { req.params.action = 'mark_read'; next() }, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addUserContactsDb, addMessageDb, addAppTableFromBodyAndCheckTokenOwner, cepsApiController.messageActions)
+
+  /**
+   * POST /ceps/message/transmit
+   * Receive a message from another PDS (unauthenticated server-to-server)
+   * Sender PDS calls this on recipient PDS. Local user context comes from req.body.recipient_id.
+   */
+  router.post('/message/transmit', setupGuard, (req, res, next) => { req.params.action = 'transmit'; next() }, addMessageContextFromBody, cepsApiController.messageActions)
+
+  /**
+   * POST /ceps/message/verify
+   * Verify a message nonce (unauthenticated server-to-server)
+   * Recipient PDS calls this on sender PDS. Local user context comes from req.body.sender_id.
+   */
+  router.post('/message/verify', setupGuard, (req, res, next) => { req.params.action = 'verify'; next() }, addMessageContextFromBody, cepsApiController.messageActions)
 
   return router
 }

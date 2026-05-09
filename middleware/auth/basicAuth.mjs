@@ -7,6 +7,8 @@
 import { getAppTokenFromHeaderAndDoMinimalChecks, getOrSetAppTokenForLoggedInUser, getAndCheckCookieTokenForLoggedInUser } from '../tokens/tokenHandler.mjs'
 import { sendAuthFailure } from '../../adapters/http/responses.mjs'
 import { APP_TOKEN_OAC } from '../../common/helpers/config.mjs'
+import { parseSetupToken, tokenExpired } from '../../features/register/services/registerServices.mjs'
+import { buildLoginRedirectUrl } from '../../common/helpers/utils.mjs'
 /**
  * Check if freezr system is set up
  * Pure function - just returns boolean
@@ -63,11 +65,11 @@ export const getAuthenticatedUserId = (session) => {
  * @param {object} dsManager - Data store manager
  * @returns {function} Express middleware
  */
-export const createSetupGuard = (dsManager) => {
+export const createSetupGuard = (dsManager, freezrPrefs) => {
   // Paths that should be accessible even if server is not set up
 
   return async (req, res, next) => {
-
+    // onsole.log('🔐 createSetupGuard called' + req.path)
     /**
      * Paths that should be accessible even if freezr system is not set up
      * These are essential files needed for the initial setup process
@@ -86,17 +88,73 @@ export const createSetupGuard = (dsManager) => {
       // '/app/info.freezr.register/firstSetUp.js'
     ]
 
-    // If setup is complete, of if the requested path is in the allowed list
-    if (isSetup(dsManager) || allowedPathsWhenNotSetup.includes(req.originalUrl)) {
-      if (!isSetup(dsManager))console.log('✅ freezr is not set up - allowing access to:', { url: req.originalUrl})
+    if (!res.locals.freezr) res.locals.freezr = {}
+    res.locals.freezr.freezrPrefs = freezrPrefs
+
+    // If setup is complete, check token exists then proceed
+    if (isSetup(dsManager)) {
       const isDev = process?.env?.NODE_ENV === 'development'
       if (isDev || process?.env?.FREEZR_SETUP_TOKEN) {
         return next()
       }
       return sendAuthFailure(res, { 
+        req,
         message: 'Setup token missing on server env.', 
         error: 'Setup token missing on server env. - createSetupGuard', 
         type: 'setupTokenMissing', 
+        path: req.path,
+        url: req.url,
+        statusCode: 403
+      })
+    }
+    // Not set up - only allow specific setup-related paths with a valid token
+    if (allowedPathsWhenNotSetup.includes(req.originalUrl)) {
+      console.log('✅ freezr is not set up - allowing access to:', { url: req.originalUrl})
+      const isDev = process?.env?.NODE_ENV === 'development'
+      if (isDev) return next()
+
+      const envTokenRaw = process?.env?.FREEZR_SETUP_TOKEN
+      if (!envTokenRaw) {
+        return sendAuthFailure(res, { 
+          req,
+          message: 'Setup token missing on server env.', 
+          error: 'Setup token missing on server env. - createSetupGuard', 
+          type: 'setupTokenMissing', 
+          path: req.path,
+          url: req.url,
+          statusCode: 403
+        })
+      }
+      const envToken = parseSetupToken(envTokenRaw)
+      if (!envToken) {
+        return sendAuthFailure(res, { 
+          req,
+          message: 'Invalid setup token format. Use <token>.<YYYY-MM-DD>', 
+          error: 'Invalid setup token format - createSetupGuard', 
+          type: 'setupTokenInvalid', 
+          path: req.path,
+          url: req.url,
+          statusCode: 403
+        })
+      }
+      if (tokenExpired(envToken.expires)) {
+        return sendAuthFailure(res, { 
+          req,
+          message: 'Setup token has expired. Generate a new one to proceed.', 
+          error: 'Setup token expired - createSetupGuard', 
+          type: 'setupTokenExpired', 
+          path: req.path,
+          url: req.url,
+          statusCode: 403
+        })
+      }
+      return next()
+    } else {
+      return sendAuthFailure(res, { 
+        req,
+        message: 'Freezr is not set up. Access restricted to setup paths only.', 
+        error: 'System not set up and path not in allowed list - createSetupGuard', 
+        type: 'notSetUp', 
         path: req.path,
         url: req.url,
         statusCode: 403
@@ -113,18 +171,19 @@ export const createSetupGuard = (dsManager) => {
  * @param {string} loginUrl - Where to redirect if not authenticated (default: /account/login)
  * @returns {function} Express middleware
  */
-export const createAuthGuard = (loginUrl = '/account/login') => {
+export const createAuthGuard = (loginUrl = '/account/home') => {
   return (req, res, next) => {
     if (isAuthenticated(req.session)) {
       next()
     } else {
       return sendAuthFailure(res, { 
+        req,
         message: 'Unauthenticated user - not logged in', 
         error: 'Unauthenticated user - not logged in - createAuthGuard', 
         type: 'notLoggedIn', 
         url: req.url,
         path: req.path,
-        shouldBeAlertedToFailure: true, 
+        shouldBeAlertedToFailure: false, // true gets too many false 
         redirectUrl: loginUrl
       })
     }
@@ -148,15 +207,17 @@ export const createAuthGuard = (loginUrl = '/account/login') => {
 export const createGetAppTokenInfoFromheaderForApi = (dsManager, options = {}) => {
   const { ensureAppName, ensureAppNames } = options  
   return async (req, res, next) => {
-    // onsole.log('🔐 createGetAppTokenInfoFromheaderForApi middleware called with Request details:', {
+    // onsole.log('🔐 createGetAppTokenInfoFromheaderForApi middleware called', {
     //   method: req.method,
-    //   url: req.url,
-    //   sessionId: req.sessionID,
-    //   userId: req.session.logged_in_user_id,
-    //   page: req.params.page
+    //   path: req.path,
+    //   hasSession: !!req.session,
+    //   hasSessionId: !!req.sessionID,
+    //   userId: req.session?.logged_in_user_id,
+    //   hasAuthHeader: !!req.headers.authorization,
+    //   authHeaderValue: req.headers.authorization ? req.headers.authorization.substring(0, 20) + '...' : 'none'
     // })
 
-    const userId = req.session.logged_in_user_id
+    const userId = req.session?.logged_in_user_id
     try {
 
       // Get or set app token
@@ -168,14 +229,17 @@ export const createGetAppTokenInfoFromheaderForApi = (dsManager, options = {}) =
         req.cookies, // Only for testing / checking - to remove
         // false // fromgetorset
       )
+      // onsole.log('🔑 Token validation result', { tokenInfo: tokenInfo ? { app_name: tokenInfo.app_name, owner_id: tokenInfo.owner_id, requestor_id: tokenInfo.requestor_id, logged_in: tokenInfo.logged_in } : null })
 
       if (!tokenInfo || !tokenInfo.app_token) {
-        console.error('❌ Token info or app_token not found', { tokenInfo, userId })``
-        req.session.regenerate((regenerateErr) => {
-          if (regenerateErr) {
-            console.error('Session regeneration error during app logout:', regenerateErr)
+        console.error('❌ Token info or app_token not found', { tokenInfo, userId })
+        // Destroy session on auth failure - no valid session should remain
+        req.session.destroy((destroyErr) => {
+          if (destroyErr) {
+            console.error('Session destruction error on auth failure:', destroyErr)
           }
           sendAuthFailure(res, { 
+            req,
             message: 'Unauthorized', 
             user_id: userId, 
             error: 'tokenNotFound - createGetAppTokenInfoFromheaderForApi',
@@ -183,10 +247,12 @@ export const createGetAppTokenInfoFromheaderForApi = (dsManager, options = {}) =
             path: req.path, 
             shouldBeAlertedToFailure: true })
         })
+        return
       }
 
       if (ensureAppName && tokenInfo.app_name !== ensureAppName) {
         return sendAuthFailure(res, { 
+          req,
           message: 'Unauthorized', 
           user_id: userId, 
           error: 'tokenMismatch - createGetAppTokenInfoFromheaderForApi',
@@ -195,6 +261,7 @@ export const createGetAppTokenInfoFromheaderForApi = (dsManager, options = {}) =
           shouldBeAlertedToFailure: true })
       } else if (ensureAppNames && ensureAppNames.indexOf(tokenInfo.app_name) === -1) {
         return sendAuthFailure(res, { 
+          req,
           message: 'Unauthorized', 
           user_id: userId, 
           error: 'tokenMismatch - createGetAppTokenInfoFromheaderForApi',
@@ -203,14 +270,30 @@ export const createGetAppTokenInfoFromheaderForApi = (dsManager, options = {}) =
           shouldBeAlertedToFailure: true })
       }
 
-      if ((userId || tokenInfo.logged_in) && tokenInfo.requestor_id !== userId) {
-        return sendAuthFailure(res, { 
-          message: 'Unauthorized', 
-          user_id: userId, 
-          error: 'sessionMismatch - createGetAppTokenInfoFromheaderForApi',
-          type: 'sessionMismatch', 
-          path: req.path, 
-          shouldBeAlertedToFailure: true })
+      // Only validate session match if both session and userId exist
+      if (userId && tokenInfo.requestor_id !== userId) {
+        console.error('❌ UserId mismatch between session and token', { userId, tokenInfo })
+        if (tokenInfo.logged_in) {
+          return sendAuthFailure(res, { 
+            req,
+            message: 'Unauthorized', 
+            user_id: userId, 
+            error: 'sessionMismatch - createGetAppTokenInfoFromheaderForApi',
+            type: 'sessionMismatch', 
+            path: req.path, 
+            shouldBeAlertedToFailure: true })
+        } else {
+          // Block non-logged-in tokens that don't match the session user too.
+          // A mismatched token should never proceed, regardless of logged_in state.
+          return sendAuthFailure(res, {
+            req,
+            message: 'Unauthorized',
+            user_id: userId,
+            error: 'sessionMismatch - createGetAppTokenInfoFromheaderForApi',
+            type: 'sessionMismatch',
+            path: req.path,
+            shouldBeAlertedToFailure: true })
+        }
       }
 
       if (!res.locals.freezr) {
@@ -227,6 +310,7 @@ export const createGetAppTokenInfoFromheaderForApi = (dsManager, options = {}) =
 
     } catch (error) {
       return sendAuthFailure(res, {
+        req,
         type: (error.code === 'expired' ? 'expired' : 'Unauthorized'), 
         error: (error.message || 'unknown error ' ) + ' - createGetAppTokenInfoFromheaderForApi', 
         user_id: userId, 
@@ -252,7 +336,7 @@ export const createGetAppTokenInfoFromCookieForFiles = (dsManager, options = {})
   const { ensureAppName } = options  
   return async (req, res, next) => {
 
-    const userId = req.session.logged_in_user_id
+    const userId = req.session?.logged_in_user_id
     try {
 
       // Get app token from cookie
@@ -266,13 +350,14 @@ export const createGetAppTokenInfoFromCookieForFiles = (dsManager, options = {})
 
       if (!tokenInfo || !tokenInfo.app_token) {
         console.error('❌ Token info or app_token not found', { tokenInfo, userId })
-        req.session.regenerate((regenerateErr) => {
-          if (regenerateErr) {
-            console.error('Session regeneration error during app logout:', regenerateErr)
-            return 
+        // Destroy session on auth failure - no valid session should remain
+        req.session.destroy((destroyErr) => {
+          if (destroyErr) {
+            console.error('Session destruction error on auth failure:', destroyErr)
           }
-          return sendAuthFailure(res, { type: 'Unauthorized', user_id: userId, error: 'tokenNotFound', shouldBeAlertedToFailure: true })
+          return sendAuthFailure(res, { req, type: 'Unauthorized', user_id: userId, error: 'tokenNotFound', shouldBeAlertedToFailure: true })
         })
+        return
       }
 
 
@@ -283,6 +368,7 @@ export const createGetAppTokenInfoFromCookieForFiles = (dsManager, options = {})
           tokenRequestorId: tokenInfo.requestor_id 
         })
         return sendAuthFailure(res, { 
+          req,
           type: 'Unauthorized', 
           user_id: userId, 
           error: 'userIdMismatch', 
@@ -291,11 +377,12 @@ export const createGetAppTokenInfoFromCookieForFiles = (dsManager, options = {})
       }
 
       if (tokenInfo.app_name !== req.params.app_name) {
-        return sendAuthFailure(res, { type: 'Unauthorized', user_id: userId, error: 'tokenMismatch', shouldBeAlertedToFailure: true })
+        return sendAuthFailure(res, { req, type: 'Unauthorized', user_id: userId, error: 'tokenMismatch', shouldBeAlertedToFailure: true })
       }
 
-      if ((userId || tokenInfo.logged_in) && tokenInfo.requestor_id !== userId) {
-        return sendAuthFailure(res, { type: 'Unauthorized', user_id: userId, error: 'sessionMismatch', shouldBeAlertedToFailure: true })
+      // Only validate session match if userId exists
+      if (userId && tokenInfo.logged_in && tokenInfo.requestor_id !== userId) {
+        return sendAuthFailure(res, { req, type: 'Unauthorized', user_id: userId, error: 'sessionMismatch', shouldBeAlertedToFailure: true })
       }
 
       if (!res.locals.freezr) {
@@ -313,11 +400,13 @@ export const createGetAppTokenInfoFromCookieForFiles = (dsManager, options = {})
     } catch (error) {
       console.error('❌ Error in createGetAppTokenInfoFromCookieForFiles middleware:', error)
       return sendAuthFailure(res, {
+        req,
         type: (error.code === 'expired' ? 'expired' : 'Unauthorized'), 
         msg: error.message,
         error, 
         user_id: userId, 
-        shouldBeAlertedToFailure: (error.code !== 'expired')
+        shouldBeAlertedToFailure: false, // (error.code !== 'expired'), if expired and multiple files request then it locks out the user
+        redirectUrl: '/account/home'
       })
     }
   }
@@ -370,7 +459,7 @@ export const createOrUpdateTokenGuardFromPage = (dsManager, options = {}) => {
 
       if (!tokenInfo || !tokenInfo.app_token) {
         console.error('❌ Error setting Token ', { tokenInfo, userId, appName })
-        return res.redirect('/account/login?redirect=missing_token')
+        return res.redirect(buildLoginRedirectUrl(req, '/account/login?redirectReason=missing_token'))
       }
 
       if (!res.locals.freezr) {
@@ -389,7 +478,7 @@ export const createOrUpdateTokenGuardFromPage = (dsManager, options = {}) => {
       if (isSetup(dsManager)) {
         console.error('❌ Error in createGetAppTokenInfoFromheaderForApi middleware:', error)
         console.error('Error stack:', error.stack)
-        return res.redirect('/account/login?redirect=auth_error')
+        return res.redirect(buildLoginRedirectUrl(req, '/account/login?redirectReason=auth_error'))
       } else {
         console.error('❌ freezr is not set up -> redirecting to first registration page:', error)
         res.redirect('/register/firstSetUp')
@@ -423,7 +512,7 @@ export const createAddAppTokenInfo = (dsManager) => {
         //   error: 'Unauthorized attempt to logout',
         //   code: 'AUTHENTICATION_ERROR'
         // })
-        sendAuthFailure(res, { type: 'Unauthorized', error: 'tokenNotFound', shouldBeAlertedToFailure: true })
+        return sendAuthFailure(res, { req, type: 'Unauthorized', error: 'tokenNotFound', shouldBeAlertedToFailure: true })
       }
 
       // Extract app token from header (format: "Bearer <token>" or just the token)
@@ -465,7 +554,7 @@ export const createAddAppTokenInfo = (dsManager) => {
         //   error: 'Unauthorized attempt to logout',
         //   code: 'AUTHENTICATION_ERROR'
         // })
-        sendAuthFailure(res, { type: 'Unauthorized', user_id: userId, error: 'tokenNotFound', shouldBeAlertedToFailure: true })
+        return sendAuthFailure(res, { req, type: 'Unauthorized', user_id: userId, error: 'tokenNotFound', shouldBeAlertedToFailure: true })
       }
 
       // Add tokenDb, tokenInfo, and dsManager to res.locals
@@ -486,7 +575,7 @@ export const createAddAppTokenInfo = (dsManager) => {
 
     } catch (error) {
       console.error('❌ Error in createAddAppTokenInfo middleware:', error)
-      sendAuthFailure(res, { type: 'Unauthorized', user_id: userId, error: 'tokenNotFound', shouldBeAlertedToFailure: true })
+      sendAuthFailure(res, { req, type: 'Unauthorized', user_id: userId, error: 'tokenNotFound', shouldBeAlertedToFailure: true })
       // res.locals.flogger.authError('Unauthorized attempt to logout', { source: 'creds', accessPt: 'appToken' })
       // return res.status(401).json({
       //   success: false,

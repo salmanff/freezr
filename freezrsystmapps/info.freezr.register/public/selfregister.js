@@ -17,7 +17,8 @@ freezr.initPageScripts = function () {
     showClass(thisPage)
   } else {
     document.getElementById('freezer_img_button').style.display = 'none'
-    if (!freezrSelfRegOptions.allow || !freezrSelfRegOptions.allowAccessToSysFsDb) window.location = '/register/self'
+    if (!freezrSelfRegOptions.allow) window.location = '/'
+    if (!freezrSelfRegOptions.allowAccessToSysFsDb) window.location = '/register/self'
     document.getElementById('storageCapacity').innerHTML = '(' + freezrSelfRegOptions.defaultMBStorageLimit + 'MBs)'
     if (simplePageAutoInstallApp()) {
       document.getElementById('appInatllMessage').innerHTML = 'Launching freezr will register you as a user. You can then accept to install ' + simplePageAutoInstallApp()
@@ -273,7 +274,7 @@ const checkResource = async function (resource, options, callback) {
   showError('checking ' + longFormOf(resource) + ' . . .')
   if (!callback) callback = gotCheckStatus
   const [err, choice, params] = getFormData(resource)
-  console.log({ resource, options, callback, err, choice, params })
+  console.log({ resource, options, choice, err })
 
   if (err) {
     showError(err)

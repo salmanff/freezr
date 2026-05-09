@@ -21,6 +21,10 @@ class CacheManager {
     // Load cache preferences (for determining cacheAll, cacheRecent per app_table)
     this.cachePrefs = config.cachePrefs || this._loadDefaultCachePrefs()
     
+    // Reference to fradmin appFs for reading/writing custom cache prefs
+    // Set later via loadAdminCachePrefs() once fradmin is initialized
+    this._fradminAppFs = null
+    
     // Underlying cache storage
     this.cache = null
     this.cacheType = this.config.type || 'memory'
@@ -119,21 +123,99 @@ class CacheManager {
   }
   
   /**
-   * Update cache preferences (admin function)
+   * Load custom cache preferences from fradmin's user files
+   * Called during startup after fradmin appFs is initialized
+   * Reads customCachePrefs.json from /users_freezr/fradmin/files/info.freezr.admin/
+   * If found, merges with defaults (custom overrides defaults)
+   * 
+   * @param {Object} fradminAppFs - The fradmin info.freezr.admin appFs (from dsManager.getOrInitUserAppFS)
    */
-  updateCachePrefs(prefs) {
-    this.cachePrefs = {
-      ALL_USERS: { ...this.cachePrefs.ALL_USERS, ...prefs.ALL_USERS },
-      USER_SPECIFIC: { ...this.cachePrefs.USER_SPECIFIC, ...prefs.USER_SPECIFIC }
+  async loadAdminCachePrefs(fradminAppFs) {
+    if (!fradminAppFs) {
+      console.warn('⚠️ loadAdminCachePrefs called without fradminAppFs')
+      return this.cachePrefs
     }
     
-    // Optionally save to file
+    // Store reference for later use by updateCachePrefs
+    this._fradminAppFs = fradminAppFs
+    
     try {
-      const prefsPath = path.join(__dirname, 'defaultCachePrefs.json')
-      fs.writeFileSync(prefsPath, JSON.stringify(this.cachePrefs, null, 2))
-      console.log('Cache preferences updated and saved')
+      const customPrefsStr = await fradminAppFs.readUserFile('customCachePrefs.json', {})
+      if (customPrefsStr && customPrefsStr.toString() !== 'null') {
+        const customPrefs = JSON.parse(customPrefsStr.toString())
+        console.log('customPrefs', { customPrefs })
+        
+        // Merge custom prefs over defaults
+        // For ALL_USERS: custom entries override defaults per table
+        // For USER_SPECIFIC: custom entries override defaults per user+table
+        const defaults = this._loadDefaultCachePrefs()
+        this.cachePrefs = {
+          ALL_USERS: { ...defaults.ALL_USERS, ...(customPrefs.ALL_USERS || {}) },
+          USER_SPECIFIC: { ...defaults.USER_SPECIFIC }
+        }
+        
+        // Deep merge USER_SPECIFIC (per user, per table)
+        if (customPrefs.USER_SPECIFIC) {
+          for (const [user, tables] of Object.entries(customPrefs.USER_SPECIFIC)) {
+            this.cachePrefs.USER_SPECIFIC[user] = {
+              ...(this.cachePrefs.USER_SPECIFIC[user] || {}),
+              ...tables
+            }
+          }
+        }
+        
+        console.log('✅ Custom cache preferences loaded from fradmin user files', { 
+          allUserTables: Object.keys(this.cachePrefs.ALL_USERS).length,
+          userSpecificUsers: Object.keys(this.cachePrefs.USER_SPECIFIC).length 
+        })
+      } else {
+        console.log('ℹ️ Custom cache preference NOT found in fradmin files - using defaults')
+      }
     } catch (err) {
-      console.warn('Could not save cache preferences:', err.message)
+      if (err.code === 'ENOENT' || err.message?.includes('not found') || err.message?.includes('no such file')) {
+        console.log('ℹ️ Custom cache preference NOT found in fradmin files - using defaults')
+      } else {
+        console.warn('⚠️ Error reading customCachePrefs.json:', err.message, '- using defaults')
+      }
+    }
+    
+    return this.cachePrefs
+  }
+  
+  /**
+   * Update cache preferences (admin function)
+   * Saves to fradmin's user files for persistence across restarts
+   */
+  async updateCachePrefs(prefs) {
+    this.cachePrefs = {
+      ALL_USERS: { ...this.cachePrefs.ALL_USERS, ...(prefs.ALL_USERS || {}) },
+      USER_SPECIFIC: { ...this.cachePrefs.USER_SPECIFIC }
+    }
+    
+    // Deep merge USER_SPECIFIC
+    if (prefs.USER_SPECIFIC) {
+      for (const [user, tables] of Object.entries(prefs.USER_SPECIFIC)) {
+        this.cachePrefs.USER_SPECIFIC[user] = {
+          ...(this.cachePrefs.USER_SPECIFIC[user] || {}),
+          ...tables
+        }
+      }
+    }
+    
+    // Save to fradmin user files (persistent across restarts)
+    if (this._fradminAppFs) {
+      try {
+        await this._fradminAppFs.writeToUserFiles(
+          'customCachePrefs.json', 
+          JSON.stringify(this.cachePrefs, null, 2), 
+          { doNotOverWrite: false }
+        )
+        console.log('✅ Cache preferences updated and saved to fradmin user files')
+      } catch (err) {
+        console.warn('⚠️ Could not save cache preferences to fradmin user files:', err.message)
+      }
+    } else {
+      console.warn('⚠️ Cache preferences updated in memory only - fradmin appFs not available yet')
     }
     
     return this.cachePrefs

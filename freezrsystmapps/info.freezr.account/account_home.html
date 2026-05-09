@@ -28,9 +28,13 @@ freezr Account Home
             Welcome to your freezr home page!
         </div>
 
+        <div id="notificationsBanner" style="display:none;"></div>
+
         <div id="errorBox" class="errorBox"></div>
 
         <div class="freezr-card" id="app_list">
+            <a href="/creator" class="freezrButt" style="float: right;">Create An App</a>
+
             <h2 style="margin-bottom: 1rem;">
                 {{#user_apps.length }}You have {{ user_apps.length }} installed apps. 
                 <span style="font-size: 13px; font-weight: normal; margin-left: 0.5rem;">
@@ -62,7 +66,9 @@ freezr Account Home
         </div>
 
         <div class="freezr-card" id="installDialogueBox">
-            <h2 style="margin-bottom: 1rem;">Install New Apps</h2>
+            <h2 style="margin-bottom: 1rem;">
+                Install Existing Apps
+            </h2>
             <!-- Tab links -->
             <div class="tab">
                 <button class="tablinks" id ="button_tabs_featured">Featured</button>
@@ -78,7 +84,7 @@ freezr Account Home
                 <p>Here are sample apps you can download.</p>
                 <p>Press to Install:</p>
                 <ul>
-                    <li class ="feature_app" id="button_feature_com.salmanff.notery">Notery: A note taking app</li>
+                    <li class ="feature_app" id="button_feature_com.salmanff.orbit">Orbit: A web page publishing tool</li>
                     <li class ="feature_app" id="button_feature_cards.hiper.freezr">Hiper Cards: Companion app to the <a href="https://chromewebstore.google.com/detail/hipercards-bookmarker-hig/peoooghegmfpgpafglhhibeeeeggmfhb">hiper cards browser extension</a>.</li>
                     <li class ="feature_app" id="button_feature_com.salmanff.poster">Poster: A simple blogging app</li>
                 </ul>
@@ -86,17 +92,35 @@ freezr Account Home
             </div>
     
             <div id="tab_upload" class="tabcontent">
-                <h3>Upload a New App</h3>
-                <div style="display: flex; justify-content: center; margin-bottom: 1rem;">
-                    <div class="drop-area" id="upload_area">
-                        Drop files here to upload
+                <div id="uploadNormalContent">
+                    <h3>Upload a New App</h3>
+                    <div style="display: flex; justify-content: center; margin-bottom: 1rem;">
+                        <div class="drop-area" id="upload_area">
+                            Drop files here to upload
+                        </div>
+                    </div>
+                    <div class="file-chooser-wrapper">
+                        <div class="freezrButt" id="button_chooseFile">Choose a file</div>
+                        <input id="app_zipfile2" type="file" accept=".zip" style="display:none" name="app_zipfile2"/>
+                        <span class="file-chooser-name" id="chosen_file_name"></span>
+                        <div id="button_uploadZipFileApp" class="freezrButt" style="display:none">Upload</div>
                     </div>
                 </div>
-                <div class="file-chooser-wrapper">
-                    <div class="freezrButt" id="button_chooseFile">Choose a file</div>
-                    <input id="app_zipfile2" type="file" accept=".zip" style="display:none" name="app_zipfile2"/>
-                    <span class="file-chooser-name" id="chosen_file_name"></span>
-                    <div id="button_uploadZipFileApp" class="freezrButt" style="display:none">Upload</div>
+                <div id="installProgressArea" style="display:none;">
+                    <div class="install-progress-inner">
+                        <div id="installSpinner" class="freezr-spinner"></div>
+                        <h3 id="installProgressTitle">Installing app...</h3>
+                        <p id="installProgressSubtitle" class="install-subtitle">Please wait while the app is being installed.</p>
+                    </div>
+                    <div id="installResultArea" style="display:none;">
+                        <div id="installResultMessage"></div>
+                        <div id="installWarnings" class="install-warnings" style="display:none;"></div>
+                        <div class="install-result-actions" id="installResultActions" style="display:none;">
+                            <a id="installResultLaunchApp" class="freezrButt" href="#">Launch App</a>
+                            <a id="installResultGoToApp" class="freezrButt install-settings-btn" href="#">App Settings</a>
+                            <div id="button_installDone" class="freezrButt install-done-btn">Done</div>
+                        </div>
+                    </div>
                 </div>
             </div>
     

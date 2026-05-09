@@ -4,8 +4,8 @@
  * Session configuration
  */
 export const SESSION_CONFIG = {
-  /** Session TTL in milliseconds (6 months) */
-  TTL_MS: 6 * 30 * 24 * 60 * 60 * 1000,  // 15552000000
+  /** Session TTL in milliseconds (30 days) */
+  TTL_MS: 30 * 24 * 60 * 60 * 1000,  // 2592000000
   
   /** Session cookie name */
   COOKIE_NAME: 'freezr_session',
@@ -29,6 +29,20 @@ export const AUTH_RATE_LIMIT = {
   
   /** How long to block after exceeding limits (5 minutes) */
   BLOCK_DURATION_MS: 5 * 60 * 1000
+}
+
+/**
+ * API rate limiting configuration (per-user, per-server)
+ */
+export const API_RATE_LIMIT = {
+  /** Maximum API requests per user per time window before hard reject */
+  MAX_REQUESTS_PER_USER: 300,
+
+  /** Request count at which throttling (gradual delay) begins */
+  THROTTLE_START: 270,
+
+  /** Time window in milliseconds (1 minute) */
+  WINDOW_MS: 60 * 1000
 }
 
 /**

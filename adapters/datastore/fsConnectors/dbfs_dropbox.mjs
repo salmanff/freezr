@@ -405,8 +405,10 @@ DropboxFS.prototype.getFileToSend = function (path, options, callback) {
       if (!response || !response.result || !response.result.fileBinary) {
         return callback(new Error('null response from dbx getting ' + path))
       } else {
-        // Return file content as string, consistent with AWS and Azure
-        return callback(null, response.result.fileBinary.toString())
+        // Return file content as Buffer, consistent with AWS and Azure
+        // Note: fileBinary is already a Buffer in Node.js - do NOT call .toString() 
+        // as that corrupts binary files (images, PDFs, etc.)
+        return callback(null, response.result.fileBinary)
       }
     })
     .catch(error => {

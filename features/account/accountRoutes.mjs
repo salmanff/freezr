@@ -115,25 +115,14 @@ export const createAccountPageRoutes = ({ dsManager, freezrPrefs, freezrStatus }
   }
 
   // ===== PAGE ROUTES =====
-  // nb todo - had previously removed notLoggedInGuard because expired token can take you to the login page
-  // 2025-11 added it back in so logged in page is nto accessed but added pageTokenGuard to renew token if needed
-  router.get('/login', pageTokenGuard, notLoggedInGuard, setupGuard, loginContext, noCheckNeeded, generateLoginPage)
-  
+
+  router.get('/login', pageTokenGuard, notLoggedInGuard, setupGuard, loginContext, noCheckNeeded, generateLoginPage)  
   router.get('/logout', noCheckNeeded, logOutAction)
   
   router.get('/app/:sub_page', setupGuard, loggedInGuard, (req, res, next) => { req.params.page = 'app'; next() }, addAccountManifestToResLocals, pageTokenGuard, addUserDSAndAppFS, isLoggedInAccountAppRequest, accountPageController.generateAccountPage)
   router.get('/app/:sub_page/:target_app', setupGuard, loggedInGuard, (req, res, next) => { req.params.page = 'app'; next() }, addAccountManifestToResLocals, pageTokenGuard, addUserDSAndAppFS, isLoggedInAccountAppRequest, accountPageController.generateAccountPage)
 
-  // router.get('/:page/validateNonce', setupGuard, loggedInGuard, pageTokenGuard, addUserDSAndAppFS, accountPageController.generateAccountPage)
   router.get('/:page', setupGuard, loggedInGuard, addAccountManifestToResLocals, pageTokenGuard, addUserDSAndAppFS, isLoggedInAccountAppRequest, accountPageController.generateAccountPage)
-
-  
-  /**
-   * GET /:page/:target_app
-   * Display account pages with target app for authenticated users
-   */
-  // TODO: WHERE IS THIS USED?
-  // router.get('/:page/:target_app', setupGuard, loggedInGuard, getAppTokenInfo, addUserDSAndAppFS, accountPageController.generateAccountPage)
   
   return router
 }
@@ -159,6 +148,7 @@ export const createAcctApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
   const loggedInGuard = createAuthGuard()
   // const getAppTokenInfo = createGetAppTokenInfoFromheaderForApi(dsManager)
   const getAndCheckAccountAppTokenInfo = createGetAppTokenInfoFromheaderForApi(dsManager, { ensureAppName: 'info.freezr.account' })
+  const getAndCheckAccountOrCreatorAppTokenInfo = createGetAppTokenInfoFromheaderForApi(dsManager, { ensureAppNames: ['info.freezr.account', 'info.freezr.creator'] })
   const getAndCheckAccountOrAmdinAppTokenInfo = createGetAppTokenInfoFromheaderForApi(dsManager, { ensureAppNames: ['info.freezr.account', 'info.freezr.admin'] })
   
   const addAppTokenInfo = createAddAppTokenInfo(dsManager) // for app token validation (doesn't require logged in user)
@@ -175,10 +165,7 @@ export const createAcctApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
   const upload = multer().single('file')
 
   // ===== CREATE MIDDLEWARE INSTANCES =====
-  
-  // Guards for API routes
-  const systemAppGuard = createSystemAppGuard()  // Ensure app_name is a system app
-  
+    
   // ===== CREATE CONTROLLERS =====
   
   // API Controllers
@@ -186,33 +173,14 @@ export const createAcctApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
   const accountApiController = createAccountApiController()
   
   // ===== API ROUTES =====
-  
-  /**
-   * GET /test
-   * Simple test route to verify modern API routes are working
-   */
-  // router.get('/test', (req, response) => {
-  //   response.json({
-  //     success: true,
-  //     message: 'Modern API routes are working!',
-  //     timestamp: new Date().toISOString(),
-  //     path: req.path
-  //   })
-  // })
-  
-  /**
-   * POST /login
-   * Authenticate user and create session
-   * 
-   * Modern replacement for /v1/account/login
-   */
+
   router.post('/login', noCheckNeeded, loginApiController.handleLogin)
   
   router.get('/generateAppPassword', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addTokenDb, isLoggedInAccountAppRequest, accountApiController.generateAppPassword)
   router.post('/applogout', setupGuard, addAppTokenInfo, noCheckNeeded, accountApiController.userAppLogOut)
 
   router.post('/updateAppFromFiles', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addFreezrAccountAsReqParam, addUserDSAndAppFS, addOwnerPermsDb, addPublicManifestsDb, isLoggedInAccountAppRequest, accountApiController.updateAppFromFilesController)
-  router.post('/appMgmtActions', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addFreezrAccountAsReqParam, addUserDSAndAppFS, addPublicManifestsDb, addPublicRecordsDB, isLoggedInAccountAppRequest, accountApiController.handleAppMgmtActions)
+  router.post('/appMgmtActions', setupGuard, loggedInGuard, getAndCheckAccountOrCreatorAppTokenInfo, addFreezrAccountAsReqParam, addUserDSAndAppFS, addPublicManifestsDb, addPublicRecordsDB, isLoggedInAccountAppRequest, accountApiController.handleAppMgmtActions)
 
   router.put('/app_install_from_zipfile', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, upload, addFreezrAccountAsReqParam, addUserDSAndAppFS, addOwnerPermsDb, addPublicRecordsDB, isLoggedInAccountAppRequest, accountApiController.installAppFromZipFile)
   router.post('/app_install_from_url', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addFreezrAccountAsReqParam, addUserDSAndAppFS, addOwnerPermsDb, addPublicRecordsDB, isLoggedInAccountAppRequest, accountApiController.installAppFromUrlController)

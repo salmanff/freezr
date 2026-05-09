@@ -61,7 +61,7 @@ export async function getOrSetAppTokenForLoggedInUser(tokenDb, appName, session,
       }
       if (!existingToken) {
         appToken = generateAppToken(userId, appName, deviceCode)
-        // console.log('🔑 getOrSetAppTokenForLoggedInUser - generated new appToken', { appToken })
+        // onsole.log('🔑 getOrSetAppTokenForLoggedInUser - generated new appToken', { appToken })
       } else if (existingToken.app_name !== appName) {
         // console.warn('🔑 Token mismatch - app name mismatch - this should not happen SNBH ', { existingToken, appName })
         appToken = generateAppToken(userId, appName, deviceCode)
@@ -89,6 +89,7 @@ export async function getOrSetAppTokenForLoggedInUser(tokenDb, appName, session,
     // Create new token
     const newToken = {
       logged_in: true,
+      token_type: 'browser',
       source_device: deviceCode,
       requestor_id: userId,
       owner_id: userId,
@@ -107,10 +108,10 @@ export async function getOrSetAppTokenForLoggedInUser(tokenDb, appName, session,
       // tokenDb.cache.byToken[expiredToken.app_token] = null
       writeResult = await tokenDb.update(expiredToken._id, newToken, { replaceAllFields: true })
       newToken._id = expiredToken._id
-      // console.log('🔑 Updated token record', { tokenDb, aoc: tokenDb.dbParams.aoc })
+      // onsole.log('🔑 Updated token record', { tokenDb, aoc: tokenDb.dbParams.aoc })
     } else {
       writeResult = await tokenDb.create(null, newToken, { })
-      // console.log('🔑 new token writeResult ', { newToken, writeResult, tokenDb, aoc: tokenDb.dbParams.aoc })
+      // onsole.log('🔑 new token writeResult ', { newToken, writeResult, tokenDb, aoc: tokenDb.dbParams.aoc })
     }
     
     // // Update cache
@@ -144,10 +145,10 @@ export async function getAppTokenFromHeaderAndDoMinimalChecks(tokenDb, session, 
   // ONLY CHECKS user_id and device_code for logged_in tokens, and expiry 
     
   const existingHeaderToken = getAppTokenFromHeader(headers)
-  // console.log('🔑 existingHeaderToken', { existingHeaderToken })
+  // onsole.log('🔑 existingHeaderToken', { existingHeaderToken })
 
   // onsole.log('🔑 Existing header token:', existingHeaderToken)
-  const userId = session.logged_in_user_id
+  const userId = session?.logged_in_user_id || null
   const existingCookieToken = (userId && tempCookieFortesting) ? tempCookieFortesting['app_token_' + userId] : null
 
   if (!existingHeaderToken) {
@@ -163,11 +164,17 @@ export async function getAppTokenFromHeaderAndDoMinimalChecks(tokenDb, session, 
   if (results && results.length > 0) {
     tokenInfo = results[0]
   }
+  
+  if (!tokenInfo) {
+    console.error('❌ Token not found in database')
+    throw new Error('Token not found in database')
+  }
+  
   if (existingHeaderToken && existingCookieToken && existingHeaderToken !== existingCookieToken && process.env.FREEZR_TEST_MODE !== 'true') {
     console.warn('⚠️ existingHeaderToken and existingCookieToken both found - should this happen?? - SNBH??')
     console.warn('⚠️ .. AND THEY ARE NOT EVEN EQUAL ???? 🤷🏽‍♂️ - SNBH??', { existingHeaderToken, existingCookieToken })
-    const results2 = await tokenDb.query({ app_token: existingCookieToken })
-    console.log('🔑 getAppTokenFromHeaderAndDoMinimalChecks - got results2', { results2, tokenInfo })
+    // const results2 = await tokenDb.query({ app_token: existingCookieToken })
+    // onsole.log('🔑 getAppTokenFromHeaderAndDoMinimalChecks - got results2', { results2, tokenInfo })
 
   }
   
@@ -176,21 +183,48 @@ export async function getAppTokenFromHeaderAndDoMinimalChecks(tokenDb, session, 
   // tokenDb.cache.byToken[tokenInfo.app_token] = tokenInfo
   // }
 
+  // 🟣🟣🟣 DIAG: log every offline-token usage so we can see whether the same
+  // token survives past its expiry, or whether a fresh one is silently issued
+  // if (tokenInfo && !tokenInfo.logged_in) {
+  //   const _now = Date.now()
+  //   const _msFromNow = (tokenInfo.expiry || 0) - _now
+  //   console.log('🟣🟣🟣 OFFLINE-TOKEN USED (incoming API call)', {
+  //     app_token: tokenInfo.app_token ? tokenInfo.app_token.substring(0, 10) + '...' : null,
+  //     app_name: tokenInfo.app_name,
+  //     token_type: tokenInfo.token_type,
+  //     requestor_id: tokenInfo.requestor_id,
+  //     owner_id: tokenInfo.owner_id,
+  //     expiry_iso: tokenInfo.expiry ? new Date(tokenInfo.expiry).toISOString() : null,
+  //     expires_in_sec: Math.round(_msFromNow / 1000),
+  //     is_expired: _msFromNow <= 0
+  //   })
+  // }
+
   if (isExpired(tokenInfo)) {
-    console.warn('⚠️ Token is expired wthout any recent visits', { tokenInfo })
-    throw new Error('Token is expired')
+    // if (tokenInfo && !tokenInfo.logged_in) {
+    //   console.warn('🟣🟣🟣 OFFLINE-TOKEN EXPIRED — rejecting request', {
+    //     app_token: tokenInfo.app_token ? tokenInfo.app_token.substring(0, 10) + '...' : null,
+    //     app_name: tokenInfo.app_name,
+    //     expiry_iso: tokenInfo.expiry ? new Date(tokenInfo.expiry).toISOString() : null,
+    //     expired_ago_sec: Math.round((Date.now() - (tokenInfo.expiry || 0)) / 1000)
+    //   })
+    // }
+    console.warn('⚠️ Token is expired wthout any recent visits (c)', { tokenInfo })
+    const err = new Error('Token is expired')
+    err.code = 'expired'
+    throw err
   }
 
-  // Extra checks for logged in
-  if (tokenInfo.logged_in) {
+  // Session binding: only validate for browser tokens (oauth tokens skip this)
+  if (tokenInfo.token_type === 'browser' && session?.logged_in_user_id) {
     const deviceCode = session.device_code
-    const userId = session.logged_in_user_id
+    const sessionUserId = session.logged_in_user_id
     
-    if (!userId || (!deviceCode && process.env.FREEZR_TEST_MODE !== 'true')) {
+    if (!sessionUserId || (!deviceCode && process.env.FREEZR_TEST_MODE !== 'true')) {
       const error = new Error('no user or deviceCode for getOrSetAppTokenForLoggedInUser (1)')
       throw error
     }
-    if (tokenInfo.requestor_id !== userId || tokenInfo.user_device !== deviceCode) {
+    if (tokenInfo.requestor_id !== sessionUserId || tokenInfo.user_device !== deviceCode) {
       throw new Error('token mismatch')
     }
   }
@@ -249,7 +283,7 @@ export async function getAndCheckCookieTokenForLoggedInUser(tokenDb, session, co
     throw new Error('Could Not auth credentials')
   }
   
-  if (!tokenInfo.logged_in 
+  if (tokenInfo.token_type !== 'browser'
     || tokenInfo.requestor_id !== userId
     // || (!appName || tokenDb.cache.byToken[existingCookieToken].app_name === appName)
     || tokenInfo.user_device !== deviceCode) {
@@ -258,13 +292,15 @@ export async function getAndCheckCookieTokenForLoggedInUser(tokenDb, session, co
   } 
 
   if (isExpired(tokenInfo)) {
-    console.warn('⚠️ Token is expired wthout any recent visits', { tokenInfo })
-    throw new Error('Token is expired')
+    console.warn('⚠️ Token is expired wthout any recent visits (h)', { tokenInfo })
+    const err = new Error('Token is expired')
+    err.code = 'expired'
+    throw err
   } 
   // if (isCloseToExpiry(tokenInfo)) {
     // Should use a different function to extend the token
   //} 
-  // console.log('🔍 getAndCheckCookieTokenForLoggedInUser - returning tokenInfo', { tokenInfo })
+  // onsole.log('🔍 getAndCheckCookieTokenForLoggedInUser - returning tokenInfo', { tokenInfo })
   return tokenInfo
 }
 
@@ -308,7 +344,7 @@ export async function OLDOLDgetCheckAndExtendAppTokenFromheader(tokenDb, appName
     }
     const returnTokenOrThrowOnExpired = (tokenInfo) => {
       if (isExpired(tokenInfo)) {
-        console.log('🔑 Token is expired:', tokenInfo)
+        // onsole.log('🔑 Token is expired:', tokenInfo)
         throw expiredTokenError(tokenInfo)
       } else {
         return tokenInfo

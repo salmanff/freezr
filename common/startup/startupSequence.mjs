@@ -142,6 +142,12 @@ export async function startupSequence (app, VERSION) {
       dsManager.setSystemUserDS('fradmin', systemEnv)
       dsManager.setSystemUserDS('public', systemEnv)
       await dsManager.initAdminDBs(dsManager.initialEnvironment, freezrPrefs)
+      
+      // Load custom cache preferences from fradmin user files (if any)
+      // fradminAdminFs was initialized in step 6
+      if (fradminAdminFs) {
+        await dsManager.cacheManager.loadAdminCachePrefs(fradminAdminFs)
+      }
     }
 
     // Step 9: Check server version and run updates
@@ -156,10 +162,16 @@ export async function startupSequence (app, VERSION) {
       
       flogger.info('❄️  Database: ' + freezrStatus.dbChoice + ' (' + freezrStatus.dbType + ') | FS: ' + freezrStatus.fsType)
       
-      if ((process.env?.DB_UNIFICATION || freezrPrefs.dbUnificationStrategy) && 
-          freezrPrefs.dbUnificationStrategy !== 'db' && 
-          freezrPrefs.dbUnificationStrategy !== process.env.DB_UNIFICATION) {
-        throw new Error('db process unification mismatch')
+      // Refuse to start if env DB_UNIFICATION disagrees with the strategy
+      // recorded in main_prefs. Switching strategy without migrating data
+      // causes silent data invisibility and per-row corruption on first edit
+      // (see xplanations/review_security_internal_2_authorization_audit.md).
+      // Treat missing values on either side as 'db' so legacy installs and
+      // unset env vars compare cleanly.
+      const envStrat = process.env?.DB_UNIFICATION || 'db'
+      const prefStrat = freezrPrefs.dbUnificationStrategy || 'db'
+      if (envStrat !== prefStrat) {
+        throw new Error('db unification mismatch — env=' + envStrat + ' prefs=' + prefStrat + '; refusing to start to avoid silent data-shape mismatch. Migrate data before changing the strategy.')
       }
       
       if (freezrStatus.can_read_write_to_db) {

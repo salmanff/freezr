@@ -27,9 +27,17 @@ export const getOrSetPrefs = async (paramsDb, prefName, prefsToSet, doSet) => {
       // Setting preferences
       if (prefOnDb) {
         // Update existing preferences
-        if (prefName === 'main_prefs' && prefOnDb.dbUnificationStrategy && 
-            prefOnDb.dbUnificationStrategy !== prefsToSet.dbUnificationStrategy) {
-          throw new Error('Cannot change dbUnificationStrategy once it has been set')
+        // Treat missing dbUnificationStrategy on either side as 'db' so
+        // legacy main_prefs rows (written before the field existed) are
+        // still locked in to their original strategy. Changing strategy
+        // requires manual data migration (see
+        // xplanations/review_security_internal_2_authorization_audit.md).
+        if (prefName === 'main_prefs') {
+          const oldStrat = prefOnDb.dbUnificationStrategy || 'db'
+          const newStrat = prefsToSet.dbUnificationStrategy || 'db'
+          if (oldStrat !== newStrat) {
+            throw new Error('Cannot change dbUnificationStrategy once it has been set (was ' + oldStrat + ', got ' + newStrat + ')')
+          }
         }
         console.log('🔄 Updating preferences', { prefName, prefsToSet })
         await paramsDb.update(prefName, prefsToSet, { replaceAllFields: true, multi: false })

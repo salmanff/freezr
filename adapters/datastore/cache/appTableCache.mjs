@@ -8,6 +8,7 @@
 import cacheConfig from './cacheConfig.mjs'
 import {
   hashQuery,
+  isDefaultSort,
   isDateModifiedGtQuery,
   isSimpleQuery,
   isCacheableValue,
@@ -16,6 +17,7 @@ import {
   filterRecords,
   isRecentCacheComplete
 } from './queryMatcher.mjs'
+import { hasUnifiedStrategy, getRevisedIdWithOatAdded } from '../dbConnectors/mongo_utils.mjs'
 
 class AppTableCache {
   /**
@@ -32,18 +34,24 @@ class AppTableCache {
     this.namespace = `${owner}:${appTable}`
     this.config = { ...cacheConfig, ...config }
     
+    // Unified DB support: store OAC and dbParams so we can revise _id in queries
+    // In unified DB mode, the DB adapter prefixes manual _id values with owner__appTable__
+    // but the application queries with the original _id. The cache needs to know how to
+    // translate between the two.
+    this._oac = config.oac || null
+    this._dbParams = config.dbParams ? { dbUnificationStrategy: config.dbParams.dbUnificationStrategy } : null
+    this._hasUnifiedStrategy = (this._oac && this._dbParams) 
+      ? hasUnifiedStrategy(this._dbParams, this._oac.owner) 
+      : false
+    
     // Write debouncing
     this.invalidationTimer = null
-    this.dirtyFlags = {
-      All: false,
-      Recent: false
-    }
     
-    // Work In Progress flags - track when cache is being populated
-    this.wipFlags = {
-      All: false,      // Set to true when All cache is being populated
-      Recent: false    // Set to true when Recent cache is being populated
-    }
+    // Dirty and WIP flags are stored in the shared cache (not local memory)
+    // so they are visible across all server instances sharing the same cache.
+    // A Proxy intercepts reads/writes and delegates to the cache interface.
+    this.dirtyFlags = this._createSharedFlags('dirty')
+    this.wipFlags = this._createSharedFlags('wip')
     
     // Cache configuration flags
     this.cacheAll = config.cacheAll || false  // Opt-in for All cache
@@ -71,20 +79,86 @@ class AppTableCache {
   }
   
   /**
+   * Create a Proxy-backed flags object that stores values in the shared cache.
+   * Reads/writes to .All and .Recent are transparently redirected to cache keys
+   * like "owner:appTable:_flags:dirty:All". This makes flags visible across
+   * all server instances sharing the same cache backend (e.g. Redis).
+   */
+  _createSharedFlags(prefix) {
+    const cache = this
+    return new Proxy({}, {
+      get (target, prop) {
+        if (prop === 'All' || prop === 'Recent') {
+          const key = cache._buildKey('_flags', prefix, prop)
+          return cache._interface.get(key) || false
+        }
+        return undefined
+      },
+      set (target, prop, value) {
+        if (prop === 'All' || prop === 'Recent') {
+          const key = cache._buildKey('_flags', prefix, prop)
+          if (value) {
+            cache._interface.set(key, true, {
+              type: '_flags',
+              namespace: cache.namespace,
+              ttl: 0
+            })
+          } else {
+            cache._interface.delete(key)
+          }
+          return true
+        }
+        return true
+      }
+    })
+  }
+  
+  /**
+   * Strip unified DB fields (__owner, __appTable) from a query and
+   * revise _id to match the prefixed format used in the DB.
+   * In unified DB mode the DB connector injects __owner/__appTable into every query
+   * and prefixes manual _id values with owner__appTable__. The cache is already scoped
+   * by owner:appTable via the namespace, so __owner/__appTable are redundant.
+   * But _id needs to be revised so cache lookups match the DB-stored _id values.
+   */
+  _stripUnifiedDbFields(query) {
+    if (!query || typeof query !== 'object') return query
+    
+    const needsOwnerStrip = query.__owner || query.__appTable
+    const needsIdRevise = this._hasUnifiedStrategy && query._id && typeof query._id === 'string'
+    
+    if (!needsOwnerStrip && !needsIdRevise) return query
+    
+    const cleaned = { ...query }
+    delete cleaned.__owner
+    delete cleaned.__appTable
+    
+    // In unified DB mode, revise _id to match the prefixed format stored in the DB
+    // e.g. 'userId_appName' → 'userId__info_freezr_account_app_list__userId_appName'
+    if (needsIdRevise) {
+      cleaned._id = getRevisedIdWithOatAdded(cleaned._id, this._oac)
+    }
+    
+    return cleaned
+  }
+  
+  /**
    * Check if query is empty or just a date sort (equivalent to Recent)
+   * Only descending _date_modified sorts can be answered by Recent cache —
+   * Recent only holds the newest N records, so ascending ("oldest first")
+   * queries must fall through to All cache or DB.
    */
   _isEmptyOrDateSort(query, options) {
     // Empty query
     if (!query || Object.keys(query).length === 0) {
       if (!options?.sort) return true
-      // Only has _date_modified sort
-      if (options?.sort && 
+      if (options?.sort &&
           Object.keys(options.sort).length === 1 &&
-          options.sort._date_modified) {
+          options.sort._date_modified === -1) {
         return true
       }
     }
-    
+
     return false
   }
   
@@ -129,11 +203,15 @@ class AppTableCache {
   async query(query, options = {}) {
     this.stats.queries++
     
+    // Strip unified DB fields - cache is already scoped by owner:appTable
+    query = this._stripUnifiedDbFields(query)
+    
     // Check WIP status - if still WIP after optional wait, query DB directly
     const isWIP = await this._checkWIP(options)
     if (isWIP) {
       this.stats.dbHits++
-      console.warn('🔴 Cache WIP - cahche filling is taking too long for', { query, owner: this.owner, appTable: this.appTable } )
+      // console.warn('🔴 Cache WIP - cahche filling is taking too long for', { query, owner: this.owner, appTable: this.appTable } )
+      console.log('C-M ⏳⏳⏳⏳⏳ CACHE WIP - cache filling taking too long, going to DB', { table: this.appTable, query })
       return null
     }
     
@@ -171,6 +249,7 @@ class AppTableCache {
     // Check WIP flags - if cache is being populated, query DB directly
     if (this.wipFlags.Recent || (this.cacheAll && this.wipFlags.All)) {
       // onsole.log('📦 Cache WIP - querying DB directly for empty/date sort query', { wipRecent: this.wipFlags.Recent, wipAll: this.wipFlags.All })
+      console.log('C-M ⏳⏳⏳⏳⏳ CACHE WIP - empty/date query going to DB', { table: this.appTable, wipRecent: this.wipFlags.Recent, wipAll: this.wipFlags.All, owner: this.owner })
       this.stats.dbHits++
       return null
     }
@@ -180,6 +259,7 @@ class AppTableCache {
     if (recentRecords !== null) {
       const filtered = filterRecords(recentRecords, query, options)
       this.stats.cacheHits++
+      console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Recent) - empty/date query', { table: this.appTable, resultCount: filtered?.length, owner: this.owner })
       return filtered
     }
     
@@ -189,12 +269,14 @@ class AppTableCache {
       if (allRecords !== null) {
         const filtered = filterRecords(allRecords, query, options)
         this.stats.cacheHits++
+        console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (All) - empty/date query', { table: this.appTable, resultCount: filtered?.length })
         return filtered
       }
     }
     
     // 3. Cache miss - caller should hit DB
     this.stats.dbHits++
+    console.log('C-M 🔵🔵🔵🔵🔵 CACHE MISS - empty/date query going to DB', { table: this.appTable })
     return null
   }
   
@@ -206,18 +288,28 @@ class AppTableCache {
     // Check WIP flags - if All cache is being populated, don't trust it yet
     if (this.cacheAll && this.wipFlags.All) {
       // onsole.log('📦 Cache WIP - querying DB directly for byKey query', { field, value, wipAll: this.wipFlags.All })
+      console.log('C-M ⏳⏳⏳⏳⏳ CACHE WIP - byKey query going to DB', { table: this.appTable, field, value })
+      
       this.stats.dbHits++
       return null
     }
     
     // 1. Check byKey cache
+    // The cached array is the canonical record set in default order.
+    // Re-apply caller's sort/skip/count in memory. If the request reaches
+    // beyond the cached window, fall through to DB (cache may be saturated
+    // at cacheCountMax with more rows behind it).
     const byKeyResult = this.getByKey(field, value)
     if (byKeyResult !== null) {
-      this.stats.cacheHits++
-      // onsole.log('📦 Cache - got a simple query byKey hit', { field, value, query, reslen: byKeyResult?.length } )
-      return byKeyResult  // Return as array to match query format
-    } else {
-      // onsole.log('📦 Cache - got a simple query byKey miss', { field, value, query } )
+      const skip = options?.skip || 0
+      const count = options?.count || options?.limit || 0
+      if (count && (skip + count > byKeyResult.length)) {
+        console.log('C-M 🔵🔵🔵🔵🔵 CACHE INSUFFICIENT (byKey) - have', byKeyResult.length, 'need', skip + count, { table: this.appTable, field, value })
+      } else {
+        this.stats.cacheHits++
+        console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (byKey)', { table: this.appTable, field, value, resultCount: Array.isArray(byKeyResult) ? byKeyResult.length : 1 })
+        return filterRecords(byKeyResult, {}, options)
+      }
     }
     
     // 2. Check All cache (if exists, it's authoritative)
@@ -227,16 +319,23 @@ class AppTableCache {
         const filtered = filterRecords(allRecords, query, options)
         // onsole.log('📦 Cache - got a simple query byKey miss - All cache', { field, value, query, allRecordsLen: allRecords?.length, filteredLen: filtered?.length } )
         this.stats.cacheHits++
+        console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (All) - byKey fallback', { table: this.appTable, field, value, resultCount: filtered?.length })
         return filtered  // If All exists and no match, return empty (don't check DB)
       }
     }
     
     // 3. Check Recent cache
+    // Recent only holds the newest N records, so it can only answer
+    // queries whose sort is compatible with that natural order
+    // (no sort, or _date_modified: -1). Ascending or other sorts must skip Recent.
     const recentRecords = this._getRecentCache()
-    if (recentRecords !== null) {
+    const count = options?.count || options?.limit || (this.config.cacheCountMax || 1000)
+    if (!options?.count && !options?.limit) console.warn('NO OPTIONS COUNT OR LIMIT ', { options })
+    if (recentRecords !== null && isDefaultSort(options?.sort)) {
       const filtered = filterRecords(recentRecords, query, options)
-      if (filtered.length > 0) {
+      if (filtered.length >= count) {
         this.stats.cacheHits++
+        console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Recent) - byKey fallback', { table: this.appTable, field, value, resultCount: filtered.length, owner: this.owner })
         return filtered
       }
       // If not in Recent, continue to Query cache (might be older record)
@@ -247,11 +346,14 @@ class AppTableCache {
     if (queryResult !== null) {
       this.stats.cacheHits++
       // onsole.log('📦 Cache query Query - this should have been caufght by key query key snbh ?? ', { query, options, queryResult } )
+      console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Query) - byKey fallback', { table: this.appTable, field, value, owner: this.owner })
+      
       return queryResult
     }
     
     // 5. Cache miss - caller should hit DB
     this.stats.dbHits++
+    console.log('C-M 🔵🔵🔵🔵🔵 CACHE MISS - byKey query going to DB', { table: this.appTable, field, value })
     return null
   }
   
@@ -263,6 +365,8 @@ class AppTableCache {
     // Check WIP flags - if cache is being populated, query DB directly
     if (this.wipFlags.Recent || (this.cacheAll && this.wipFlags.All)) {
       // onsole.log('📦 Cache WIP - querying DB directly for date query', { wipRecent: this.wipFlags.Recent, wipAll: this.wipFlags.All })
+      console.log('C-M ⏳⏳⏳⏳⏳ CACHE WIP - date query going to DB', { table: this.appTable, timestamp })
+      
       this.stats.dbHits++
       return null
     }
@@ -275,6 +379,7 @@ class AppTableCache {
         // Recent cache is complete - can answer definitively
         const filtered = filterRecords(recentRecords, query, options)
         this.stats.cacheHits++
+        console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Recent-complete) - date query', { table: this.appTable, timestamp, resultCount: filtered?.length })
         return filtered
       }
       // Recent cache exists but doesn't cover this timestamp
@@ -282,6 +387,7 @@ class AppTableCache {
       const filtered = filterRecords(recentRecords, query, options)
       if (filtered.length > 0) {
         this.stats.cacheHits++
+        console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Recent-partial) - date query', { table: this.appTable, timestamp, resultCount: filtered.length })
         return filtered
       }
     }
@@ -292,12 +398,14 @@ class AppTableCache {
       if (allRecords !== null) {
         const filtered = filterRecords(allRecords, query, options)
         this.stats.cacheHits++
+        console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (All) - date query', { table: this.appTable, timestamp, resultCount: filtered?.length })
         return filtered  // All is authoritative
       }
     }
     
     // 3. Cache miss - caller should hit DB
     this.stats.dbHits++
+    console.log('C-M 🔵🔵🔵🔵🔵 CACHE MISS - date query going to DB', { table: this.appTable, timestamp })
     return null
   }
   
@@ -311,6 +419,8 @@ class AppTableCache {
     if (!options) options = {}
     if (this.cacheAll && this.wipFlags.All) {
       // onsole.log('📦 Cache WIP - querying DB directly for general query (All cache being populated)', { wipAll: this.wipFlags.All })
+      console.log('C-M ⏳⏳⏳⏳⏳ CACHE WIP - general query going to DB', { table: this.appTable, query })
+      
       this.stats.dbHits++
       return null
     }
@@ -319,6 +429,7 @@ class AppTableCache {
     const queryResult = this._getQueryCache(query, options)
     if (queryResult !== null) {
       this.stats.cacheHits++
+      console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Query) - general query', { table: this.appTable, query })
       return queryResult
     }
     
@@ -328,12 +439,14 @@ class AppTableCache {
       if (allRecords !== null) {
         const filtered = filterRecords(allRecords, query, options)
         this.stats.cacheHits++
+        console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (All) - general query', { table: this.appTable, resultCount: filtered?.length })
         return filtered  // All is authoritative - don't check DB
       }
     }
     
     // 3. Cache miss - caller should hit DB
     this.stats.dbHits++
+    console.log('C-M 🔵🔵🔵🔵🔵 CACHE MISS - general query going to DB', { table: this.appTable, query })
     return null
   }
   
@@ -343,6 +456,17 @@ class AppTableCache {
    * Only caches queries that match declared cachePatterns
    */
   async setQuery(query, results, options = {}) {
+    // Strip unified DB fields - cache is already scoped by owner:appTable
+    query = this._stripUnifiedDbFields(query)
+
+    // Don't cache results from non-default-sort or skip>0 fetches.
+    // The cache stores canonical record sets in default order; a sliced or
+    // re-ordered result would poison future reads for this key.
+    if (!isDefaultSort(options?.sort) || (options?.skip || 0) > 0) {
+      console.log('C-M ⚪⚪⚪⚪⚪ CACHE SKIP - non-default sort or skip>0', { table: this.appTable, sort: options?.sort, skip: options?.skip })
+      return false
+    }
+
     // Check if this is an empty query or date sort - store in Recent
     if (this._isEmptyOrDateSort(query, options)) {
       await this.setRecent(results)
@@ -357,10 +481,12 @@ class AppTableCache {
       const fieldPattern = this.cachePatterns.find(p => p === simpleCheck.field)
       if (fieldPattern) {
         // onsole.log('📦 Cache has fieldPattern setQuery Simple (byKey)', { field: simpleCheck.field, value: simpleCheck.value })
+        console.log('C-M 📦📦📦📦📦 CACHE SET (byKey from query)', { table: this.appTable, field: simpleCheck.field, value: simpleCheck.value, resultCount: results?.length })
         await this.setByKey(simpleCheck.field, simpleCheck.value, results)
         return true
       } else {
         // onsole.log('📦 Cache setQuery Simple - field not in cachePatterns, skipping', { field: simpleCheck.field, cachePatterns: this.cachePatterns })
+        console.log('C-M ⚪⚪⚪⚪⚪ CACHE SKIP - field not in cachePatterns', { table: this.appTable, fieldPattern, field: simpleCheck.field, allPatterns: this.cachePatterns, owner: this.owner })
         return false
       }
     }
@@ -369,8 +495,11 @@ class AppTableCache {
     const patternCheck = matchesCompoundPattern(query, this.cachePatterns, options)
     if (patternCheck.matches) {
       // onsole.log('📦 Cache setQuery Compound', { pattern: patternCheck.pattern, query })
-      const queryHash = hashQuery(query, {})  // No options in hash
-      const key = this._buildKey('Query', queryHash)
+      console.log('C-M 📦📦📦📦📦 CACHE SET (Query compound)', { table: this.appTable, pattern: patternCheck.pattern, resultCount: results?.length })
+      // Key uses separate query hash + sort hash so invalidation can match by query alone
+      const queryHash = hashQuery(query, {})
+      const sortHash = options?.sort ? hashQuery({}, { sort: options.sort }) : 'nosort'
+      const key = this._buildKey('Query', queryHash, sortHash)
       
       this._interface.set(key, results, {
         type: 'Query',
@@ -382,16 +511,34 @@ class AppTableCache {
     
     // Query doesn't match any pattern - don't cache
     // onsole.log('📦 Cache setQuery - no matching pattern, skipping', { query, cachePatterns: this.cachePatterns })
+    console.log('C-M ⚪⚪⚪⚪⚪ CACHE SKIP - no matching pattern (3)', { table: this.appTable, query, cachePatterns: this.cachePatterns, owner: this.owner })
     return false
   }
   
   /**
    * Get from Query cache
+   * Hash by query only (no options) to match setQuery behavior.
+   * Apply sort/skip/limit in memory from cached full result set.
    */
   _getQueryCache(query, options = {}) {
-    const queryHash = hashQuery(query, options)
-    const key = this._buildKey('Query', queryHash)
-    return this._interface.get(key)
+    // Key uses separate query hash + sort hash (matches setQuery structure)
+    const queryHash = hashQuery(query, {})
+    const sortHash = options?.sort ? hashQuery({}, { sort: options.sort }) : 'nosort'
+    const key = this._buildKey('Query', queryHash, sortHash)
+    const cached = this._interface.get(key)
+    if (cached === null) return null
+
+    // Check if cached results can satisfy this request
+    const skip = options.skip || 0
+    const count = options.count || options.limit || 0
+    if (count && (skip + count > cached.length)) {
+      // Not enough cached data to serve this request
+      console.log('C-M 🔵🔵🔵🔵🔵 CACHE INSUFFICIENT - Query cache has', cached.length, 'but need', skip + count, { table: this.appTable, owner: this.owner })
+      return null
+    }
+
+    // Apply sort/skip/limit in memory
+    return filterRecords(cached, {}, options)
   }
   
   /**
@@ -460,7 +607,8 @@ class AppTableCache {
     this.wipFlags.All = false
     this.dirtyFlags.All = false
     // onsole.log('✅ All cache populated and WIP flag cleared for ' + this.namespace, { recordCount: records?.length })
-    
+    console.log('C-M 📦📦📦📦📦 CACHE POPULATED (All)', { table: this.appTable, recordCount: records?.length, owner: this.owner })
+
     return true
   }
   
@@ -501,7 +649,8 @@ class AppTableCache {
     this.wipFlags.Recent = false
     this.dirtyFlags.Recent = false
     // onsole.log('✅ Recent cache populated and WIP flag cleared', { namespace: this.namespace, recordCount: limited?.length })
-    
+    console.log('C-M 📦📦📦📦📦 CACHE POPULATED (Recent)', { table: this.appTable, recordCount: limited?.length })
+  
     return true
   }
   
@@ -669,162 +818,6 @@ class AppTableCache {
   // Structure: { token: timestamp } - multiple tokens per file path, with expiry
   
   /**
-   * Get file tokens for a specific file path
-   * Returns an object mapping tokens to their creation timestamps
-   * @param {string} filePath - The file path (dataObjectId)
-   * @returns {Object|null} - Object with token:timestamp mappings or null if not found
-   */
-  getFileTokens(filePath) {
-    const key = this._buildKey('fileTokens', filePath)
-    return this._interface.get(key)
-  }
-  
-  /**
-   * Set a file token for a specific file path
-   * Stores tokens as { token: timestamp } mapping
-   * Multiple tokens can exist per file (for different clients/sessions)
-   * @param {string} filePath - The file path (dataObjectId)
-   * @param {string} token - The token string
-   * @param {number} timestamp - The creation timestamp (defaults to now)
-   * @returns {boolean} - True if successful
-   */
-  setFileToken(filePath, token, timestamp = Date.now()) {
-    const key = this._buildKey('fileTokens', filePath)
-    let tokens = this._interface.get(key) || {}
-    
-    // Add new token
-    tokens[token] = timestamp
-    
-    // Clean up expired tokens (older than 24 hours)
-    const FILE_TOKEN_EXPIRY = 24 * 3600 * 1000 // 24 hours in ms
-    const now = Date.now()
-    Object.keys(tokens).forEach(t => {
-      if (now - tokens[t] > FILE_TOKEN_EXPIRY) {
-        delete tokens[t]
-      }
-    })
-    
-    // If no tokens left, don't store empty object
-    if (Object.keys(tokens).length === 0) {
-      this._interface.delete(key)
-      return false
-    }
-    
-    this._interface.set(key, tokens, {
-      type: 'fileTokens',
-      namespace: this.namespace,
-      ttl: this.config.ttl.fileTokens
-    })
-
-    // console.log('      🔑 fileTokens setFileToken setFileToken ', { filePath, token, timestamp })
-    
-    return true
-  }
-  
-  /**
-   * Delete a specific file token
-   * @param {string} filePath - The file path (dataObjectId)
-   * @param {string} token - The token to delete
-   * @returns {boolean} - True if token was found and deleted
-   */
-  deleteFileToken(filePath, token) {
-    const key = this._buildKey('fileTokens', filePath)
-    const tokens = this._interface.get(key)
-    
-    if (!tokens || !tokens[token]) {
-      return false
-    }
-    
-    delete tokens[token]
-    
-    // If no tokens left, delete the entire entry
-    if (Object.keys(tokens).length === 0) {
-      this._interface.delete(key)
-    } else {
-      this._interface.set(key, tokens, {
-        type: 'fileTokens',
-        namespace: this.namespace,
-        ttl: this.config.ttl.fileTokens
-      })
-    }
-    
-    return true
-  }
-  
-  /**
-   * Delete all file tokens for a specific file path
-   * @param {string} filePath - The file path (dataObjectId)
-   * @returns {boolean} - True if successful
-   */
-  deleteAllFileTokens(filePath) {
-    const key = this._buildKey('fileTokens', filePath)
-    this._interface.delete(key)
-    return true
-  }
-  
-  /**
-   * Validate a file token and return its timestamp if valid
-   * @param {string} filePath - The file path (dataObjectId)
-   * @param {string} token - The token to validate
-   * @returns {number|null} - Token creation timestamp if valid, null otherwise
-   */
-  validateFileToken(filePath, token) {
-    // console.log('      🔑 validateFileToken fileTokens getFileTokens', { filePath, token })
-    const tokens = this.getFileTokens(filePath)
-    if (!tokens || !tokens[token]) {
-      return null
-    }
-    
-    const tokenTime = tokens[token]
-    const FILE_TOKEN_EXPIRY = 24 * 3600 * 1000 // 24 hours in ms
-    const now = Date.now()
-    
-    // Check if token is expired
-    if (now - tokenTime > FILE_TOKEN_EXPIRY) {
-      // Token expired - clean it up
-      this.deleteFileToken(filePath, token)
-      return null
-    }
-    
-    return tokenTime
-  }
-  
-  /**
-   * Get or create a file token (with reuse logic)
-   * Returns existing valid token if available, otherwise creates new one
-   * @param {string} filePath - The file path (dataObjectId)
-   * @param {Function} tokenGenerator - Function to generate new token (defaults to randomText)
-   * @returns {string} - The file token
-   */
-  getOrSetFileToken(filePath, tokenGenerator = null) {
-    const FILE_TOKEN_KEEP = 18 * 3600 * 1000 // 18 hours - reuse window
-    const now = Date.now()
-    
-    const tokens = this.getFileTokens(filePath)
-    if (tokens) {
-      // Look for a valid token within the reuse window
-      for (const [token, timestamp] of Object.entries(tokens)) {
-        if (now - timestamp < FILE_TOKEN_KEEP) {
-          return token // Reuse existing token
-        }
-      }
-    }
-    
-    // No valid token found - create new one
-    // Import randomText if not provided
-    if (!tokenGenerator) {
-      // We'll need to import this in the controller, so pass it in
-      throw new Error('tokenGenerator function is required')
-    }
-    
-    const newToken = tokenGenerator(20)
-    this.setFileToken(filePath, newToken, now)
-    return newToken
-  }
-  
-  // ==================== END FILE TOKEN METHODS ====================
-  
-  /**
    * Invalidate cache entries for a specific record based on cachePatterns
    * Called with old and/or new record data to precisely invalidate affected caches
    * 
@@ -832,8 +825,9 @@ class AppTableCache {
    * @param {Object} newRecord - The record after update (null for deletes)
    */
   invalidateForRecord(oldRecord, newRecord) {
-    console.log('🔄 cache invalidateForRecord', { table: this.namespace, hasOld: !!oldRecord, hasNew: !!newRecord })
-    
+    // onsole.log('🔄 cache invalidateForRecord', { table: this.namespace, hasOld: !!oldRecord, hasNew: !!newRecord })
+    console.log('C-M 🗑️🗑️🗑️🗑️🗑️ CACHE INVALIDATE (record)', { table: this.appTable, hasOld: !!oldRecord, hasNew: !!newRecord })
+
     // Collect all values to invalidate (from both old and new records)
     const toInvalidate = {
       byKey: new Set(),   // Set of "field:value" strings
@@ -849,7 +843,7 @@ class AppTableCache {
           const query = buildQueryFromPattern(record, pattern)
           if (query) {
             const queryHash = hashQuery(query, {})
-            toInvalidate.queries.add(queryHash)
+            toInvalidate.queries.add(queryHash)  // Query hash only - will pattern-match all sort variants
             // onsole.log('🔄 invalidateForRecord - compound pattern', { pattern, query, queryHash })
           }
         } else {
@@ -875,11 +869,11 @@ class AppTableCache {
       this.deleteByKey(field, value)
     }
     
-    // Delete all collected Query entries
+    // Delete all collected Query entries (pattern-match to catch all sort variants)
     for (const queryHash of toInvalidate.queries) {
-      const key = this._buildKey('Query', queryHash)
-      this._interface.delete(key)
-      // onsole.log('🔄 invalidateForRecord - deleted query cache', { key })
+      const keyPrefix = this._buildKey('Query', queryHash)
+      this._interface.deletePattern(`^${keyPrefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`)
+      // onsole.log('🔄 invalidateForRecord - deleted query cache', { keyPrefix })
     }
     
     return {
@@ -897,7 +891,7 @@ class AppTableCache {
    * @param {Object} newRecord - The record after update (null for deletes)
    */
   markDirty(recordId = null, oldRecord = null, newRecord = null) {
-    // onsole.log('🔄 cache markDirty from appTableCache.mjs', { table: this.namespace, recordId, hasOld: !!oldRecord, hasNew: !!newRecord })
+    console.log('C-M 🗑️🗑️🗑️🗑️🗑️ CACHE MARKED DIRTY', { table: this.appTable, recordId, hasPatterns: this.cachePatterns.length > 0 })
     
     // If we have cachePatterns and record data, use precise invalidation
     if (this.cachePatterns.length > 0 && (oldRecord || newRecord)) {
@@ -908,10 +902,11 @@ class AppTableCache {
         this.deleteByKey('_id', recordId)
       }
       
-      // Conservative: invalidate all Query caches when no pattern info available
-      if (this.cachePatterns.length === 0) {
-        const pattern = `^${this.namespace}:Query:`
-        this._interface.deletePattern(pattern)
+      // Without record data we can't do precise pattern invalidation,
+      // so conservatively invalidate all Query and byKey pattern entries
+      this._interface.deletePattern(`^${this.namespace}:Query:`)
+      if (this.cachePatterns.length > 0) {
+        this._interface.deletePattern(`^${this.namespace}:byKey:`)
       }
     }
     
@@ -949,11 +944,13 @@ class AppTableCache {
     if (this.refreshFunction) {
       try {
         // onsole.log('🔄 cache _executeRefresh from appTableCache.mjs', { table: this.namespace, dirtyFlags: this.dirtyFlags })
+        console.log('C-M 🔄🔄🔄🔄🔄 CACHE REFRESH (debounced)', { table: this.appTable, dirtyAll: this.dirtyFlags.All, dirtyRecent: this.dirtyFlags.Recent })
         await this.refreshFunction(this.dirtyFlags)
         this.dirtyFlags.All = false
         this.dirtyFlags.Recent = false
       } catch (err) {
         console.warn('🔄 cache - Error refreshing cache:', err.message)
+        console.warn('🔴 CACHE REFRESH ERROR:', err.message)
       }
     }
   }
@@ -978,11 +975,13 @@ class AppTableCache {
         this.wipFlags.All = true
         this.dirtyFlags.All = true
         // onsole.log('🔄 Initializing All cache - WIP flag set')
+        console.log('C-M ⏳⏳⏳⏳⏳ CACHE INIT START (All)', { table: this.appTable, owner: this.owner })
       }
       if (needsRecent) {
         this.wipFlags.Recent = true
         this.dirtyFlags.Recent = true
         // onsole.log('🔄 Initializing Recent cache - WIP flag set')
+        console.log('C-M ⏳⏳⏳⏳⏳ CACHE INIT START (Recent)', { table: this.appTable, owner: this.owner })
       }
       
       // Trigger immediate refresh (no debounce)
@@ -1002,6 +1001,57 @@ class AppTableCache {
   }
   
   /**
+   * Check if a query should be expanded to cacheCountMax for caching.
+   * Called by the query layer (userDsMgr) BEFORE hitting the DB on a cache miss.
+   * If the query matches a cacheable pattern and options are within range,
+   * signals the caller to fetch up to cacheCountMax so we can cache a full result set.
+   * 
+   * @param {Object} query - The query object (already stripped of unified DB fields)
+   * @param {Object} options - The original query options
+   * @returns {Object} { expand: boolean, expandedOptions: Object|null }
+   */
+  shouldExpandForCache(query, options = {}) {
+    if (!options) options = {}
+    const cacheCountMax = this.config.cacheCountMax || 1000
+
+    // Don't expand if sort is non-default — the cached set must be in canonical
+    // (default) order so future paginated reads with any sort can be served correctly.
+    if (!isDefaultSort(options.sort)) {
+      return { expand: false }
+    }
+
+    // Don't expand if skip + count already exceeds cacheCountMax
+    const skip = options.skip || 0
+    const count = options.count || options.limit || 0
+    if (count && (skip + count > cacheCountMax)) {
+      return { expand: false }
+    }
+
+    // Check if query matches a simple pattern (single field equality)
+    const simpleCheck = isSimpleQuery(query, options)
+    if (simpleCheck.isSimple) {
+      const fieldPattern = this.cachePatterns.find(p => p === simpleCheck.field)
+      if (fieldPattern) {
+        return {
+          expand: true,
+          expandedOptions: { ...options, count: cacheCountMax, skip: 0 }
+        }
+      }
+    }
+
+    // Check if query matches a compound pattern
+    const patternCheck = matchesCompoundPattern(query, this.cachePatterns, options)
+    if (patternCheck.matches) {
+      return {
+        expand: true,
+        expandedOptions: { ...options, count: cacheCountMax, skip: 0 }
+      }
+    }
+
+    return { expand: false }
+  }
+  
+  /**
    * Set the refresh function (called by ds_manager integration)
    */
   setRefreshFunction(fn) {
@@ -1013,6 +1063,7 @@ class AppTableCache {
    * Invalidate entire cache for this app_table
    */
   invalidateAll() {
+    console.log('C-M 🗑️🗑️🗑️🗑️🗑️ CACHE INVALIDATE ALL', { table: this.appTable, owner: this.owner })
     this._interface.deletePattern(`^${this.namespace}:`)
     this.dirtyFlags.All = false
     this.dirtyFlags.Recent = false

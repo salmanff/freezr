@@ -78,6 +78,18 @@ export const getAdminPageManifest = (params, freezrStatus, freezrPrefs) => {
       }
     },
 
+    cache_prefs: {
+      page_title: 'Cache Preferences (freezr Admin)',
+      css_files: [
+        '/app/info.freezr.public/public/freezr_style.css',
+        '/app/info.freezr.account/account_home.css'
+      ],
+      page_url: 'cache_prefs.html',
+      app_name: 'info.freezr.admin',
+      script_files: ['cache_prefs.js'],
+      modules: []
+    },
+
     addlocalmicroservice: {
       page_title: 'Add Microservice (freezr Admin)',
       css_files: [

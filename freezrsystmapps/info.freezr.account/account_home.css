@@ -251,3 +251,197 @@
   margin-bottom: 0.25rem;
   margin-top: 0.5rem;
 }
+
+/* ===== Install Progress / Feedback ===== */
+.install-progress-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  text-align: center;
+}
+
+/* Larger spinner for install progress - reuses .freezr-spinner from freezr_style.css */
+#installSpinner.freezr-spinner {
+  width: 48px;
+  height: 48px;
+  border-width: 4px;
+  margin-bottom: 1.25rem;
+  color: var(--freezr-accent);
+}
+
+.install-subtitle {
+  color: var(--freezr-text-muted);
+  font-size: 14px;
+  margin-top: 0.5rem;
+}
+
+#installResultArea {
+  text-align: center;
+  padding: 1rem;
+}
+
+#installResultMessage {
+  font-size: 16px;
+  font-weight: 500;
+  padding: 1rem 1.5rem;
+  border-radius: var(--freezr-radius);
+  margin-bottom: 1rem;
+  line-height: 1.5;
+}
+
+#installResultMessage.install-success {
+  background: rgba(34, 197, 94, 0.1);
+  color: #16a34a;
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+#installResultMessage.install-error {
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.install-warnings {
+  background: rgba(245, 158, 11, 0.1);
+  color: #b45309;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: var(--freezr-radius);
+  padding: 0.75rem 1.25rem;
+  font-size: 14px;
+  margin-bottom: 1rem;
+  text-align: left;
+  line-height: 1.5;
+}
+
+.install-result-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+.install-settings-btn {
+  background: var(--freezr-card-bg) !important;
+  color: var(--freezr-accent) !important;
+  border: 1px solid var(--freezr-border) !important;
+}
+
+.install-settings-btn:hover {
+  border-color: var(--freezr-accent) !important;
+  text-decoration: none;
+}
+
+.install-done-btn {
+  background: var(--freezr-bg) !important;
+  color: var(--freezr-text-muted) !important;
+  border: 1px solid var(--freezr-border) !important;
+}
+
+.tab button.tab-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+  cursor: default;
+}
+
+/* ===== Notifications banner (front-page warnings) =====
+   Shape mirrors the small notifications shown in the freezr menu, but card-sized
+   for the home page. Severity drives accent color. */
+.freezr-notif-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  margin-bottom: 0.75rem;
+  border-radius: var(--freezr-radius);
+  background: rgba(239, 68, 68, 0.08);
+  border-left: 4px solid #dc2626;
+  box-shadow: var(--freezr-shadow);
+}
+.freezr-notif-card[data-severity="warning"] {
+  background: rgba(245, 158, 11, 0.1);
+  border-left-color: #d97706;
+}
+.freezr-notif-card[data-severity="info"] {
+  background: rgba(99, 102, 241, 0.08);
+  border-left-color: var(--freezr-accent);
+}
+.freezr-notif-card .freezr-notif-card-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+.freezr-notif-card .freezr-notif-card-body {
+  flex: 1;
+}
+.freezr-notif-card .freezr-notif-card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+  color: var(--freezr-text);
+}
+.freezr-notif-card .freezr-notif-card-msg {
+  font-size: 0.9rem;
+  color: var(--freezr-text);
+  line-height: 1.4;
+}
+.freezr-notif-card .freezr-notif-card-action {
+  display: inline-block;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--freezr-accent);
+  text-decoration: underline;
+}
+
+/* ===== Permission rows ===== */
+/* Thin separator between consecutive permission rows (no border before the first
+   row, which already sits under a bordered group title). */
+.permissionRow + .permissionRow {
+  border-top: 1px solid var(--freezr-border);
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+}
+
+/* ===== Responsive: phones / narrow viewports ===== */
+@media (max-width: 500px) {
+  /* Tighten outer page padding so cards aren't pinched */
+  .freezr-content {
+    padding: 1rem 0.75rem 2rem !important;
+  }
+  .freezr-card {
+    padding: 1rem !important;
+  }
+
+  /* App header: stack logo, name/description, Launch button vertically and centre them */
+  .appHeaderGrid {
+    grid-template-columns: 1fr !important;
+    justify-items: center !important;
+    text-align: center !important;
+    gap: 0.75rem !important;
+  }
+  .appHeaderGrid .freezrButt {
+    width: 100%;
+    text-align: center;
+  }
+
+  /* Permission rows: stack Accept/Deny button above the description */
+  .permissionGrid {
+    grid-template-columns: 1fr !important;
+    gap: 0.5rem !important;
+  }
+  .permissionGrid .freezer_butt {
+    margin: 0 0 0.25rem 0;
+    justify-self: start !important;
+  }
+
+  /* Top install prompt: stack icon above the call-to-action text */
+  .topInstallPromptBox {
+    flex-direction: column !important;
+    text-align: center !important;
+    padding: 1rem !important;
+  }
+  .topInstallPromptBox .topInstallPromptText {
+    font-size: 1.1rem !important;
+  }
+}

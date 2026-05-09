@@ -44,6 +44,13 @@ import { endsWith } from '../../../common/helpers/utils.mjs'
 
 const ROLE_NAME = 'freezrLambdaRole'
 
+// Validate function/service names: alphanumeric, underscores, hyphens, dots only. No path traversal.
+const isValidFunctionName = (name) => {
+  if (!name || typeof name !== 'string') return false
+  if (name.length > 200) return false
+  return /^[a-zA-Z0-9._-]+$/.test(name)
+}
+
 export const version = '0.0.1'
 export const ADMIN_FUNCTIONS = ['upsertlocalservice', 'deletelocalfunction', 'getalllocalfunctions']
 export const LOCAL_FUNCTIONS = [...ADMIN_FUNCTIONS, 'invokelocalservice']
@@ -152,6 +159,10 @@ const handleInvoke = async (req, res, freezr, credentials, task) => {
 
   if (!functionName || !fullFunctionName) {
     return sendFailure(res, 'Invalid function name', 'serverless.handleInvoke', 400)
+  }
+
+  if (task === 'invokelocalservice' && !isValidFunctionName(functionName)) {
+    return sendFailure(res, 'Invalid function name characters', 'serverless.handleInvoke', 400)
   }
 
   const payload = { inputParams: req.body.inputParams }
@@ -291,6 +302,10 @@ const handleUpsertLocalService = async (req, res, freezr) => {
     return sendFailure(res, 'Service name should have one _ and be a zip file', 'serverless.handleUpsertLocalService', 400)
   }
 
+  if (!isValidFunctionName(thirdPartyFunctionFileName)) {
+    return sendFailure(res, 'Invalid function name characters', 'serverless.handleUpsertLocalService', 400)
+  }
+
   const thirdPartyFunctionsFS = freezr.thirdPartyFunctionsFS
   if (!thirdPartyFunctionsFS) {
     return sendFailure(res, 'Public 3Pfunctions file system not available', 'serverless.handleUpsertLocalService', 500)
@@ -331,6 +346,10 @@ const handleDeleteLocalFunction = async (req, res, freezr) => {
   
   if (!thirdPartyFunctionName) {
     return sendFailure(res, 'No service name provided', 'serverless.handleDeleteLocalFunction', 400)
+  }
+
+  if (!isValidFunctionName(thirdPartyFunctionName)) {
+    return sendFailure(res, 'Invalid function name characters', 'serverless.handleDeleteLocalFunction', 400)
   }
 
   const thirdPartyFunctionsFS = freezr.thirdPartyFunctionsFS
@@ -622,9 +641,13 @@ const upsertFunction = async function (credentials, fullFunctionName, code) {
  */
 export const unzipServiceToPublicLocalFile = async function (freezrthirdPartyFunctionsFS, serviceName) {
   try {
+    const baseName = endsWith(serviceName, '.zip') ? serviceName.slice(0, -4) : serviceName
+    if (!isValidFunctionName(baseName)) {
+      return { error: new Error('Invalid service name characters') }
+    }
     const fileName = serviceName + (endsWith(serviceName, '.zip') ? '' : '.zip')
     // Strip .zip extension for folder name
-    const folderName = endsWith(serviceName, '.zip') ? serviceName.slice(0, -4) : serviceName
+    const folderName = baseName
     const zipBuffer = await freezrthirdPartyFunctionsFS.getUserFile(fileName, { returnBuffer: true })
     const folderPath = 'users_3Pfunctions' + sep() + folderName
     const ret = await extractZipToLocalFolder(zipBuffer, folderPath, folderName)

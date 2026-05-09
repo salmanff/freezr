@@ -5,8 +5,8 @@
 // Currently set up for:
 //   - A local mongo server running
 // Needs to be checked for:
-//   - Openshift (Also affects port and ip address)
 //   - Google App Enging (GAE)
+// 2026 Removed due to lack of use: 'Openshift', 'fdsFairOs', 'glitch'
 
 /* 2021 todos
   - Do checkDb on each environment available
@@ -31,13 +31,6 @@ import { decryptParams, verifyEnvChecksum } from '../../features/register/servic
 // DEFAULTS
 export const ENV_PARAMS = {
   FS: {
-    // local: {
-    //   type: 'local',
-    //   label: "Server's file system",
-    //   msg: 'You are using your local file system.',
-    //   warning: 'Note that most cloud servers delete their local file system when they restart - ie periodically. Make sure you know what you are doing when you choose this option.',
-    //   forPages: []
-    // },
     sysDefault: {
       type: 'local',
       label: 'Host Server Storage',
@@ -241,7 +234,7 @@ export function checkAndCleanFs (fsParams, freezrInitialEnvCopy) {
   if (!fsParams) return null
   if (!fsParams.choice) fsParams.choice = fsParams.type
   if (fsParams.choice === 'sysDefault') return { type: 'system', choice: 'sysDefault' }
-  const VALID_FS_CHOICES = ['system', 'sysDefault', 'local', 'dropbox', 'googleDrive', 'aws', 'azure'] // 'fdsFairOs', , 'glitch'
+  const VALID_FS_CHOICES = ['system', 'sysDefault', 'local', 'dropbox', 'googleDrive', 'aws', 'azure']
   // console.log('checking fs type choice ', { fsParams })
   if (!VALID_FS_CHOICES.includes(fsParams.choice)) console.warn('checkAndCleanFs', 'error - invalid fs choice ', fsParams)
   if (!fsParams.choice || !VALID_FS_CHOICES.includes(fsParams.choice)) return null
@@ -320,16 +313,15 @@ const fsParseCreds = {
 
 // TESTS
 export async function checkDB (env, options = {}) {
-  // console.log('checkdb ', { env, options })
+  // onsole.log('checkdb ', { env, options, fsParams: env?.fsParams, dbParams: env?.dbParams })
   // options : { okToCheckOnLocal}
+  
   const TEST_OAC = {
     owner: 'test',
     app_name: 'info.freezr.admin',
     collection_name: 'params'
   }
   if (!options) options = {}
-
-  // console.log('checkDB - env', { env, options, fsParams: env.fsParams, dbParams: env.dbParams })
 
   if (!env || !env.dbParams) {
     throw new Error('No parameters found.')
@@ -352,7 +344,7 @@ export async function checkDB (env, options = {}) {
   tempTestManager.setSystemUserDS('test', env)
   
   try {
-    const testDB = await tempTestManager.initOacDB(TEST_OAC, {})
+    const testDB = await tempTestManager.initOacDB(TEST_OAC, { noCache: true })
     const savedData = await testDB.read_by_id('test_write_id')
     
     if (savedData) {
@@ -588,7 +580,7 @@ async function checkDbAndGetEnvIfExists (tempParams) {
     
     const tempTestManager = new DATA_STORE_MANAGER()
     tempTestManager.setSystemUserDS('fradmin', tempParams)
-    const fradminDb = await tempTestManager.initOacDB(PARAMS_OAC, {})
+    const fradminDb = await tempTestManager.initOacDB(PARAMS_OAC, { noCache: true })
     const envOnDb = await fradminDb.read_by_id('freezr_environment')
     
     return { dbWorks, envOnDb }
@@ -699,14 +691,13 @@ export async function tryGettingEnvFromautoConfig (options) {
     
     const fradminOwner = tempDsManager.setSystemUserDS('fradmin', { fsParams: fsParamsToUse, dbParams: dbParamsToUse, freezrPrefs })
     // console.log('🔍 [ENV] Step 2: Calling initOacDB...')
-    const fradminDb = await fradminOwner.initOacDB(PARAMS_OAC, {})
+    const fradminDb = await fradminOwner.initOacDB(PARAMS_OAC, { noCache: true })
     // console.log('🔍 [ENV] Step 2: initOacDB resolved, hasDb:', !!fradminDb)
 
     // Step 3: Read freezr_environment from DB
-    // console.log('🔍 [ENV] Step 3: Reading freezr_environment from DB...')
-    const envOnDb = decryptEnvParams(await fradminDb.read_by_id('freezr_environment'))
-    console.log('🔍 [ENV] Step 3: read_by_id resolved, hasEnvOnDb:', !!envOnDb)
-
+    const envOnDbRaw = await fradminDb.read_by_id('freezr_environment') 
+    const envOnDb = decryptEnvParams(envOnDbRaw)
+    
     // Step 4: Process envOnDb
     // console.log('🔍 [ENV] Step 4: Processing envOnDb...')
     const fileChecksumOk = r.envOnFile ? verifyEnvChecksum(r.envOnFile) : null
@@ -773,17 +764,12 @@ async function getAutoConfigParams () {
 }
 
 const autoIpAddress = function () {
-  if (process && process.env && process.env.DATABASE_SERVICE_NAME && process.env.OPENSHIFT_NODEJS_IP) {
-    return process.env.OPENSHIFT_NODEJS_IP // openshift v3
-  } else { /* add other platforms here */
-    return null
-  }
+  // some environments may have an ip address in process.env
+  return null
 }
 
 const autoPort = function () {
-  if (process && process.env && process.env.DATABASE_SERVICE_NAME) {
-    return 8080 // openshift v3
-  } else if (process && process.env && process.env.PORT) { // aws
+  if (process && process.env && process.env.PORT) { // aws
     // onsole.log("auto port exists (AWS & other..)",    process.env.PORT)
     return process.env.PORT
   } /* add other platforms here */ else {
@@ -802,12 +788,6 @@ async function autoDbParams () {
       params: null
     },
     COSMOSMONGO_EXTERNAL: {
-      vars_exist: false,
-      functioning: false,
-      env_on_db: false,
-      params: null
-    },
-    MONGO_OPENSHIFT: {
       vars_exist: false,
       functioning: false,
       env_on_db: false,
@@ -874,62 +854,7 @@ async function autoDbParams () {
     haveWorkingDb = true
   }
 
-  // 2. MONGO_REDHAT (Openshift v3)
-  if (process && process.env && process.env.DATABASE_SERVICE_NAME &&
-    process.env.MONGODB_USER && process.env.MONGODB_PASSWORD) {
-    const mongoServiceName = process.env.DATABASE_SERVICE_NAME.toUpperCase()
-    otherOptions.MONGO_OPENSHIFT.vars_exist = true
-    otherOptions.MONGO_OPENSHIFT.params = {
-      type: 'mongodb',
-      choice: 'mongoRedHat',
-      user: process.env.MONGODB_USER,
-      pass: process.env.MONGODB_PASSWORD,
-      host: process.env[mongoServiceName + '_SERVICE_HOST'],
-      port: process.env[mongoServiceName + '_SERVICE_PORT'],
-      addAuth: false,
-      unifiedDbName: 'freezrdb'
-    }
-  }
-
-  // 3. GAE (Google App Engine)
-  try {
-    const { Datastore } = await import('@google-cloud/datastore')
-    const ds = new Datastore()
-    otherOptions.GAE.gaeApiRunning = true
-    
-    if (otherOptions.GAE.gaeApiRunning) {
-      otherOptions.GAE.params.type = 'gaeCloudDatastore'
-      otherOptions.GAE.params.choice = 'gaeCloudDatastore'
-      try {
-        let keyfile = fs.readFileSync('./adapters/datastore/customParameters/gaeDatastoreKeyfile.json')
-        keyfile = JSON.parse(keyfile)
-        if (keyfile) {
-          otherOptions.GAE.params.gaeProjectId = keyfile.project_id
-          otherOptions.GAE.params.gaeKeyFile = true
-        }
-        /* Old code related to App engine
-              if ( otherOptions.GAE.gaeApiRunning && (otherOptions.GAE.gaeKeyFile || isGaeServer)) {    // Google App Engine
-        db_handler.re_init_environment_sync({dbParams:otherOptions.GAE.params})
-        db_handler.check_db({dbParams:otherOptions.GAE.params}, (err,env_on_db)=>{
-            if (!err) {
-              if (env_on_db) otherOptions.GAE.env_on_db=env_on_db
-              otherOptions.GAE.functioning = true;
-              if (!haveWorkingDb) foundDbParams = otherOptions.GAE.params
-              haveWorkingDb=true;
-            }
-            cb(null)
-        })
-      } else {cb(null)} 
-        */
-      } catch (e) {
-        // console.log('autoDbParams', 'could not get GAE ds ', ds)
-      }
-    }
-  } catch (e) {
-    // no GAE API - this is expected in most cases
-  }
-
-  // 4. MONGO_LOCAL
+  // 2. MONGO_LOCAL
   otherOptions.MONGO_LOCAL.params = {
     type: 'mongodb',
     user: null,
@@ -938,21 +863,8 @@ async function autoDbParams () {
     port: '27017',
     addAuth: false
   }
-      /* Old code - to review and redo?
-      db_handler.re_init_environment_sync({dbParams:otherOptions.MONGO_LOCAL.params, startuptest:true})
-      db_handler.check_db({dbParams:otherOptions.MONGO_LOCAL.params, startuptest:true}, (err,env_on_db)=>{
-          if (!err) {
-            if (env_on_db) otherOptions.MONGO_LOCAL.env_on_db=env_on_db
-            otherOptions.MONGO_LOCAL.functioning = true;
-            if (!haveWorkingDb) foundDbParams = otherOptions.MONGO_LOCAL.params
-            haveWorkingDb=true;
-          } else {
-            console.warn("GOT ERR FOR MONGO_LOCAL")
-          }
-          cb(null)
-      })
-      */
-  // 5. NEDB
+      
+  // 3. NEDB
   otherOptions.NEDB_LOCAL.params = { type: 'nedb' }
   const tempParams = {
     fsParams: fsParams(),
@@ -960,6 +872,30 @@ async function autoDbParams () {
     ipaddress: autoIpAddress(),
     dbParams: otherOptions.NEDB_LOCAL.params
   }
+
+  // 4. GAE (Google App Engine) - Not tested for a long time
+  // try {
+  //   const { Datastore } = await import('@google-cloud/datastore')
+  //   const ds = new Datastore()
+  //   otherOptions.GAE.gaeApiRunning = true
+    
+  //   if (otherOptions.GAE.gaeApiRunning) {
+  //     otherOptions.GAE.params.type = 'gaeCloudDatastore'
+  //     otherOptions.GAE.params.choice = 'gaeCloudDatastore'
+  //     try {
+  //       let keyfile = fs.readFileSync('./adapters/datastore/customParameters/gaeDatastoreKeyfile.json')
+  //       keyfile = JSON.parse(keyfile)
+  //       if (keyfile) {
+  //         otherOptions.GAE.params.gaeProjectId = keyfile.project_id
+  //         otherOptions.GAE.params.gaeKeyFile = true
+  //       }
+  //     } catch (e) {
+  //       // console.log('autoDbParams', 'could not get GAE ds ', ds)
+  //     }
+  //   }
+  // } catch (e) {
+  //   // no GAE API - this is expected in most cases
+  // }
   
   const { dbWorks, envOnDb } = await checkDbAndGetEnvIfExists(tempParams)
   // console.log('checkDbAndGetEnvIfExists ', { dbWorks, envOnDb })

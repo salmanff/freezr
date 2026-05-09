@@ -18,6 +18,26 @@ export const PERMISSION_FIELD_TYPES = {
   // granted: 'bool',
   // status: 'string',
 }
+/**
+ * Permission types where access control is per-record via the _accessibles array.
+ *
+ * Freezr uses two access-control models for cross-user/cross-app permissions:
+ *
+ * 1. RECORD-MARKED types (listed here): The permission record just needs granted:true
+ *    to enable the sharing mechanism. Individual access is controlled by the _accessibles
+ *    array on each record, which lists {grantee, requestor_app, permission_name, granted}.
+ *    The grantees field on the permission record is NOT used for access checks.
+ *    The controller checks _accessibles at read time (readRecordById, dbQuery).
+ *
+ * 2. TABLE-LEVEL types (read_all, write_all, write_own, db_query): Access is controlled
+ *    by the grantees array on the permission record itself. The addRightsToTable middleware
+ *    verifies that the requestor is in perm.grantees before granting table-wide rights.
+ *    No per-record marking is needed.
+ *
+ * This distinction matters in addRightsToTable (permissionContext.mjs): only table-level
+ * types check perm.grantees; record-marked types skip the grantee check since their
+ * access control happens later at the record level.
+ */
 export const PERMISSION_TYPES_FOR_WHICH_RECORDS_ARE_MARKED = ['share_records', 'message_records', 'upload_pages']
 export const PERMISSION_FIELD_EXCEPTIONS_BY_TYPE = {
   use_3pFunction: [{
@@ -95,15 +115,39 @@ export const PERMISSION_DEFINITIONS = [
   },
   // App Capabilities
   {
-    type: 'outside_scripts',
+    type: 'external_scripts',
     category: 'App Capabilities',
-    description: 'Allow app to use outside scripts',
+    description: 'Allow app to load JavaScript from external domains (relaxes script-src CSP)',
+    requiredFields: []
+  },
+  {
+    type: 'external_fetch',
+    category: 'App Capabilities',
+    description: 'Allow app to send/receive data to/from external domains (relaxes connect-src CSP)',
+    requiredFields: []
+  },
+  {
+    type: 'unsafe_eval',
+    category: 'App Capabilities',
+    description: 'Allow app to use eval() and dynamic code execution (adds unsafe-eval to script-src CSP)',
     requiredFields: []
   },
   {
     type: 'use_serverless',
     category: 'App Capabilities',
     description: 'Allow access to user serverlesss params to run 3rd party functions on the cloud.',
+    requiredFields: []
+  },
+  {
+    type: 'use_llm',
+    category: 'App Capabilities',
+    description: 'Allow app to use the user\'s LLM API keys to make AI requests.',
+    requiredFields: []
+  },
+  {
+    type: 'allow_self_frames',
+    category: 'App Capabilities',
+    description: 'Relax Content-Security-Policy frame-src/child-src for this app so it may embed same-origin or blob iframes (e.g. page preview).',
     requiredFields: []
   },
   {

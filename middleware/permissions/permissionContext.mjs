@@ -2,9 +2,10 @@
 // Middleware for adding permission-related context to requests
 // Handles permission database initialization and access
 
-import { userPERMS_OAC, SYSTEM_PERMS } from '../../common/helpers/config.mjs' 
+import { userPERMS_OAC, SYSTEM_PERMS } from '../../common/helpers/config.mjs'
 import { startsWith, endsWith } from '../../common/helpers/utils.mjs'
 import { sendFailure } from '../../adapters/http/responses.mjs'
+import { PERMISSION_TYPES_FOR_WHICH_RECORDS_ARE_MARKED } from './permissionDefinitions.mjs'
 
 /**
  * Middleware factory to add user permissions database to res.locals
@@ -20,7 +21,7 @@ export const createAddOwnerPermsDbForLoggedInuser = (dsManager, freezrPrefs, fre
     // onsole.log('🔐 addOwnerPermsDb middleware called')
     
     try {
-      const userId = req.session.logged_in_user_id
+      const userId = req.session?.logged_in_user_id
       if (!userId) {
         return res.status(401).json({ error: 'User not logged in' })
       }
@@ -64,6 +65,7 @@ export const createaddOwnerPermsDb = (dsManager, freezrPrefs, freezrStatus) => {
     try {
       const dataOwnerId = res.locals.freezr?.data_owner_id // || res.locals.freezr?.tokenInfo?.requestor_id
       if (!dataOwnerId) {
+        console.error('❌ data_owner_id not set in createaddOwnerPermsDb')
         return sendFailure(res, 'data_owner_user not set')
       }
 
@@ -111,7 +113,12 @@ export const addRightsToTable = async (req, res, next) => {
   const requestorUserId = tokenInfo.requestor_id
   const requestorApp = tokenInfo.app_name
   const ownerUserId = res.locals.freezr?.data_owner_id
-  const appTable = req.params.app_table
+  let appTable = req.params.app_table
+
+  if (req.body.owner_id && req.body.owner_id !== ownerUserId) {
+    // nb added 2026-02-15 as extra orpecaution - to review if there are cases where it makese sense to allow discrepancy
+    return sendFailure(res, 'owner_id mismatch', 'addRightsToTable', 401)
+  }
 
   // Section not tested yet -  2025-12-20
   // if (!req.params) req.params = {}
@@ -129,9 +136,9 @@ export const addRightsToTable = async (req, res, next) => {
   
   if (!appTable || !ownerUserId || !requestorApp || !requestorUserId) {
     console.error('Missing parameters for permissions for table operations', { appTable, ownerUserId, requestorApp, requestorUserId })
-    sendFailure(res, 'Missing parameters for permissions for table operations', 'addRightsToTable', 401)
-  } else if (requestorUserId === ownerUserId && 
-    (startsWith(appTable, requestorApp) || requestorApp === 'info.freezr.account')) {
+    return sendFailure(res, 'Missing parameters for permissions for table operations', 'addRightsToTable', 401)
+  } else if (requestorUserId === ownerUserId &&
+    (appTable === requestorApp || startsWith(appTable, requestorApp + '.') || requestorApp === 'info.freezr.account')) {
     res.locals.freezr.rightsToTable.own_record = true
     next()
   // not tested yet - accounts query done under accounts?? 2025-12-20
@@ -197,32 +204,43 @@ export const addRightsToTable = async (req, res, next) => {
       //   const allPerms = await permsDb.query({ requestor_app: 'cards.hiper.freezr' }, {})
       //   console.log('addRightsToTable allPerms', { allPerms })
       // }
-      res.locals.freezr.rightsToTable.grantedPerms = grantedPerms
+      // Freezr has two permission access-control models (see permissionDefinitions.mjs):
+      // 1. Record-marked types (share_records, message_records, upload_pages):
+      //    Access is per-record via the _accessibles array on each record.
+      //    The permission record just needs granted:true to enable the sharing mechanism.
+      //    No grantee check here -- the controller checks _accessibles at read time.
+      // 2. Table-level types (read_all, write_all, write_own, db_query):
+      //    Access is controlled by the grantees array on the permission record.
+      //    Must verify the requestor is in grantees before granting table-wide rights.
       grantedPerms.forEach(perm => {
-        // if (
-        //     perm.grantees.includes(requestorUserId) ||
-        //     perm.grantees.includes('_public') || // console.log: todo: || includes valid group names [2021 - groups]
-        //     perm.grantees.includes('_allUsers')
-        // ) {
-          // if (perm.name === permissionName || !forcePermName) { //  || // todo   2025-12-20 -> Should forcePermName be used?
-            // res.locals.freezr.rightsToTable.grantedPerms.push(perm)
+        const isRecordMarkedType = PERMISSION_TYPES_FOR_WHICH_RECORDS_ARE_MARKED.includes(perm.type)
+
+        if (!isRecordMarkedType && requestorUserId !== ownerUserId) {
+          const isGrantee = perm.grantees && (
+            perm.grantees.includes(requestorUserId) ||
+            perm.grantees.includes('_public') ||
+            perm.grantees.includes('_allUsers')
+          )
+          if (!isGrantee) return
+        }
+
+        res.locals.freezr.rightsToTable.grantedPerms.push(perm)
+
         if (perm.type === 'write_all') {
           res.locals.freezr.rightsToTable.can_write = true
         } else if (perm.type === 'write_own') {
-          res.locals.freezr.rightsToTable.write_own = true // ie need to find record to determine if can write
+          res.locals.freezr.rightsToTable.write_own = true
         } else if (perm.type === 'read_all') {
           res.locals.freezr.rightsToTable.can_read = true
         } else if (perm.type === 'share_records') {
-          res.locals.freezr.rightsToTable.share_records = true // ie need to find record to determine if it has been shared
+          res.locals.freezr.rightsToTable.share_records = true
         }
-          // }
-        // }
       })
       // console.log('addRightsToTable rightsToTable', { appTable,requestorApp, ownerUserId, requestorUserId, originalUrl: req.originalUrl, path: req.path, query: req.query, params: req.params, rightsToTable: res.locals.freezr.rightsToTable })
       next()
     } catch (error) {
       console.error('❌ Error in addRightsToTable:', error)
-      sendFailure(res, error, 'addRightsToTable', 500)
+      return sendFailure(res, error, 'addRightsToTable', 500)
     }
   }
 }

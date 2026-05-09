@@ -87,7 +87,6 @@ export const createPublicRoutes = ({ dsManager, freezrPrefs, freezrStatus }) => 
   
   const setupGuard = createSetupGuard(dsManager)
   const addPublicRecordsDB = createAddPublicRecordsDB(dsManager, freezrPrefs, freezrStatus)
-  // const addUserPermsDbForParamsUser = createAddUserPermsDbForParamsUser(dsManager, freezrPrefs, freezrStatus)
   const hasAtLeastOnePublicRecord = createHasAtLeastOnePublicRecord(dsManager, freezrPrefs, freezrStatus)
 
   // ===== CREATE CONTROLLERS =====
@@ -143,33 +142,10 @@ export const createPublicRoutes = ({ dsManager, freezrPrefs, freezrStatus }) => 
 
   // ===== PAGE ROUTES =====
 
-  /**
-   * GET /public/objectpage/:publicid
-   * GET /public/objectpage/@:user_id/:app_table/:data_object_id
-   * Renders a public object page using the pcard template from manifest
-   * Replaces: /@:user_id/:app_table/:data_object_id for public pages
-   */
-  router.get('/objectpage/:publicid',
+  router.get('/notfound',
     setupGuard,
-    addPublicRecordsDB,
-    publicPageController.objectPage
+    publicPageController.pageNotFound
   )
-
-  router.get('/objectpage/@:user_id/:app_table/:data_object_id',
-    setupGuard,
-    addPublicRecordsDB,
-    publicPageController.objectPage
-  )
-
-    /**
-   * GET /@:user_id/:app_table/:data_object_id
-   * Catch-all for legacy public ID routes
-   * Checks publicDb and renders object page if found
-   */
-    router.get('/notfound',
-      setupGuard,
-      publicPageController.pageNotFound
-    )
   
 
   /**
@@ -258,19 +234,32 @@ export const createPublicRoutes = ({ dsManager, freezrPrefs, freezrStatus }) => 
   )
 
   /**
+   * GET /public/app/@:user_id/:app_name/logo
+   * Serves the app's static/logo.png as a public favicon / logo
+   * Must be defined before the :page route so it matches first
+   */
+  router.get('/app/@:user_id/:app_name/logo',
+    setupGuard,
+    getPublicAppManifest,
+    hasAtLeastOnePublicRecord,
+    addPublicAppFS,
+    (req, res) => {
+      const appFS = res.locals.freezr?.appFS
+      if (!appFS) return res.status(404).end()
+      if (!res.locals.freezr?.hasLogo) return res.status(404).end()
+      res.locals.freezr.permGiven = true
+      appFS.sendPublicAppFile('static/logo.png', res, {})
+    }
+  )
+
+  /**
    * GET /public/app/@:user_id/:app_name/:page
    * Display public app page for a specific page
-   * 
-   * Middleware chain:
-   * 1. setupGuard - Verify freezr is configured
-   * 2. getPublicAppManifest - Load manifest for the user's app
-   * 3. addPublicAppFS - Load appFS for the user's app
-   * 4. hasAtLeastOnePublicRecord - Check if there is at least one public record for the app
-   * 5. Route handler - Render page
    */
   router.get('/app/@:user_id/:app_name/:page',
     setupGuard,
     getPublicAppManifest,
+    addPublicRecordsDB,
     addPublicAppFS,
     hasAtLeastOnePublicRecord,
     publicAppPageController.generatePublicAppPage
@@ -280,19 +269,12 @@ export const createPublicRoutes = ({ dsManager, freezrPrefs, freezrStatus }) => 
    * GET /public/app/@:user_id/:app_name/*
    * Display public app page or serve public app file
    * Supports both single-segment paths and multi-segment paths
-   * 
-   * Middleware chain:
-   * 1. setupGuard - Verify freezr is configured
-   * 2. extractPublicAppResourcePath - Extract resource path from wildcard
-   * 3. getPublicAppManifest - Load manifest for the user's app
-   * 4. addPublicAppFS - Load appFS for the user's app
-   * 5. hasAtLeastOnePublicRecord - Check if there is at least one public record for the app
-   * 6. Route handler - Render page or serve file
    */
   router.get('/app/@:user_id/:app_name/*',
     setupGuard,
     extractPublicAppResourcePath,
     getPublicAppManifest,
+    addPublicRecordsDB,
     addPublicAppFS,
     hasAtLeastOnePublicRecord,
     publicAppPageController.servePublicPageOrFile
@@ -348,5 +330,43 @@ export const createPublicCatchAllRoutes = ({ dsManager, freezrPrefs, freezrStatu
   return router
 }
 
-export default { createPublicRoutes, createPublicCatchAllRoutes }
+/**
+ * Create routes for browsing published apps
+ * Mounts at /publicapps
+ */
+export const createPublicAppsRoutes = ({ dsManager, freezrPrefs, freezrStatus }) => {
+  const router = Router()
+
+  router.use(preventCookiesOnPublicRoutes)
+
+  const setupGuard = createSetupGuard(dsManager)
+  const addPublicRecordsDB = createAddPublicRecordsDB(dsManager, freezrPrefs, freezrStatus)
+  const publicPageController = createPublicPageController()
+
+  router.get('/',
+    setupGuard,
+    publicPageController.publicAppsPage
+  )
+
+  router.get('/@:user_id',
+    setupGuard,
+    publicPageController.publicAppsPage
+  )
+
+  router.get('/@:user_id/:app_name/pcard',
+    setupGuard,
+    addPublicRecordsDB,
+    publicPageController.publicAppCard
+  )
+
+  router.get('/@:user_id/:app_name/download',
+    setupGuard,
+    addPublicRecordsDB,
+    publicPageController.publicAppDownload
+  )
+
+  return router
+}
+
+export default { createPublicRoutes, createPublicCatchAllRoutes, createPublicAppsRoutes }
 

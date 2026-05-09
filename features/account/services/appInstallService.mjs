@@ -171,6 +171,28 @@ const validateAppAndManifest = async (context) => {
     console.error('❌ validateAppAndManifest - app name not allowed', { realAppName: context.realAppName, issyss: isSystemApp(context.realAppName), isvalid: validAppName(context.realAppName) })
     throw new Error('App name not allowed: ' + context.realAppName)
   }
+
+  // Check for app name prefix collisions to prevent cross-app data access.
+  // An app named "com.example.myapp.posts" could access data belonging to
+  // "com.example.myapp" because the middleware uses startsWith to match
+  // app_table names to the requesting app. Block if the new name is a prefix
+  // of an existing app (or vice versa) with a dot separator.
+  if (context.userAppListDb) {
+    const existingApps = await context.userAppListDb.query({ removed: false }, {})
+    if (existingApps && existingApps.length > 0) {
+      const newName = context.realAppName
+      for (const existing of existingApps) {
+        const existingName = existing.app_name
+        if (!existingName || existingName === newName) continue
+        if (newName.startsWith(existingName + '.') || existingName.startsWith(newName + '.')) {
+          throw new Error(
+            `App name "${newName}" conflicts with existing app "${existingName}" — ` +
+            'one name is a dot-prefix of the other, which would allow cross-app data access.'
+          )
+        }
+      }
+    }
+  }
 }
 
 // Step 4: Setup app filesystem

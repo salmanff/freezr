@@ -188,7 +188,7 @@ const handleGetNewState = async (req, res, oauthorDb, cacheManager) => {
   
   // Create state parameters with PKCE codes
   const redirecturi = (startsWith(req.get('host'), 'localhost') ? 'http' : 'https') + 
-    '://' + req.headers.host + '/public/oauth/oauth_validate_page.html'
+    '://' + req.headers.host + '/public/oauth/oauth_validate_page'
   
   const stateParams = createStateParams({
     ip: req.ip,
@@ -475,6 +475,19 @@ export const createAppTokenLoginHandler = ({ dsManager, freezrPrefs }) => {
         expiresIn = requestedExpiry
       }
       
+      // 🟣🟣🟣 DIAG: OAuth password-grant exchange touches an offline token's expiry
+      // (only path other than CEPS validate that writes to expiry). Should NOT fire
+      // on ordinary CEPS read/write/query calls.
+      // console.log('🟣🟣🟣 OFFLINE-TOKEN OAuth password-grant exchange (writes expiry)', {
+      //   app_token: appToken ? appToken.substring(0, 10) + '...' : null,
+      //   user_id: userId,
+      //   app_name: appName,
+      //   record_expiry_iso: record.expiry ? new Date(record.expiry).toISOString() : null,
+      //   requestedExpiry_iso: requestedExpiry ? new Date(requestedExpiry).toISOString() : null,
+      //   finalExpiresIn_iso: expiresIn ? new Date(expiresIn).toISOString() : null,
+      //   finalExpiresIn_sec_from_now: expiresIn ? Math.round((expiresIn - Date.now()) / 1000) : null
+      // })
+
       // Update the record to mark it as used
       await tokenDb.update(
         record._id + '',

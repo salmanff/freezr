@@ -504,14 +504,12 @@ const userAppLogOut = async (req, res) => {
     //   visitLogger.recordLoggedInVisit(dsManager, req, { visitType: 'apis' })
     // }
 
-    const deviceCode = req.session.device_code || 
-
-    // Regenerate session for security (ensures clean app logout)
-    req.session.regenerate((regenerateErr) => {
-      if (regenerateErr) {
-        req.session.device_code = deviceCode
-        console.error('Session regeneration error during app logout:', regenerateErr)
-        // Continue with logout even if regeneration fails
+    // Destroy session completely - deletes session file and clears cookie
+    // device_code will be regenerated at next login (stateless design)
+    req.session.destroy((destroyErr) => {
+      if (destroyErr) {
+        console.error('Session destruction error during app logout:', destroyErr)
+        // Continue with logout even if destruction fails
       }
       
       return sendApiSuccess(res, { success: true })
@@ -525,7 +523,7 @@ const userAppLogOut = async (req, res) => {
 
 /**
  * Handle app management actions (removeAppFromHomePage, deleteApp, updateApp)
- * Modernized version of account_handler.appMgmtActions
+ * Can only be accessed by the account or creator apps
  *
  * Dependencies expected from middleware chain:
  * - req.session.logged_in_user_id
@@ -969,6 +967,8 @@ const installAppFromZipFile = async (req, res) => {
     // Call service function directly
     const result = await oneUserInstallationProcess(context)
 
+    console.log('🔄 installAppFromZipFile result:', result)
+
     return sendApiSuccess(res, result)
 
   } catch (error) {
@@ -1266,8 +1266,7 @@ export const changeNamedPermissionsHandler = async (req, res) => {
       return sendFailure(res, result?.error, 'accountApiController.changeNamedPermissionsHandler', 500)
     }
 
-    
-
+    // OLD??? 
     // const ownerPermsDb = res.locals?.freezr?.ownerPermsDb
     // const userDs = res.locals?.freezr?.userDs
     // const publicRecordsDb = res.locals?.freezr?.publicRecordsDb
@@ -1324,12 +1323,12 @@ export const changeNamedPermissionsHandler = async (req, res) => {
     //       const requesteeDb = await userDs.getorInitDb(tableId)
 
     //       const theQuery = {}
-    //       theQuery['_accessible.' + grantee + '.' + fullPermName + '.granted'] = true
+    //       theQuery['_accessibles.' + grantee + '.' + fullPermName + '.granted'] = true
 
     //       const recs = await requesteeDb.query(theQuery, {})
 
     //       for (const rec of recs) {
-    //         const accessible = rec._accessible || {}
+    //         const accessible = rec._accessibles || {}
     //         const publicid = (accessible[grantee] && accessible[grantee][fullPermName] && accessible[grantee][fullPermName].public_id) 
     //           ? accessible[grantee][fullPermName].public_id 
     //           : null
@@ -1341,7 +1340,7 @@ export const changeNamedPermissionsHandler = async (req, res) => {
     //           delete accessible[grantee]
     //         }
 
-    //         await requesteeDb.update(rec._id, { _accessible: accessible }, { replaceAllFields: false })
+    //         await requesteeDb.update(rec._id, { _accessibles: accessible }, { replaceAllFields: false })
 
     //         // If public grantee, delete from public records
     //         if (grantee === '_public' && publicid && publicRecordsDb) {

@@ -28,7 +28,6 @@ export default {
     userFiles: 3600,              // 1 hour for user files
     appFileModTime: 0,            // No TTL - file mod times persist until invalidated
     userFileModTime: 0,           // No TTL - file mod times persist until invalidated
-    fileTokens: 86400,             // 24 hours for file tokens (matches FILE_TOKEN_EXPIRY)
     byKey: 3600,                  // 30 minutes for individual records
     Query: 300,                   // 5 minutes for query results (short!)
     Recent: 86400 * 7,            // 7 days for Recent cache
@@ -37,6 +36,9 @@ export default {
   
   // Cache population settings
   recentCount: 1000,              // Number of records in Recent cache
+  cacheCountMax: 1000,            // Max records to cache for patterned/simple queries
+                                  // When caching, we fetch up to this many from DB
+                                  // On read, if skip + count > this, bypass cache
   
   // Write debouncing
   invalidationDelay: 1000,        // Wait 1 second after last write before refreshing
@@ -47,7 +49,6 @@ export default {
     Recent: 90,                   // High priority
     appFileModTime: 80,           // High - needed for multi-server consistency
     userFileModTime: 80,          // High - needed for multi-server consistency
-    fileTokens: 60,               // Medium-high - file tokens need to persist for multi-server
     appFiles: 50,                 // Medium priority
     userFiles: 50,                // Medium priority
     byKey: 40,                    // Lower priority
@@ -62,7 +63,6 @@ export default {
     byKey: 5000,                  // Max individual records
     appFiles: 1000,               // Max app files
     userFiles: 1000,              // Max user files
-    fileTokens: 1000,             // same as max user files
     appFileModTime: 5000,         // Max app file mod times to track
     userFileModTime: 5000         // Max user file mod times to track
   },

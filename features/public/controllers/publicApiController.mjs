@@ -2,6 +2,7 @@
 // Handles JSON API endpoints for public routes
 
 import { sendFailure, sendAuthFailure, sendApiSuccess } from '../../../adapters/http/responses.mjs'
+import { escapeRegex } from '../../../common/helpers/utils.mjs'
 
 /**
  * Builds query parameters from request params and query string
@@ -46,14 +47,14 @@ const buildPublicQuery = (req) => {
     if (searchTerm) {
       if (searchTerm.indexOf(' ') < 0) {
         // Single term - simple regex
-        queryParams.search_words = new RegExp(searchTerm)
+        queryParams.search_words = new RegExp(escapeRegex(searchTerm))
       } else {
         // Multiple terms - use $and with multiple regex conditions
         // Start with existing queryParams, then add search conditions
         const theAnds = [queryParams]
         const searchTerms = searchTerm.split(' ').filter(term => term.length > 0)
         searchTerms.forEach(term => {
-          theAnds.push({ search_words: new RegExp(term) })
+          theAnds.push({ search_words: new RegExp(escapeRegex(term)) })
         })
         // Return new query with $and structure
         return { $and: theAnds }

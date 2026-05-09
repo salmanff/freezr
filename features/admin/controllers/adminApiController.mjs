@@ -8,12 +8,14 @@
 // - Uses functional approach with closures for dependency injection
 
 import { sendApiSuccess, sendFailure, sendAuthFailure } from '../../../adapters/http/responses.mjs'
+import { escapeRegex } from '../../../common/helpers/utils.mjs'
 import { oneUserInstallationProcess } from '../../account/services/appInstallService.mjs'
 import { setUserPasswordAsAdmin, deleteAllAppTokensForUser } from '../../account/services/passwordService.mjs'
 import { removeUserDataAndRecord } from '../../account/controllers/accountApiController.mjs'
 import { userPERMS_OAC, userAppListOAC, PUBLIC_MANIFESTS_OAC, PUBLIC_RECORDS_OAC, USER_DB_OAC, APP_TOKEN_OAC, PARAMS_OAC } from '../../../common/helpers/config.mjs'
 import User from '../../../common/misc/userObj.mjs'
 import { getOrSetPrefs, DEFAULT_PREFS } from '../services/adminConfigService.mjs'
+import { getConnectionStats } from '../../../adapters/datastore/dbConnectors/dbApi_mongodb.mjs'
 
 /**
  * Handle get user app resources action
@@ -58,15 +60,6 @@ const handleGetUserAppResources = async (req, res) => {
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
-/**
- * Escape special regex characters in a string for use in RegExp
- * @param {string} s
- * @returns {string}
- */
-function escapeRegex (s) {
-  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
 const handleListUsers = async (req, res) => {
   try {
     const skip = parseInt(req.query?.skip, 10) || 0
@@ -199,8 +192,14 @@ const handleUpdateUserLimits = async (req, res) => {
     const updatedLimits = { ...existingLimits, ...newLimits }
     // console.log('updateLimits', { userId, existingLimits, newLimits, updatedLimits })
     
-    // Update user record
+    // Update user record in database
     await allUsersDb.update(userId, { limits: updatedLimits }, { replaceAllFields: false })
+
+    // Update in-memory userDs useage limits if the user DS is loaded
+    const userDs = dsManager.users?.[userId]
+    if (userDs && userDs.useage) {
+      userDs.useage.storageLimit = updatedLimits.storage
+    }
 
     return sendApiSuccess(res, { success: true, userId, limits: updatedLimits })
   } catch (error) {
@@ -238,6 +237,10 @@ const handleChangeUserRights = async (req, res) => {
     if (!allUsersDb?.query) {
       return sendFailure(res, 'Users database not available', 'handleChangeUserRights', 500)
     }
+    const tokenDb = await dsManager.getorInitDb(APP_TOKEN_OAC, { freezrPrefs })
+    if (!tokenDb?.delete_records) {
+      return sendFailure(res, 'Token database not available', 'handleChangeUserRights', 500)
+    }
 
     // Get user
     const users = await allUsersDb.query({ user_id: userId }, null)
@@ -258,7 +261,14 @@ const handleChangeUserRights = async (req, res) => {
     // Update user record
     await allUsersDb.update(userId, { isAdmin, isPublisher }, { replaceAllFields: false })
 
-    return sendApiSuccess(res, { success: true, userId, isAdmin, isPublisher })
+    // Invalidate all sessions and app tokens so the user must re-login with updated rights
+    const deleted = await deleteAllAppTokensForUser(tokenDb, userId)
+    let sessionsDestroyed = 0
+    if (req.sessionStore && typeof req.sessionStore.destroyAllForUserId === 'function') {
+      sessionsDestroyed = await req.sessionStore.destroyAllForUserId(userId)
+    }
+
+    return sendApiSuccess(res, { success: true, userId, isAdmin, isPublisher, tokensDeleted: deleted.deletedCount, sessionsDestroyed })
   } catch (error) {
     console.error('❌ Error in handleChangeUserRights:', error)
     return sendFailure(res, error, 'handleChangeUserRights', 500)
@@ -601,8 +611,8 @@ const handleChangeMainPrefs = async (req, res) => {
         return sendFailure(res, 'Users database not available', 'handleChangeMainPrefs', 500)
       }
       
-      const userInfo = await allUsersDb.read_by_id(userId)
-      if (!userInfo) {
+      const userInfo = await allUsersDb.query({ user_id: userId }) // .read_by_id(userId)
+      if (!userInfo || userInfo.length === 0) {
         return sendAuthFailure(res, {
           type: 'userNotFound',
           message: 'User not found',
@@ -612,8 +622,8 @@ const handleChangeMainPrefs = async (req, res) => {
           statusCode: 404
         })
       }
-      
-      const user = new User(userInfo)
+
+      const user = new User(userInfo[0])
       if (!user.check_passwordSync(req.body.password)) {
         return sendAuthFailure(res, {
           type: 'invalidPassword',
@@ -698,6 +708,108 @@ const handleChangeMainPrefs = async (req, res) => {
 }
 
 /**
+ * Handle get cache preferences action
+ * GET /adminapi/get_cache_prefs
+ */
+const handleGetCachePrefs = async (req, res) => {
+  try {
+    const dsManager = res.locals?.freezr?.dsManager
+    if (!dsManager || !dsManager.cacheManager) {
+      return sendFailure(res, 'Cache manager not available', 'handleGetCachePrefs', 500)
+    }
+    const cachePrefs = dsManager.cacheManager.getCachePrefs()
+    return sendApiSuccess(res, { cachePrefs })
+  } catch (error) {
+    console.error('Error in handleGetCachePrefs:', error)
+    return sendFailure(res, error, 'handleGetCachePrefs', 500)
+  }
+}
+
+/**
+ * Handle get cache stats action
+ * GET /adminapi/get_cache_stats
+ */
+const handleGetCacheStats = async (req, res) => {
+  try {
+    const dsManager = res.locals?.freezr?.dsManager
+    if (!dsManager || !dsManager.cacheManager) {
+      return sendFailure(res, 'Cache manager not available', 'handleGetCacheStats', 500)
+    }
+    const stats = dsManager.cacheManager.getStats()
+    return sendApiSuccess(res, { stats })
+  } catch (error) {
+    console.error('Error in handleGetCacheStats:', error)
+    return sendFailure(res, error, 'handleGetCacheStats', 500)
+  }
+}
+
+/**
+ * Handle set cache preferences action
+ * POST /adminapi/set_cache_prefs body: { cachePrefs: { ALL_USERS: {}, USER_SPECIFIC: {} } }
+ */
+const handleSetCachePrefs = async (req, res) => {
+  try {
+    const dsManager = res.locals?.freezr?.dsManager
+    if (!dsManager || !dsManager.cacheManager) {
+      return sendFailure(res, 'Cache manager not available', 'handleSetCachePrefs', 500)
+    }
+
+    const newPrefs = req.body?.cachePrefs
+    if (!newPrefs || typeof newPrefs !== 'object') {
+      return sendFailure(res, 'Missing or invalid cachePrefs object', 'handleSetCachePrefs', 400)
+    }
+
+    // Validate structure
+    if (!newPrefs.ALL_USERS || typeof newPrefs.ALL_USERS !== 'object') {
+      newPrefs.ALL_USERS = {}
+    }
+    if (!newPrefs.USER_SPECIFIC || typeof newPrefs.USER_SPECIFIC !== 'object') {
+      newPrefs.USER_SPECIFIC = {}
+    }
+
+    // updateCachePrefs is now async - it writes to fradmin user files
+    const updatedPrefs = await dsManager.cacheManager.updateCachePrefs(newPrefs)
+    return sendApiSuccess(res, { cachePrefs: updatedPrefs })
+  } catch (error) {
+    console.error('Error in handleSetCachePrefs:', error)
+    return sendFailure(res, error, 'handleSetCachePrefs', 500)
+  }
+}
+
+/**
+ * Handle get mongo connection stats action
+ * GET /adminapi/get_mongo_connection_stats
+ */
+const handleGetMongoConnectionStats = async (req, res) => {
+  try {
+    const stats = getConnectionStats()
+    return sendApiSuccess(res, { stats })
+  } catch (error) {
+    console.error('Error in handleGetMongoConnectionStats:', error)
+    return sendFailure(res, error, 'handleGetMongoConnectionStats', 500)
+  }
+}
+
+/**
+ * Handle clear all caches action
+ * POST /adminapi/clear_all_caches
+ */
+const handleClearAllCaches = async (req, res) => {
+  try {
+    const dsManager = res.locals?.freezr?.dsManager
+    if (!dsManager || !dsManager.cacheManager) {
+      return sendFailure(res, 'Cache manager not available', 'handleClearAllCaches', 500)
+    }
+    dsManager.cacheManager.clearAll()
+    const stats = dsManager.cacheManager.getStats()
+    return sendApiSuccess(res, { message: 'All caches cleared', stats })
+  } catch (error) {
+    console.error('Error in handleClearAllCaches:', error)
+    return sendFailure(res, error, 'handleClearAllCaches', 500)
+  }
+}
+
+/**
  * Handle admin API action
  * Routes to specific action handlers based on action parameter
  * 
@@ -741,6 +853,16 @@ const handleAdminAction = async (req, res) => {
         return await handleChangeUserRights(req, res)
       case 'delete_users':
         return await handleDeleteUsers(req, res)
+      case 'get_cache_prefs':
+        return await handleGetCachePrefs(req, res)
+      case 'get_cache_stats':
+        return await handleGetCacheStats(req, res)
+      case 'get_mongo_connection_stats':
+        return await handleGetMongoConnectionStats(req, res)
+      case 'set_cache_prefs':
+        return await handleSetCachePrefs(req, res)
+      case 'clear_all_caches':
+        return await handleClearAllCaches(req, res)
       default:
         return sendFailure(res, `Unknown action: ${action}`, 'handleAdminAction', 404)
     }

@@ -4,7 +4,7 @@
 import { sendApiSuccess, sendFailure } from '../../../adapters/http/responses.mjs'
 import { isSystemApp } from '../../../common/helpers/config.mjs'
 import { startsWith, endsWith } from '../../../common/helpers/utils.mjs'
-import { APP_TOKEN_OAC, VALIDATION_TOKEN_OAC, userContactsOAC, userPERMS_OAC } from '../../../common/helpers/config.mjs'
+import { APP_TOKEN_OAC, VALIDATION_TOKEN_OAC, userContactsOAC, userPERMS_OAC, messagesSentOAC, messagesGotOAC } from '../../../common/helpers/config.mjs'
 import { createBaseFreezrContextForResLocals } from '../../../common/helpers/context.mjs'
 
 /**
@@ -17,10 +17,10 @@ import { createBaseFreezrContextForResLocals } from '../../../common/helpers/con
  */
 export const createAddUserAppList = (dsManager, freezrPrefs) => {
   return async (req, res, next) => {
-    // console.log('📋 addUserAppList middleware called')
+    // onsole.log('📋 addUserAppList middleware called')
     
     try {
-      const ownerId = res.locals.freezr?.tokenInfo?.owner_id || req.session.logged_in_user_id
+      const ownerId = res.locals.freezr?.tokenInfo?.owner_id || req.session?.logged_in_user_id
       
       if (!ownerId) {
         throw new Error('User ID not found')
@@ -46,7 +46,7 @@ export const createAddUserAppList = (dsManager, freezrPrefs) => {
         userAppListDb
       }
       
-      // console.log('✅ User app list DB set up in res.locals.freezr, proceeding to next middleware')
+      // onsole.log('✅ User app list DB set up in res.locals.freezr, proceeding to next middleware')
       next()
       
     } catch (error) {
@@ -148,7 +148,7 @@ export const createGetTargetManifest = (dsManager, freezrPrefs) => {
         appName: requestedAppName
       }
       
-      // console.log('✅ Manifest retrieved and set in res.locals.freezr:', { requestedAppName, hasManifest: !!manifest })
+      // onsole.log('✅ Manifest retrieved and set in res.locals.freezr:', { requestedAppName, hasManifest: !!manifest })
       next()
       
     } catch (error) {
@@ -178,7 +178,7 @@ export const createAddTargetAppFS = (dsManager, freezrPrefs, freezrStatus) => {
         return res.status(400).json({ error: 'target_app parameter is required' })
       }
       
-      const owner = req.session.logged_in_user_id
+      const owner = req.session?.logged_in_user_id
       if (!owner) {
         return res.status(401).json({ error: 'User not authenticated' })
       }
@@ -243,8 +243,8 @@ export const createAddPublicSystemAppFS = (dsManager, freezrPrefs, freezrStatus)
         dsManager.setSystemUserDS('public', dsManager.initialEnvironment, { freezrPrefs })
 
         // const results = await dsManager.users.fradmin.getorInitDb({ app_table: 'info.freezr.admin.users', owner: 'fradmin' }, { freezrPrefs })  
-        // console.log('🔄 getorInitDb - result:', results)
-        // console.log('🔄 getorInitDb - fradmin set up', { fradmin: dsManager.users.fradmin })
+        // onsole.log('🔄 getorInitDb - result:', results)
+        // onsole.log('🔄 getorInitDb - fradmin set up', { fradmin: dsManager.users.fradmin })
       }
       const theDs = dsManager.users.fradmin 
       const appFS = await theDs.getorInitAppFS(targetAppName, {})
@@ -306,7 +306,7 @@ export const createAddUserDs = (dsManager, freezrPrefs) => {
         requesting_owner_id: owner
       }
       
-      // console.log('✅ User DS set up in res.locals.freezr, proceeding to next middleware')
+      // onsole.log('✅ User DS set up in res.locals.freezr, proceeding to next middleware')
       next()
       
     } catch (error) {
@@ -327,7 +327,6 @@ export const createAddUserDs = (dsManager, freezrPrefs) => {
 export const createAddAppTableFromBodyAndCheckTokenOwner = (dsManager, freezrPrefs) => {
   if (!freezrPrefs) throw new Error('no freezrPrefs in createAddUserDs')
   return async (req, res, next) => {
-    // onsole.log('💾 addUserDs middleware called')
 
     const appTable = req.body.table_id
 
@@ -344,7 +343,7 @@ export const createAddAppTableFromBodyAndCheckTokenOwner = (dsManager, freezrPre
       const requestorId = tokenInfo.requestor_id
       const requestorApp = tokenInfo.app_name
 
-      if (!startsWith(appTable, requestorApp)) {
+      if (appTable !== requestorApp && !startsWith(appTable, requestorApp + '.')) {
         return sendFailure(res, 'Can currently only share records for own app', 'createAddAppTableFromBodyAndCheckTokenOwner', 403)
       }
 
@@ -394,7 +393,7 @@ export const createAddStorageLimits = (dsManager, freezrPrefs) => {
     // onsole.log('💾 addUserDs middleware called')
     
     try {
-      const owner = req.session.logged_in_user_id
+      const owner = req.session?.logged_in_user_id
 
       if (!owner) {
         return next()
@@ -428,7 +427,7 @@ export const createAddStorageLimits = (dsManager, freezrPrefs) => {
  */
 export const addDataOwnerToContext = function (req, res, next) {
   const owner = req.body.owner_id || req.query.owner_id || res.locals.freezr?.tokenInfo?.owner_id
-  // console.log('addDataOwnerToContext', { owner, tokenInfo: res.locals.freezr?.tokenInfo, req: req.body, query: req.query, freezr: res.locals.freezr })
+  // onsole.log('addDataOwnerToContext', { owner, tokenInfo: res.locals.freezr?.tokenInfo, req: req.body, query: req.query, freezr: res.locals.freezr })
   if (!owner || !res.locals.freezr?.tokenInfo) {
     return sendFailure(res, 'owner_id or tokenInfo not set')
   }
@@ -472,7 +471,7 @@ export const defineFileAppTableFromAppName = function (req, res, next) {
  * @param {Object} res - Express response object
  */
 export const getAllAppAppTablesAndSendWithManifest = async (req, res) => {
-  console.log('🔍 getAllAppAppTablesAndSendWithManifest handler called')
+  // onsole.log('🔍 getAllAppAppTablesAndSendWithManifest handler called')
   
   try {
     const freezr = res.locals.freezr
@@ -488,7 +487,7 @@ export const getAllAppAppTablesAndSendWithManifest = async (req, res) => {
     }
     
     const userDS = freezr.userDS
-    const owner = req.session.logged_in_user_id
+    const owner = req.session?.logged_in_user_id
     const tokenInfo = freezr.tokenInfo
 
     if (!tokenInfo) {
@@ -739,6 +738,108 @@ export const createAddUserFilesDbAndAppFS = (dsManager, freezrPrefs, freezrStatu
   }
 }
 
+/**
+ * Middleware to add user preferences to context
+ * Gets the userDS and sets res.locals.freezr.userPrefs from userDS.userPrefs
+ * 
+ * @param {Object} dsManager - Data store manager
+ * @param {Object} freezrPrefs - Freezr preferences
+ * @returns {Function} Express middleware function
+ */
+export const createAddUserPrefs = (dsManager, freezrPrefs) => {
+  return async (req, res, next) => {
+    try {
+      const requestorId = res.locals.freezr?.tokenInfo?.requestor_id
+      if (!requestorId) {
+        return sendFailure(res, 'Requestor ID not found', 'createAddUserPrefs', 401)
+      }
+
+      // Only validate session match if session exists (allows cookieless requests)
+      if (req.session?.logged_in_user_id && req.session.logged_in_user_id !== requestorId) {
+        return sendFailure(res, 'User ID mismatch', 'createAddUserPrefs', 403)
+      }
+
+      const userDS = await dsManager.getOrSetUserDS(requestorId, { freezrPrefs })
+      if (!userDS) {
+        return sendFailure(res, 'Could not get user data store', 'createAddUserPrefs', 500)
+      }
+
+      res.locals.freezr.userPrefs = userDS.userPrefs
+
+      next()
+    } catch (error) {
+      console.error('❌ Error in addUserPrefs middleware:', error)
+      return sendFailure(res, error, 'createAddUserPrefs', 500)
+    }
+  }
+}
+
+/**
+ * Middleware for unauthenticated server-to-server message actions (transmit, verify).
+ * These endpoints have no Bearer token -- the local user is determined from the request body:
+ *   - transmit: local user is req.body.recipient_id (receiving the message)
+ *   - verify:   local user is req.body.sender_id (originally sent the message)
+ *
+ * Sets up the minimal set of DBs each action needs on res.locals.freezr.
+ */
+export const createAddMessageContextFromBody = (dsManager, freezrPrefs, freezrStatus) => {
+  return async (req, res, next) => {
+    try {
+      if (!res.locals.freezr) res.locals.freezr = {}
+      const action = req.params.action
+
+      let localUserId = null
+      if (action === 'transmit') {
+        localUserId = req.body.recipient_id
+      } else if (action === 'verify') {
+        localUserId = req.body.sender_id
+      }
+
+      if (!localUserId || typeof localUserId !== 'string') {
+        return sendFailure(res, 'Missing or invalid user id in request body', 'addMessageContextFromBody', 400)
+      }
+
+      if (!dsManager.users || !dsManager.users[localUserId]) {
+        console.warn('❌ User not live on server', { localUserId })
+        // Get the server instance from dsManager (if needed for advanced server-to-server checks)
+        const userDS = await dsManager.getOrSetUserDS(localUserId, { freezrPrefs })
+        if (!userDS) {
+          return sendFailure(res, 'User not found on this server', 'addMessageContextFromBody', 404)
+        }
+      }
+
+      if (action === 'transmit') {
+        const userContactsDb = await dsManager.getorInitDb(userContactsOAC(localUserId), { freezrPrefs })
+        if (!userContactsDb) {
+          return sendFailure(res, 'Could not get userContactsDb', 'addMessageContextFromBody', 500)
+        }
+        res.locals.freezr.userContactsDb = userContactsDb
+
+        const userMessagesGotDb = await dsManager.getorInitDb(messagesGotOAC(localUserId), { freezrPrefs })
+        if (!userMessagesGotDb) {
+          return sendFailure(res, 'Could not get userMessagesGotDb', 'addMessageContextFromBody', 500)
+        }
+        res.locals.freezr.userMessagesGotDb = userMessagesGotDb
+
+        const userPrefs = dsManager.users[localUserId].userPrefs
+        res.locals.freezr.userPrefs = userPrefs || null
+      } else if (action === 'verify') {
+        const userMessagesSentDb = await dsManager.getorInitDb(messagesSentOAC(localUserId), { freezrPrefs })
+        if (!userMessagesSentDb) {
+          return sendFailure(res, 'Could not get userMessagesSentDb', 'addMessageContextFromBody', 500)
+        }
+        res.locals.freezr.userMessagesSentDb = userMessagesSentDb
+      }
+
+      res.locals.freezr.permGiven = true
+      next()
+    } catch (error) {
+      console.error('❌ Error in addMessageContextFromBody middleware:', error)
+      return sendFailure(res, error, 'addMessageContextFromBody', 500)
+    }
+  }
+}
+
 export default {
   createAddUserAppList,
   addDataOwnerToContext,
@@ -749,6 +850,8 @@ export default {
   createAddAppTableDbAndFsIfNeedbe,
   getAllAppAppTablesAndSendWithManifest,
   createAddValidationDbs,
-  createAddUserFilesDbAndAppFS
+  createAddUserFilesDbAndAppFS,
+  createAddUserPrefs,
+  createAddMessageContextFromBody
 }
 

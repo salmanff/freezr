@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>freezr logo preview</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/app/info.freezr.public/public/freezr_core.css" type="text/css" />
+<style>
+	/* =====================================================================
+	   PLAYGROUND-ONLY corner-button variants.
+	   Production uses .freezr-logo-btn-negative-gradient (B4) defined in
+	   freezr_core.css. The classes below let us experiment without polluting
+	   the global stylesheet. To promote one of these to production, copy its
+	   class block into freezr_core.css and update freezrApiV2.js className.
+	   ===================================================================== */
+
+	/* Local mask SVG (only needed by the "ghost" variant). */
+	:root {
+		--freezr-logo-mask-svg: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 72 72' fill='none'><g transform='rotate(45 36 36)' stroke='%23000' stroke-width='2.5' stroke-linecap='round' fill='none'><circle cx='36' cy='36' r='4' fill='%23000' stroke='none'/><path d='M23 49 A18 18 0 0 1 23 23'/><path d='M17 55 A26 26 0 0 1 17 17'/><path d='M11 61 A35 35 0 0 1 11 11'/><path d='M49 23 A18 18 0 0 1 49 49'/><path d='M55 17 A26 26 0 0 1 55 55'/><path d='M61 11 A35 35 0 0 1 61 61'/></g></svg>");
+	}
+
+	/* A — Ghost watermark (mono silhouette, blends via mix-blend-mode). */
+	.preview-btn-ghost {
+		background-color: currentColor;
+		-webkit-mask: var(--freezr-logo-mask-svg) center/contain no-repeat;
+		        mask: var(--freezr-logo-mask-svg) center/contain no-repeat;
+		color: #1a3a5a;
+		opacity: 0.35;
+		mix-blend-mode: multiply;
+		transition: opacity 0.15s ease, transform 0.15s ease;
+	}
+	.preview-btn-ghost:hover { opacity: 0.85; transform: scale(1.08); }
+
+	/* B0 — Original negative (grey/black). */
+	.preview-btn-negative {
+		background-color: rgba(0, 0, 0, 0.22);
+		background-image: var(--freezr-logo-white-svg);
+		background-repeat: no-repeat;
+		background-position: center;
+		background-size: 78%;
+		border-radius: 8px;
+		backdrop-filter: blur(2px);
+		-webkit-backdrop-filter: blur(2px);
+		transition: background-color 0.15s ease, transform 0.15s ease;
+	}
+	.preview-btn-negative:hover { background-color: rgba(0, 0, 0, 0.42); transform: scale(1.08); }
+
+	/* B1 — Soft brand blue. */
+	.preview-btn-negative-blue {
+		background-color: rgba(26, 107, 181, 0.22);
+		background-image: var(--freezr-logo-white-svg);
+		background-repeat: no-repeat;
+		background-position: center;
+		background-size: 78%;
+		border-radius: 8px;
+		backdrop-filter: blur(3px);
+		-webkit-backdrop-filter: blur(3px);
+		transition: background-color 0.15s ease, transform 0.15s ease;
+	}
+	.preview-btn-negative-blue:hover { background-color: rgba(26, 107, 181, 0.42); transform: scale(1.08); }
+
+	/* B2 — Frosted brand blue. */
+	.preview-btn-negative-blue-frost {
+		background-color: rgba(26, 107, 181, 0.16);
+		background-image: var(--freezr-logo-white-svg);
+		background-repeat: no-repeat;
+		background-position: center;
+		background-size: 78%;
+		border-radius: 10px;
+		backdrop-filter: blur(8px) saturate(140%);
+		-webkit-backdrop-filter: blur(8px) saturate(140%);
+		box-shadow: 0 1px 2px rgba(26, 107, 181, 0.18);
+		transition: background-color 0.15s ease, transform 0.15s ease;
+	}
+	.preview-btn-negative-blue-frost:hover { background-color: rgba(26, 107, 181, 0.36); transform: scale(1.08); }
+
+	/* B3 — Sky. */
+	.preview-btn-negative-sky {
+		background-color: rgba(168, 212, 245, 0.55);
+		background-image: var(--freezr-logo-white-svg);
+		background-repeat: no-repeat;
+		background-position: center;
+		background-size: 78%;
+		border-radius: 8px;
+		backdrop-filter: blur(3px);
+		-webkit-backdrop-filter: blur(3px);
+		transition: background-color 0.15s ease, transform 0.15s ease;
+	}
+	.preview-btn-negative-sky:hover { background-color: rgba(168, 212, 245, 0.85); transform: scale(1.08); }
+
+	/* B5 — Ice (outlined, very transparent). */
+	.preview-btn-negative-ice {
+		background-color: rgba(26, 107, 181, 0.10);
+		background-image: var(--freezr-logo-white-svg);
+		background-repeat: no-repeat;
+		background-position: center;
+		background-size: 78%;
+		border-radius: 8px;
+		border: 1px solid rgba(26, 107, 181, 0.28);
+		backdrop-filter: blur(4px);
+		-webkit-backdrop-filter: blur(4px);
+		box-sizing: border-box;
+		transition: background-color 0.15s ease, transform 0.15s ease;
+	}
+	.preview-btn-negative-ice:hover { background-color: rgba(26, 107, 181, 0.26); transform: scale(1.08); }
+
+	/* C — Faded gradient (no pill, just the colored mark). */
+	.preview-btn-gradient {
+		background-image: var(--freezr-logo-svg);
+		background-repeat: no-repeat;
+		background-position: center;
+		background-size: contain;
+		opacity: 0.45;
+		filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.18));
+		transition: opacity 0.15s ease, transform 0.15s ease;
+	}
+	.preview-btn-gradient:hover { opacity: 0.95; transform: scale(1.08); }
+
+	/* =====================================================================
+	   Page chrome (purely for the preview layout itself).
+	   ===================================================================== */
+	body {
+		font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+		margin: 0;
+		padding: 32px;
+		background: #fafafa;
+		color: #222;
+	}
+	h1 { font-size: 22px; margin: 0 0 8px; }
+	h2 { font-size: 16px; margin: 28px 0 8px; color: #555; font-weight: 600; }
+	h3 { font-size: 13px; margin: 22px 0 6px; color: #777; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+	p.note { color: #666; max-width: 760px; line-height: 1.5; }
+	code { background: #eee; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+	.callout {
+		background: #eef6ff;
+		border: 1px solid #c4dcf5;
+		border-radius: 8px;
+		padding: 12px 16px;
+		max-width: 760px;
+		margin: 12px 0 24px;
+		color: #234;
+		font-size: 13px;
+		line-height: 1.5;
+	}
+
+	.row {
+		display: flex;
+		gap: 28px;
+		align-items: center;
+		flex-wrap: wrap;
+		padding: 16px 18px;
+		background: #fff;
+		border: 1px solid #e6e6e6;
+		border-radius: 8px;
+	}
+	.row .item {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 6px;
+		font-size: 11px;
+		color: #777;
+	}
+	.size-16 { width: 16px; height: 16px; }
+	.size-24 { width: 24px; height: 24px; }
+	.size-32 { width: 32px; height: 32px; }
+	.size-48 { width: 48px; height: 48px; }
+	.size-72 { width: 72px; height: 72px; }
+	.size-128 { width: 128px; height: 128px; }
+
+	.legend, .grid {
+		display: grid;
+		grid-template-columns: 170px repeat(7, 1fr);
+		gap: 8px;
+	}
+	.legend {
+		margin-top: 10px;
+		font-weight: 600;
+		font-size: 11px;
+		color: #333;
+	}
+	.legend > div { padding: 0 4px; line-height: 1.3; }
+	.legend .style-tag { display: block; font-weight: 400; color: #888; font-size: 10px; margin-top: 2px; }
+	.legend .chosen { color: #1a6bb5; }
+	.grid .label {
+		display: flex;
+		align-items: center;
+		font-size: 12px;
+		color: #555;
+		padding: 0 6px;
+	}
+	.surface {
+		position: relative;
+		height: 84px;
+		border-radius: 8px;
+		border: 1px solid rgba(0,0,0,0.08);
+		overflow: hidden;
+	}
+	.surface .candidate {
+		position: absolute;
+		top: 8px;
+		right: 8px;
+		width: 32px;
+		height: 32px;
+		cursor: pointer;
+	}
+	.surface.chosen { box-shadow: 0 0 0 2px #1a6bb5 inset; }
+	.surface .surface-label {
+		position: absolute;
+		bottom: 6px;
+		left: 6px;
+		font-size: 10px;
+		color: rgba(0,0,0,0.55);
+		background: rgba(255,255,255,0.6);
+		padding: 1px 6px;
+		border-radius: 3px;
+	}
+	.surface.dark .surface-label { color: rgba(255,255,255,0.85); background: rgba(0,0,0,0.4); }
+
+	.bg-white { background: #ffffff; }
+	.bg-cream { background: #fdf6e3; }
+	.bg-grey { background: #f0f1f3; }
+	.bg-dark { background: #1f2937; }
+	.bg-photo {
+		background:
+			linear-gradient(135deg, rgba(255,255,255,0.0), rgba(0,0,0,0.25)),
+			conic-gradient(from 30deg at 50% 50%, #e0c3fc, #8ec5fc, #fbc2eb, #a6c1ee, #e0c3fc);
+		background-size: cover;
+	}
+	.bg-pattern {
+		background-color: #e8edf2;
+		background-image: linear-gradient(45deg, #cfd6df 25%, transparent 25%, transparent 75%, #cfd6df 75%),
+		                  linear-gradient(45deg, #cfd6df 25%, transparent 25%, transparent 75%, #cfd6df 75%);
+		background-size: 16px 16px;
+		background-position: 0 0, 8px 8px;
+	}
+	.bg-gradient-blue { background: linear-gradient(135deg, #1a6bb5, #a8d4f5); }
+	.bg-gradient-warm { background: linear-gradient(135deg, #ff9a9e, #fad0c4); }
+
+	.zoom-row {
+		display: flex;
+		gap: 28px;
+		flex-wrap: wrap;
+		margin-top: 8px;
+		padding: 18px;
+		background: linear-gradient(135deg, #cfd6df 0%, #fdfdfd 50%, #cfd6df 100%);
+		border-radius: 8px;
+	}
+	.zoom-row .zoom-cell {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 8px;
+		font-size: 11px;
+		color: #444;
+	}
+	.zoom-row .zoom-cell .candidate {
+		width: 96px;
+		height: 96px;
+		cursor: pointer;
+	}
+	.zoom-row .zoom-cell.chosen {
+		padding: 8px;
+		border: 2px solid #1a6bb5;
+		border-radius: 12px;
+		background: rgba(255,255,255,0.5);
+	}
+</style>
+</head>
+<body>
+
+<h1>freezr logo + spinner + corner-button preview</h1>
+
+<div class="callout">
+	<strong>Production class is <code>.freezr-logo-btn-negative-gradient</code> (B4)</strong> &mdash;
+	defined in <code>freezr_core.css</code> and used by <code>#freezer_img_button</code>
+	(the corner button that <code>freezrApiV2.js</code> drops onto every app page).
+	Other variants on this page are <em>preview-only</em> (prefixed <code>.preview-btn-*</code>)
+	so the global stylesheet stays lean. To swap the production button to a different
+	variant later: copy its class block from this page's <code>&lt;style&gt;</code>
+	into <code>freezr_core.css</code> and update the <code>className</code> in
+	<code>freezrApiV2.js _createElements()</code>.
+</div>
+
+<h2>Static logo &mdash; <code>.freezr-logo</code></h2>
+<div class="row">
+	<div class="item"><div class="freezr-logo size-16"></div><span>16 px</span></div>
+	<div class="item"><div class="freezr-logo size-24"></div><span>24 px</span></div>
+	<div class="item"><div class="freezr-logo size-32"></div><span>32 px</span></div>
+	<div class="item"><div class="freezr-logo size-48"></div><span>48 px</span></div>
+	<div class="item"><div class="freezr-logo size-72"></div><span>72 px</span></div>
+	<div class="item"><div class="freezr-logo size-128"></div><span>128 px</span></div>
+</div>
+
+<h2>Spinner &mdash; <code>.freezr-logo-spinner</code></h2>
+<div class="row">
+	<div class="item"><div class="freezr-logo-spinner size-16"></div><span>16 px</span></div>
+	<div class="item"><div class="freezr-logo-spinner size-24"></div><span>24 px</span></div>
+	<div class="item"><div class="freezr-logo-spinner size-32"></div><span>32 px</span></div>
+	<div class="item"><div class="freezr-logo-spinner size-48"></div><span>48 px</span></div>
+	<div class="item"><div class="freezr-logo-spinner size-72"></div><span>72 px</span></div>
+</div>
+
+<h2>Corner-button variants (B4 chosen, others kept for future tinkering)</h2>
+
+<h3>Big preview (zoomed 3x)</h3>
+<div class="zoom-row">
+	<div class="zoom-cell"><div class="candidate preview-btn-ghost"></div><span>A &mdash; ghost</span></div>
+	<div class="zoom-cell"><div class="candidate preview-btn-negative"></div><span>B0 &mdash; original grey</span></div>
+	<div class="zoom-cell"><div class="candidate preview-btn-negative-blue"></div><span>B1 &mdash; soft blue</span></div>
+	<div class="zoom-cell"><div class="candidate preview-btn-negative-blue-frost"></div><span>B2 &mdash; frosted blue</span></div>
+	<div class="zoom-cell"><div class="candidate preview-btn-negative-sky"></div><span>B3 &mdash; sky</span></div>
+	<div class="zoom-cell chosen"><div class="candidate freezr-logo-btn-negative-gradient"></div><span><strong>B4 &mdash; brand gradient (in use)</strong></span></div>
+	<div class="zoom-cell"><div class="candidate preview-btn-negative-ice"></div><span>B5 &mdash; ice</span></div>
+	<div class="zoom-cell"><div class="candidate preview-btn-gradient"></div><span>C &mdash; faded gradient</span></div>
+</div>
+
+<h3>At real size (32&times;32 px) on different app backgrounds</h3>
+<div class="legend">
+	<div></div>
+	<div>A &mdash; ghost<span class="style-tag"><code>preview-btn-ghost</code></span></div>
+	<div>B0 &mdash; grey<span class="style-tag"><code>preview-btn-negative</code></span></div>
+	<div>B1 &mdash; soft blue<span class="style-tag"><code>preview-btn-negative-blue</code></span></div>
+	<div>B2 &mdash; frosted<span class="style-tag"><code>preview-btn-negative-blue-frost</code></span></div>
+	<div>B3 &mdash; sky<span class="style-tag"><code>preview-btn-negative-sky</code></span></div>
+	<div class="chosen">B4 &mdash; brand grad &#9733;<span class="style-tag"><code>freezr-logo-btn-negative-gradient</code></span></div>
+	<div>B5 &mdash; ice<span class="style-tag"><code>preview-btn-negative-ice</code></span></div>
+</div>
+
+<div class="grid" style="margin-top: 12px;">
+	<div class="label">White page</div>
+	<div class="surface bg-white"><div class="candidate preview-btn-ghost"></div><span class="surface-label">white</span></div>
+	<div class="surface bg-white"><div class="candidate preview-btn-negative"></div><span class="surface-label">white</span></div>
+	<div class="surface bg-white"><div class="candidate preview-btn-negative-blue"></div><span class="surface-label">white</span></div>
+	<div class="surface bg-white"><div class="candidate preview-btn-negative-blue-frost"></div><span class="surface-label">white</span></div>
+	<div class="surface bg-white"><div class="candidate preview-btn-negative-sky"></div><span class="surface-label">white</span></div>
+	<div class="surface bg-white chosen"><div class="candidate freezr-logo-btn-negative-gradient"></div><span class="surface-label">white</span></div>
+	<div class="surface bg-white"><div class="candidate preview-btn-negative-ice"></div><span class="surface-label">white</span></div>
+
+	<div class="label">Cream / paper</div>
+	<div class="surface bg-cream"><div class="candidate preview-btn-ghost"></div><span class="surface-label">cream</span></div>
+	<div class="surface bg-cream"><div class="candidate preview-btn-negative"></div><span class="surface-label">cream</span></div>
+	<div class="surface bg-cream"><div class="candidate preview-btn-negative-blue"></div><span class="surface-label">cream</span></div>
+	<div class="surface bg-cream"><div class="candidate preview-btn-negative-blue-frost"></div><span class="surface-label">cream</span></div>
+	<div class="surface bg-cream"><div class="candidate preview-btn-negative-sky"></div><span class="surface-label">cream</span></div>
+	<div class="surface bg-cream chosen"><div class="candidate freezr-logo-btn-negative-gradient"></div><span class="surface-label">cream</span></div>
+	<div class="surface bg-cream"><div class="candidate preview-btn-negative-ice"></div><span class="surface-label">cream</span></div>
+
+	<div class="label">Light grey</div>
+	<div class="surface bg-grey"><div class="candidate preview-btn-ghost"></div><span class="surface-label">grey</span></div>
+	<div class="surface bg-grey"><div class="candidate preview-btn-negative"></div><span class="surface-label">grey</span></div>
+	<div class="surface bg-grey"><div class="candidate preview-btn-negative-blue"></div><span class="surface-label">grey</span></div>
+	<div class="surface bg-grey"><div class="candidate preview-btn-negative-blue-frost"></div><span class="surface-label">grey</span></div>
+	<div class="surface bg-grey"><div class="candidate preview-btn-negative-sky"></div><span class="surface-label">grey</span></div>
+	<div class="surface bg-grey chosen"><div class="candidate freezr-logo-btn-negative-gradient"></div><span class="surface-label">grey</span></div>
+	<div class="surface bg-grey"><div class="candidate preview-btn-negative-ice"></div><span class="surface-label">grey</span></div>
+
+	<div class="label">Patterned</div>
+	<div class="surface bg-pattern"><div class="candidate preview-btn-ghost"></div><span class="surface-label">pattern</span></div>
+	<div class="surface bg-pattern"><div class="candidate preview-btn-negative"></div><span class="surface-label">pattern</span></div>
+	<div class="surface bg-pattern"><div class="candidate preview-btn-negative-blue"></div><span class="surface-label">pattern</span></div>
+	<div class="surface bg-pattern"><div class="candidate preview-btn-negative-blue-frost"></div><span class="surface-label">pattern</span></div>
+	<div class="surface bg-pattern"><div class="candidate preview-btn-negative-sky"></div><span class="surface-label">pattern</span></div>
+	<div class="surface bg-pattern chosen"><div class="candidate freezr-logo-btn-negative-gradient"></div><span class="surface-label">pattern</span></div>
+	<div class="surface bg-pattern"><div class="candidate preview-btn-negative-ice"></div><span class="surface-label">pattern</span></div>
+
+	<div class="label">Photo / colorful</div>
+	<div class="surface bg-photo"><div class="candidate preview-btn-ghost"></div><span class="surface-label">photo</span></div>
+	<div class="surface bg-photo"><div class="candidate preview-btn-negative"></div><span class="surface-label">photo</span></div>
+	<div class="surface bg-photo"><div class="candidate preview-btn-negative-blue"></div><span class="surface-label">photo</span></div>
+	<div class="surface bg-photo"><div class="candidate preview-btn-negative-blue-frost"></div><span class="surface-label">photo</span></div>
+	<div class="surface bg-photo"><div class="candidate preview-btn-negative-sky"></div><span class="surface-label">photo</span></div>
+	<div class="surface bg-photo chosen"><div class="candidate freezr-logo-btn-negative-gradient"></div><span class="surface-label">photo</span></div>
+	<div class="surface bg-photo"><div class="candidate preview-btn-negative-ice"></div><span class="surface-label">photo</span></div>
+
+	<div class="label">Brand blue gradient</div>
+	<div class="surface bg-gradient-blue dark"><div class="candidate preview-btn-ghost"></div><span class="surface-label">blue grad</span></div>
+	<div class="surface bg-gradient-blue dark"><div class="candidate preview-btn-negative"></div><span class="surface-label">blue grad</span></div>
+	<div class="surface bg-gradient-blue dark"><div class="candidate preview-btn-negative-blue"></div><span class="surface-label">blue grad</span></div>
+	<div class="surface bg-gradient-blue dark"><div class="candidate preview-btn-negative-blue-frost"></div><span class="surface-label">blue grad</span></div>
+	<div class="surface bg-gradient-blue dark"><div class="candidate preview-btn-negative-sky"></div><span class="surface-label">blue grad</span></div>
+	<div class="surface bg-gradient-blue dark chosen"><div class="candidate freezr-logo-btn-negative-gradient"></div><span class="surface-label">blue grad</span></div>
+	<div class="surface bg-gradient-blue dark"><div class="candidate preview-btn-negative-ice"></div><span class="surface-label">blue grad</span></div>
+
+	<div class="label">Warm gradient</div>
+	<div class="surface bg-gradient-warm"><div class="candidate preview-btn-ghost"></div><span class="surface-label">warm grad</span></div>
+	<div class="surface bg-gradient-warm"><div class="candidate preview-btn-negative"></div><span class="surface-label">warm grad</span></div>
+	<div class="surface bg-gradient-warm"><div class="candidate preview-btn-negative-blue"></div><span class="surface-label">warm grad</span></div>
+	<div class="surface bg-gradient-warm"><div class="candidate preview-btn-negative-blue-frost"></div><span class="surface-label">warm grad</span></div>
+	<div class="surface bg-gradient-warm"><div class="candidate preview-btn-negative-sky"></div><span class="surface-label">warm grad</span></div>
+	<div class="surface bg-gradient-warm chosen"><div class="candidate freezr-logo-btn-negative-gradient"></div><span class="surface-label">warm grad</span></div>
+	<div class="surface bg-gradient-warm"><div class="candidate preview-btn-negative-ice"></div><span class="surface-label">warm grad</span></div>
+
+	<div class="label">Dark navy</div>
+	<div class="surface bg-dark dark"><div class="candidate preview-btn-ghost"></div><span class="surface-label">dark</span></div>
+	<div class="surface bg-dark dark"><div class="candidate preview-btn-negative"></div><span class="surface-label">dark</span></div>
+	<div class="surface bg-dark dark"><div class="candidate preview-btn-negative-blue"></div><span class="surface-label">dark</span></div>
+	<div class="surface bg-dark dark"><div class="candidate preview-btn-negative-blue-frost"></div><span class="surface-label">dark</span></div>
+	<div class="surface bg-dark dark"><div class="candidate preview-btn-negative-sky"></div><span class="surface-label">dark</span></div>
+	<div class="surface bg-dark dark chosen"><div class="candidate freezr-logo-btn-negative-gradient"></div><span class="surface-label">dark</span></div>
+	<div class="surface bg-dark dark"><div class="candidate preview-btn-negative-ice"></div><span class="surface-label">dark</span></div>
+</div>
+
+<p class="note" style="margin-top:32px">
+	The blue-outlined cell in each row is the production B4. Hover any candidate to see its hover state.
+</p>
+
+</body>
+</html>

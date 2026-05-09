@@ -128,8 +128,12 @@ const extractZipToLocalFolder = async (zipBuffer, targetPath, appName) => {
         await fs.promises.mkdir(fullTargetPath, { recursive: true })
       }
       
-      // Write the file
+      // Zip-slip protection: ensure extracted file stays within target directory
       const fullFilePath = path.join(targetPath, targetFileName)
+      if (!path.resolve(fullFilePath).startsWith(path.resolve(targetPath) + path.sep)) {
+        console.warn('Zip-slip attempt blocked:', targetFileName)
+        continue
+      }
       await fs.promises.writeFile(fullFilePath, content)
     }
   } catch (error) {

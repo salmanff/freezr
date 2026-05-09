@@ -16,9 +16,6 @@ import {
   createPublicManifestObjectFromManifest
 } from '../../../middleware/permissions/permissionCore.mjs'
 
-const fullPermissionName = function(requestorApp, permName) {
-  return (requestorApp + '/' + permName).replace(/\./g, '_')
-}
 const tableIdsFromPermission = function(permission) {
   return typeof permission.table_id === 'string' ? [permission.table_id] : permission.table_ids || []
 }
@@ -99,7 +96,7 @@ export const updatePermissionRecordsFromManifest = async (ownerPermsDb, appName,
  */
 export const updatePublicManifestFromManifest = async (userId, appName, manifest, publicManifestsDb, options = {}) => {
   const { fromInstall = false, fromUpdateFromFiles = false, tempFolderPath, appFS } = options
-  console.log('updatePublicManifestFromManifest 1', { userId, appName, manifest, publicManifestsDb, options })
+  // onsole.log('updatePublicManifestFromManifest 1', { userId, appName, manifest, publicManifestsDb, options })
   // Validate explicit flags and required dependencies
   if (fromInstall && !tempFolderPath) {
     throw new Error('tempFolderPath is required when fromInstall is true')
@@ -109,16 +106,16 @@ export const updatePublicManifestFromManifest = async (userId, appName, manifest
   }
 
   try {
-    // Use pure function to determine what files need to be read
-    const { cardsToRead, pagesToRead } = extractPublicManifestFilesToRead(manifest)
+    // Use pure function to determine what pcard files need to be read
+    // (ppages are NOT cached — they are read at render time from appFS)
+    const { cardsToRead } = extractPublicManifestFilesToRead(manifest)
 
     const cards = {}
-    const ppages = {}
 
-    // Read cards based on the source (orchestration layer)
+    // Read pcard templates based on the source (orchestration layer)
+    // cardsToRead includes both permission-level pcards (keyed by permName)
+    // and table-level pcards (keyed by '_table:tableKey')
     if (fromInstall && tempFolderPath) {
-      console.log('updatePublicManifestFromManifest 2 - fromInstall and tempFolderPath')
-      // Read from temp folder during installation
       for (const { permName, path } of cardsToRead) {
         try {
           const theCard = await getLocalFile(tempFolderPath, path)
@@ -126,26 +123,10 @@ export const updatePublicManifestFromManifest = async (userId, appName, manifest
             cards[permName] = theCard
           }
         } catch (err) {
-          console.error('Error reading card for permission:', permName, err)
-          // Continue processing other cards
+          console.error('Error reading card for:', permName, err)
         }
       }
-
-      // Read pages from temp folder
-      // for (const { permName, path } of pagesToRead) {
-      //   try {
-      //     const thePage = await getLocalFile(tempFolderPath, path)
-      //     if (thePage) {
-      //       ppages[permName] = thePage
-      //     }
-      //   } catch (err) {
-      //     console.error('Error reading public page for permission:', permName, err)
-      //     // Continue processing other pages
-      //   }
-      // }
     } else if (fromUpdateFromFiles && appFS) {
-      console.log('updatePublicManifestFromManifest 3 - fromUpdateFromFiles and appFS - cardsToRead', cardsToRead)
-      // Read from appFS during update
       for (const { permName, path } of cardsToRead) {
         try {
           const theCard = await appFS.readAppFile(path, {})
@@ -153,43 +134,26 @@ export const updatePublicManifestFromManifest = async (userId, appName, manifest
             cards[permName] = theCard
           }
         } catch (err) {
-          console.error('Error reading card for permission:', permName, err)
-          // Continue processing other cards
+          console.error('Error reading card for:', permName, err)
         }
       }
-
-      // Read pages from appFS
-      // for (const { permName, path } of pagesToRead) {
-      //   try {
-      //     const thePage = await appFS.readAppFile(path, {})
-      //     if (thePage) {
-      //       ppages[permName] = thePage
-      //     }
-      //   } catch (err) {
-      //     console.error('Error reading public page for permission:', permName, err)
-      //     // Continue processing other pages
-      //   }
-      // }
-    } else {
-      console.log('updatePublicManifestFromManifest 4 - no cardsToRead')
     }
 
     // Query existing record to get existing permissions
     const results = await publicManifestsDb.query({ user_id: userId, app_name: appName }, {})
     const existingPermissions = (results && results[0]) ? (results[0].permissions || []) : []
-    console.log('updatePublicManifestFromManifest 5 - cards', cards)
     // Use pure function to build the public manifest object
     const publicManifestObject = createPublicManifestObjectFromManifest(
       userId, 
       appName, 
       manifest, 
       cards, 
-      ppages, 
+      {}, 
       existingPermissions
     )
 
-    console.log('updatePublicManifestFromManifest 6 - publicManifestObject', publicManifestObject)
-    console.log('updatePublicManifestFromManifest 6A - publicManifestObject.cards', publicManifestObject.cards)
+    // onsole.log('updatePublicManifestFromManifest 6 - publicManifestObject', publicManifestObject)
+    // onsole.log('updatePublicManifestFromManifest 6A - publicManifestObject.cards', publicManifestObject.cards)
     if (results && results[0]) {
       // Update existing record
       const recId = results[0]._id
@@ -330,28 +294,28 @@ export const denyNamedPermissions = async (permName, requestorApp, locals) => {
     permUpdated = true
 
     // Revoke access from all records
-    const fullPermName = fullPermissionName(requestorApp, permName)
     const tableIds = tableIdsFromPermission(permission)
     console.log('🔐 denyNamedPermissions 3 ')
 
     for (const tableId of tableIds) {
       const requesteeDb = await userDS.getorInitDb(tableId)
       console.log('🔐 denyNamedPermissions 4 ')
-      // Get all records with the permission
-      const theQuery = { _accessible: { $elemMatch: { fullPermName: { $eq: fullPermName } } } }
+      // Get all records that have an _accessibles entry matching this permission
+      const theQuery = { _accessibles: { $elemMatch: { requestor_app: requestorApp, permission_name: permName } } }
       const recs = await requesteeDb.query(theQuery, {})
-      const publicIds = []
 
-      // traverse all records and remove the permission (and record public_id if present)
+      // traverse all records and remove the matching _accessibles entries
       for (const rec of recs) {
-        for (let i = rec._accessible.length -1; i >= 0; i--) {
-          const grantObj = rec._accessible[i].grantee
-          if (grantObj.fullPermName === fullPermName) {
-            if (grantObj.public_id) publicIds.push(grantObj.public_id)
-            rec._accessible.splice(i, 1)
+        const publicIds = []
+        const accessibles = rec._accessibles || []
+        for (let i = accessibles.length - 1; i >= 0; i--) {
+          const entry = accessibles[i]
+          if (entry.requestor_app === requestorApp && entry.permission_name === permName) {
+            if (entry.public_id) publicIds.push(entry.public_id)
+            accessibles.splice(i, 1)
           }
         }
-        await requesteeDb.update(rec._id, { _accessible: rec._accessible }, { replaceAllFields: false })
+        await requesteeDb.update(rec._id, { _accessibles: accessibles }, { replaceAllFields: false })
 
         // If public grantee, delete from public records
         if (publicIds.length > 0) {

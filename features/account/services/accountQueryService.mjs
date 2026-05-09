@@ -13,7 +13,8 @@
  * @param {Object} userDS - User data store
  * @returns {Promise<Object>} Promise that resolves to app data
  */
-export const listAllUserApps = async (userDS) => {
+export const listAllUserApps = async (userDS, options = {}) => {
+  const { includeManifest = false } = options
   try {    
     if (!userDS) {
       throw new Error('User data store not available')
@@ -38,7 +39,7 @@ export const listAllUserApps = async (userDS) => {
     
     // Query all user apps
     const results = await appList.query({}, {})
-    
+
     if (results && results.length > 0) {
       const processedResults = results.map(app => {
         const processedApp = {
@@ -50,6 +51,9 @@ export const listAllUserApps = async (userDS) => {
           app_display_name: app.app_display_name,
           offThreadWip: ((app.offThreadStatus && app.offThreadStatus.offThreadWip) ? app.offThreadStatus.offThreadWip : false),
           offThreadParams: ((app.offThreadStatus && app.offThreadStatus.offThreadParams) ? app.offThreadStatus.offThreadParams : null)
+        }
+        if (includeManifest) {
+          processedApp.manifest = app.manifest
         }
         
         // Format display name

@@ -11,6 +11,7 @@ import { loadDataHtmlAndPage } from '../../../adapters/rendering/pageLoader.mjs'
 import { 
   getSystemDataPageManifest
 } from '../services/accountManifestService.mjs'
+import { buildLoginRedirectUrl } from '../../../common/helpers/utils.mjs'
 
 
 /**
@@ -140,7 +141,7 @@ const generateSystemDataPage = async (req, res) => {
     // Ensure user is logged in
     if (!req.session.logged_in_user_id) {
       console.log('❌ User not logged in, redirecting to /account/login')
-      return res.redirect('/account/login')
+      return res.redirect(buildLoginRedirectUrl(req, '/account/login'))
     }
     
     // Get system data page manifest

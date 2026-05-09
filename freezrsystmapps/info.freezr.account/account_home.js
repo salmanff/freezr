@@ -5,6 +5,8 @@
 freezr.initPageScripts = function () {
   console.log('hello from account_home.js')
 
+  renderNotificationsBanner()
+
   document.addEventListener('click', function (evt) {
     if (evt.target.id && freezr.utils.startsWith(evt.target.id, 'button_')) {
       const parts = evt.target.id.split('_')
@@ -93,8 +95,132 @@ freezr.initPageScripts = function () {
   }
 }
 
+// Install progress feedback
+const showInstallProgress = function (appName) {
+  // Switch to upload tab
+  buttons.tabs(['upload'], { force: true })
+
+  // Freeze all tab buttons
+  const tablinks = document.getElementsByClassName('tablinks')
+  for (let i = 0; i < tablinks.length; i++) {
+    tablinks[i].classList.add('tab-disabled')
+  }
+
+  // Hide normal upload content, show progress area
+  const normalContent = document.getElementById('uploadNormalContent')
+  const progressArea = document.getElementById('installProgressArea')
+  const resultArea = document.getElementById('installResultArea')
+  const spinner = document.getElementById('installSpinner')
+  const title = document.getElementById('installProgressTitle')
+  const subtitle = document.getElementById('installProgressSubtitle')
+
+  if (normalContent) normalContent.style.display = 'none'
+  if (progressArea) progressArea.style.display = 'block'
+  if (resultArea) resultArea.style.display = 'none'
+  if (spinner) spinner.style.display = 'block'
+  if (title) title.innerText = 'Installing ' + (appName || 'app') + '...'
+  if (subtitle) {
+    subtitle.innerText = 'Please wait while the app is being installed.'
+    subtitle.style.display = 'block'
+  }
+}
+
+const showInstallResult = function (returndata) {
+  const spinner = document.getElementById('installSpinner')
+  const title = document.getElementById('installProgressTitle')
+  const subtitle = document.getElementById('installProgressSubtitle')
+  const resultArea = document.getElementById('installResultArea')
+  const resultMessage = document.getElementById('installResultMessage')
+  const warningsDiv = document.getElementById('installWarnings')
+  const actionsDiv = document.getElementById('installResultActions')
+  const launchAppLink = document.getElementById('installResultLaunchApp')
+  const goToAppLink = document.getElementById('installResultGoToApp')
+
+  // Hide spinner and subtitle
+  if (spinner) spinner.style.display = 'none'
+  if (subtitle) subtitle.style.display = 'none'
+
+  if (resultArea) resultArea.style.display = 'block'
+
+  const isError = returndata?.error || returndata?.errors
+  const appName = returndata?.flags?.meta?.app_name || returndata?.meta?.app_name
+  const servedUrl = returndata?.flags?.meta?.served_url || returndata?.meta?.served_url
+
+  if (isError) {
+    // Error result
+    if (title) title.innerText = 'Installation failed'
+    if (resultMessage) {
+      resultMessage.className = 'install-error'
+      resultMessage.innerText = returndata.error || returndata.errors || 'An unknown error occurred during installation.'
+    }
+    if (actionsDiv) actionsDiv.style.display = 'flex'
+    if (launchAppLink) launchAppLink.style.display = 'none'
+    if (goToAppLink) goToAppLink.style.display = 'none'
+  } else {
+    // Success result
+    const wasUpdate = returndata?.flags?.meta?.didwhat === 'updated'
+    if (title) title.innerText = wasUpdate ? 'App Updated!' : 'App Installed!'
+    if (resultMessage) {
+      resultMessage.className = 'install-success'
+      resultMessage.innerText = (appName || 'App') + ' was successfully ' + (wasUpdate ? 'updated' : 'installed') + '.'
+    }
+    if (actionsDiv) actionsDiv.style.display = 'flex'
+    if (launchAppLink) {
+      launchAppLink.style.display = 'inline-block'
+      launchAppLink.href = servedUrl || ('/apps/' + appName)
+    }
+    if (goToAppLink) {
+      goToAppLink.style.display = 'inline-block'
+      goToAppLink.href = '/account/app/settings/' + appName
+    }
+  }
+
+  // Show warnings if any
+  const warnings = returndata?.flags?.warnings || returndata?.warnings
+  if (warningsDiv) {
+    if (warnings && ((Array.isArray(warnings) && warnings.length > 0) || (typeof warnings === 'string' && warnings.length > 0))) {
+      warningsDiv.style.display = 'block'
+      if (Array.isArray(warnings)) {
+        const msgs = warnings.map(w => (typeof w === 'object' && w.message) ? w.message : String(w))
+        warningsDiv.innerHTML = '<strong>Warnings:</strong><br>' + msgs.join('<br>')
+      } else {
+        warningsDiv.innerHTML = '<strong>Warning:</strong> ' + ((typeof warnings === 'object' && warnings.message) ? warnings.message : warnings)
+      }
+    } else {
+      warningsDiv.style.display = 'none'
+    }
+  }
+
+  // Re-enable tab buttons
+  const tablinks = document.getElementsByClassName('tablinks')
+  for (let i = 0; i < tablinks.length; i++) {
+    tablinks[i].classList.remove('tab-disabled')
+  }
+}
+
+const resetInstallArea = function () {
+  const normalContent = document.getElementById('uploadNormalContent')
+  const progressArea = document.getElementById('installProgressArea')
+  if (normalContent) normalContent.style.display = 'block'
+  if (progressArea) progressArea.style.display = 'none'
+}
+
 const buttons = {
-  tabs: function (args) {
+  installDone: function () {
+    resetInstallArea()
+    // Re-enable tabs in case they're still disabled
+    const tablinks = document.getElementsByClassName('tablinks')
+    for (let i = 0; i < tablinks.length; i++) {
+      tablinks[i].classList.remove('tab-disabled')
+    }
+  },
+  tabs: function (args, options) {
+    // Don't allow tab switching while install is in progress (unless forced)
+    if (!options?.force) {
+      const progressArea = document.getElementById('installProgressArea')
+      if (progressArea && progressArea.style.display === 'block') return
+    }
+
     const tabName = args[0]
 
     const tabcontent = document.getElementsByClassName('tabcontent')
@@ -114,7 +240,6 @@ const buttons = {
     const appName = targetEl.id.split('_')[2]
     document.getElementById('appUrl').innerText = 'https://github.com/salmanff/' + appName
     document.getElementById('appNameFromUrl').innerText = appName
-    buttons.tabs(['download'])
     buttons.addAppViaUrl()
   },
   addAppViaUrl: function () {
@@ -128,9 +253,7 @@ const buttons = {
     } else if (!isValidAppName(appName)) {
       showError('Invalid app name - please correct the app name')
     } else {
-      document.getElementById('tabDownloadInner').style.display = 'none'
-      document.getElementById('installingAppViaUrl').style.display = 'block'
-      document.getElementById('installingAppViaUrlAppName').innerText = appName
+      showInstallProgress(appName)
 
       appUrl = normliseGithubUrl(appUrl)
       // Using new V2 API
@@ -138,18 +261,12 @@ const buttons = {
         .then(returndata => {
           if (returndata.error) {
             console.warn({ returndata })
-            showError(returndata.error)
-            document.getElementById('tabDownloadInner').style.display = 'block'
-            document.getElementById('installingAppViaUrl').style.display = 'none'
-          } else {
-            installSuccessProcess(returndata)
           }
+          showInstallResult(returndata)
         })
         .catch(error => {
           console.warn({ error })
-          showError(error.message || 'error installing 3.')
-          document.getElementById('tabDownloadInner').style.display = 'block'
-          document.getElementById('installingAppViaUrl').style.display = 'none'
+          showInstallResult({ error: error.message || 'Error installing app.' })
         })
     }
   },
@@ -157,7 +274,7 @@ const buttons = {
     document.getElementById('app_zipfile2').click()
     // File input stays hidden; the change event handler shows the filename and upload button
   },
-  uploadZipFileApp: function (args) { // OLD STYLE UPLOAD
+  uploadZipFileApp: function (args) {
     const fileInput = document.getElementById('app_zipfile2')
     const file = (fileInput && fileInput.files) ? fileInput.files[0] : null
 
@@ -175,28 +292,29 @@ const buttons = {
       const appName = appNameJoined.split(' ')[0]
 
       if (file.name.substr(-4) !== '.zip') {
-        document.getElementById('errorBox').innerHTML = 'The app file uploaded must be a zipped file. (File name represents the app name.)'
+        showError('The app file uploaded must be a zipped file. (File name represents the app name.)')
       } else if (!isValidAppName(appName)) {
-        document.getElementById('errorBox').innerHTML = 'Invalid app name - please make sure the zip file conforms to freezr app name guidelines'
+        showError('Invalid app name - please make sure the zip file conforms to freezr app name guidelines')
       } else {
+        showInstallProgress(appName)
+
         const uploadData = new FormData()
         uploadData.append('file', file)
         uploadData.append('app_name', appName)
         const url = '/acctapi/app_install_from_zipfile'
 
-        if (file.size > 1000000) showError('You are uploading a large file. This might take a little while. Please be patient.')
         // Using new V2 API
         freezr.apiRequest('PUT', url, uploadData, { uploadFile: true })
           .then(returndata => {
             if (returndata?.error) {
-              showError(returndata.error || 'Error installing 2.')
-            } else {
-              installSuccessProcess(returndata)
+              console.warn({ returndata })
             }
+            console.log('🔄 uploadZipFileApp result:', returndata)
+            showInstallResult(returndata)
           })
           .catch(error => {
             console.warn({ error })
-            showError(error.message || error.code || 'Error installing 1.')
+            showInstallResult({ error: error.message || error.code || 'Error installing app.' })
           })
       }
     }
@@ -212,19 +330,18 @@ const buttons = {
     } else if (!isValidAppName(appName) && servedUrl && !isValidUrl(servedUrl)) {
       showError('Invalid app url - please correct the app url or leave blank if not needed')
     } else {
+      showInstallProgress(appName)
       // Using new V2 API
       freezr.apiRequest('POST', '/acctapi/app_install_served', { app_name: appName, served_url: servedUrl, app_display_name: displayName })
         .then(returndata => {
           if (returndata.error) {
             console.warn({ returndata })
-            showError('Error updating app!' + returndata.error)
-          } else {
-            installSuccessProcess(returndata)
           }
+          showInstallResult(returndata)
         })
         .catch(error => {
           console.warn({ error })
-          showError('Error updating app!' + error.message)
+          showInstallResult({ error: 'Error updating app! ' + error.message })
         })
     }
   },
@@ -235,35 +352,25 @@ const buttons = {
     } else if (!isValidAppName(appName)) {
       showError('Invalid app name 3 - please correct the app name')
     } else {
+      showInstallProgress(appName)
       // Using new V2 API
       freezr.apiRequest('POST', '/acctapi/updateAppFromFiles', { app_name: appName })
         .then(returndata => {
           if (returndata.error || returndata.errors) {
             console.warn({ returndata })
-            showError('Error updating app!' + returndata.error)
-          } else {
-            installSuccessProcess(returndata)
           }
+          showInstallResult(returndata)
         })
         .catch(error => {
           console.warn({ error })
-          showError('Error updating app!' + error.message)
+          showInstallResult({ error: 'Error updating app! ' + error.message })
         })
     }
   }
 }
 const installSuccessProcess = function (returndata) {
-  const appName = returndata?.flags?.meta?.app_name || returndata?.meta?.app_name
-  const sentencefromreturndata = function (returndata) {
-    const wasUpdate = returndata?.flags?.meta?.didwhat === 'updated'
-    const sentence = appName + ' was successfully ' + (wasUpdate ? 'updated' : 'created') + '.'
-    return sentence
-  }
-  if (appName) {
-    window.open('/account/app/settings/' + appName + '?message=' + sentencefromreturndata(returndata), '_self')
-  } else {
-    showError('Could not get appname!! ??')
-  }
+  // Legacy fallback - now handled by showInstallResult
+  showInstallResult(returndata)
 }
 const isValidUrl = function (appName) {
   if (!appName) return false
@@ -272,11 +379,13 @@ const isValidUrl = function (appName) {
   if (appName.indexOf('/oapp/') < -1) return false
   return true
 }
+// same as config.js but isSystemApp replaced with explicit info.freezr check
 const isValidAppName = function (appName) {
   if (!appName) return false
   if (appName.length < 1) return false
   if (!isValidFilename(appName)) return false
   if (startsWithOneOf(appName, ['.', '-', '\\', 'system'])) return false
+  if ((startsWith(appName, 'info.freezr') || startsWith(appName, 'ceps.dev')) && !startsWith(appName, 'info.freezr.user.')) return false
   if (SYSTEM_APPS.indexOf(appName) > -1) return false
   if (appName.indexOf('_') > -1) return false
   if (appName.indexOf(' ') > -1) return false
@@ -287,6 +396,7 @@ const isValidAppName = function (appName) {
   if (appName.indexOf('{') > -1) return false
   if (appName.indexOf('}') > -1) return false
   if (appName.indexOf('..') > -1) return false
+  if (appName.endsWith('.')) return false
   const appSegements = appName.split('.')
   if (appSegements.length < 3) return false
   return true
@@ -341,33 +451,30 @@ const handleDrop = function (e) {
   if (!items || !file) {
     showError('Please Choose a file first.')
   } else if (items.length > 1) {
-    document.getElementById('errorBox').innerHTML = 'Please upload one zip file only.'
+    showError('Please upload one zip file only.')
   } else if (ext !== 'zip') {
-    document.getElementById('errorBox').innerHTML = 'The app file uploaded must be a zipped file. (File name represents the app name.)'
+    showError('The app file uploaded must be a zipped file. (File name represents the app name.)')
   } else if (!isValidAppName(appName)) {
-    document.getElementById('errorBox').innerHTML = 'Invalid app name - please make sure the zip file conforms to freezr app name guidelines'
+    showError('Invalid app name - please make sure the zip file conforms to freezr app name guidelines')
   } else {
+    showInstallProgress(appName)
+
     const uploadData = new FormData()
     uploadData.append('file', file)
     uploadData.append('app_name', appName)
     const url = '/acctapi/app_install_from_zipfile'
-    // freezr.menu.open()
-    if (file.size > 1000000) showError('You are uploading a large file. This might take a little while. Please be patient.')
+
     // Using new V2 API
     freezr.apiRequest('PUT', url, uploadData, { uploadFile: true })
       .then(returndata => {
-        freezr.menu.close()
         if (returndata.error) {
           console.warn({ returndata })
-          showError('There was an error installing the app: ' + (returndata.error || 'unknown error') + '.')
-        } else {
-          installSuccessProcess(returndata)
         }
+        showInstallResult(returndata)
       })
       .catch(error => {
-        freezr.menu.close()
         console.warn({ error })
-        showError('There was an error installing the app: ' + (error?.message || 'unknown error') + '.')
+        showInstallResult({ error: 'There was an error installing the app: ' + (error?.message || 'unknown error') + '.' })
       })
   }
 }
@@ -390,6 +497,58 @@ const targetDropArea = function (e) {
   return target
 }
 
+// Render notification cards from freezrMeta.notifications. New notification
+// types (messages, cron failures, etc.) flow in here automatically via the
+// userDS.getNotifications() server hook — no per-id code needed below.
+const renderNotificationsBanner = function () {
+  const banner = document.getElementById('notificationsBanner')
+  if (!banner) return
+  const notifications = (window.freezrMeta && freezrMeta.notifications) || []
+  banner.innerHTML = ''
+  if (!notifications.length) {
+    banner.style.display = 'none'
+    return
+  }
+  banner.style.display = 'block'
+  const ICON_BY_SEVERITY = { error: '⚠', warning: '⚠', info: 'ℹ' }
+  notifications.forEach(function (n) {
+    const card = document.createElement('div')
+    card.className = 'freezr-notif-card'
+    card.setAttribute('data-severity', n.severity || 'info')
+
+    const icon = document.createElement('div')
+    icon.className = 'freezr-notif-card-icon'
+    icon.textContent = ICON_BY_SEVERITY[n.severity] || ICON_BY_SEVERITY.info
+    card.appendChild(icon)
+
+    const body = document.createElement('div')
+    body.className = 'freezr-notif-card-body'
+
+    const title = document.createElement('div')
+    title.className = 'freezr-notif-card-title'
+    title.textContent = n.title || ''
+    body.appendChild(title)
+
+    if (n.message) {
+      const msg = document.createElement('div')
+      msg.className = 'freezr-notif-card-msg'
+      msg.textContent = n.message
+      body.appendChild(msg)
+    }
+
+    if (n.action && n.action.url) {
+      const a = document.createElement('a')
+      a.className = 'freezr-notif-card-action'
+      a.href = n.action.url
+      a.textContent = n.action.label || 'View'
+      body.appendChild(a)
+    }
+
+    card.appendChild(body)
+    banner.appendChild(card)
+  })
+}
+
 // Utility
 let timer = null
 const showError = function (errorText) {
@@ -397,6 +556,12 @@ const showError = function (errorText) {
   const errorBox = document.getElementById('errorBox')
   errorBox.style['font-size'] = '24px'
   errorBox.innerHTML = errorText || ' &nbsp '
+  // Scroll to the error box so it's visible to the user
+  if (errorBox && typeof errorBox.scrollIntoView === 'function') {
+    errorBox.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  } else {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
   if (errorText) {
     timer = setTimeout(function () {
       showError()

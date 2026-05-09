@@ -66,8 +66,8 @@ export const createAddUserDSAndAppFS = (dsManager, freezrPrefs, freezrStatus) =>
         const existingFreezr = res.locals.freezr || {}
         
         res.locals.freezr = {
-          ...createBaseFreezrContextForResLocals(req, dsManager, freezrPrefs, freezrStatus),
           ...existingFreezr, // Preserve existing properties (like tokenInfo)
+          ...createBaseFreezrContextForResLocals(req, dsManager, freezrPrefs, freezrStatus),
           appFS,
           userDS
         }
@@ -82,7 +82,7 @@ export const createAddUserDSAndAppFS = (dsManager, freezrPrefs, freezrStatus) =>
       }
       console.error('❌ Error in addUserAppsAndPermDBs middleware:', error)
       sendFailure(res, error, 'createAddUserDSAndAppFS', 500)
-      //   res.redirect('/account/login?redirect=internalError')
+      //   res.redirect('/account/login?redirectReason=internalError')
     }
   }
 }
@@ -108,8 +108,8 @@ export const createAddTokenDb = (dsManager, freezrPrefs, freezrStatus) => {
       const existingFreezr = res.locals.freezr || {}
       
       res.locals.freezr = {
-        ...createBaseFreezrContextForResLocals(req, dsManager, freezrPrefs, freezrStatus),
         ...existingFreezr, // Preserve existing properties
+        ...createBaseFreezrContextForResLocals(req, dsManager, freezrPrefs, freezrStatus),
         appTokenDb
       }
       
@@ -149,8 +149,8 @@ export const createAddAllUsersDb = (dsManager, freezrPrefs, freezrStatus) => {
       const existingFreezr = res.locals.freezr || {}
       
       res.locals.freezr = {
-        ...createBaseFreezrContextForResLocals(req, dsManager, freezrPrefs, freezrStatus),
         ...existingFreezr, // Preserve existing properties
+        ...createBaseFreezrContextForResLocals(req, dsManager, freezrPrefs, freezrStatus),
         allUsersDb
       }
       
@@ -234,20 +234,27 @@ export const createAddMessageDb = (dsManager, freezrPrefs, freezrStatus) => {
       
       res.locals.freezr.userMessagesGotDb = userMessagesGotDb
 
-      const { gotMessageDbs, contactsDBs, simpleRecipients, badContacts } = await getGotMessagesAndContactsForRecipients(
-        dsManager, 
-        req.body, 
-        res.locals.freezr.userGroupsDb, 
-        freezrPrefs
-      )
-      
-      res.locals.freezr.freezrOtherPersonGotMsgs = gotMessageDbs
-      res.locals.freezr.freezrOtherPersonContacts = contactsDBs
-      res.locals.freezr.freezrMessageRecipients = simpleRecipients
-      res.locals.freezr.freezrBadContacts = badContacts
-      
-      // onsole.log('✅ User messages DB set up in res.locals.freezr, proceeding to next middleware')
-      next()
+      if (req.params.action === 'mark_read') {
+        next()
+        return
+      } else {
+        
+        const { gotMessageDbs, contactsDBs, simpleRecipients, badContacts } = await getGotMessagesAndContactsForRecipients(
+          dsManager, 
+          req.body, 
+          res.locals.freezr.userGroupsDb, 
+          freezrPrefs
+        )
+        // onsole.log('addMessageDb', { simpleRecipients, badContacts, body: req.body })
+        
+        res.locals.freezr.freezrOtherPersonGotMsgs = gotMessageDbs
+        res.locals.freezr.freezrOtherPersonContacts = contactsDBs
+        res.locals.freezr.freezrMessageRecipients = simpleRecipients
+        res.locals.freezr.freezrBadContacts = badContacts
+        
+        // onsole.log('✅ User messages DB set up in res.locals.freezr, proceeding to next middleware')
+        next()
+      }
     } catch (error) {
       console.error('❌ Error in addMessageDb middleware:', error)
       sendFailure(res, error, 'addMessageDb', 500)
@@ -420,7 +427,7 @@ export const createAddSystemAppFS = (dsManager, freezrPrefs, freezrStatus) => {
     }
     const userDS = await dsManager.getOrSetUserDS('public', { freezrPrefs })
     const appName = 'info.freezr.' + req.originalUrl.split('/')[1]
-    console.log('createAddSystemAppFS - appName', appName)
+    // onsole.log('createAddSystemAppFS - appName', appName)
     if (userDS && userDS.getorInitAppFS) {
       const appFS = await userDS.getorInitAppFS(appName, {})
       res.locals.freezr.appFS = appFS

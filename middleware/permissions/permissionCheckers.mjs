@@ -52,7 +52,7 @@ export const systemAppOrTargetAppRequest = (req, res, next) => {
   // TODO - HANDLE PERMISSIONS BETTER
   if (tokenInfo.app_name === targetApp // target app is the same as the requestor app
     || (tokenInfo.app_name === 'info.freezr.account' && targetApp !== 'info.freezr.admin') // account has right to get non admin files
-    // Add other app to app permissions here
+    || (tokenInfo.app_name === 'info.freezr.creator') // creator can access any user app's files
     ) { 
 
     res.locals.freezr.permGiven = true
@@ -141,9 +141,9 @@ export const isLoggedInAccountAppRequest = (req, res, next) => {
     return sendFailure(res, 'Token is not for a logged-in user', 'permissionCheckers.isLoggedInAccountAppRequest', 401)
   }
 
-  // Check that the app is the account app
-  if (tokenInfo.app_name !== 'info.freezr.account') {
-    return sendFailure(res, 'Request must be from account app', 'permissionCheckers.isLoggedInAccountAppRequest', 403)
+  // Check that the app is the account app (or creator, which shares account-level privileges)
+  if (tokenInfo.app_name !== 'info.freezr.account' && tokenInfo.app_name !== 'info.freezr.creator') {
+    return sendFailure(res, 'Request must be from account or creator app', 'permissionCheckers.isLoggedInAccountAppRequest', 403)
   }
 
   // Get logged-in user ID from session
@@ -209,6 +209,28 @@ export const isLoggedInAccountorAdminAppRequest = (req, res, next) => {
 
   res.locals.freezr.permGiven = true
   // Validation passed, continue to next middleware
+  next()
+}
+
+export const isLoggedInCreatorAppRequest = (req, res, next) => {
+  const tokenInfo = res.locals?.freezr?.tokenInfo
+  if (!tokenInfo) {
+    return sendFailure(res, 'Token info not found', 'permissionCheckers.isLoggedInCreatorAppRequest', 401)
+  }
+  if (!tokenInfo.logged_in) {
+    return sendFailure(res, 'Token is not for a logged-in user', 'permissionCheckers.isLoggedInCreatorAppRequest', 401)
+  }
+  if (tokenInfo.app_name !== 'info.freezr.creator') {
+    return sendFailure(res, 'Request must be from creator app', 'permissionCheckers.isLoggedInCreatorAppRequest', 403)
+  }
+  const loggedInUserId = req.session?.logged_in_user_id
+  if (!loggedInUserId) {
+    return sendFailure(res, 'User not logged in', 'permissionCheckers.isLoggedInCreatorAppRequest', 401)
+  }
+  if (tokenInfo.requestor_id !== loggedInUserId) {
+    return sendFailure(res, new Error('auth error - user ID mismatch'), 'permissionCheckers.isLoggedInCreatorAppRequest', 403)
+  }
+  res.locals.freezr.permGiven = true
   next()
 }
 

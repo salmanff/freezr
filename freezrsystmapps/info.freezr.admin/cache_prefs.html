@@ -1,0 +1,117 @@
+<!-- Admin Cache Preferences cache_prefs.html -->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">Cache Preferences</span>
+    <a href="/account/home">Home</a>
+    <a href="/admin/home">Admin</a>
+    <a href="/admin/prefs">System Prefs</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div id="errorBox" class="errorBox" style="margin-bottom: 1rem;"></div>
+
+    <!-- ALL_USERS section -->
+    <div class="freezr-card">
+      <h3 style="margin-bottom: 0.5rem;">All Users - Table Cache Settings</h3>
+      <p style="color: var(--freezr-text-muted); font-size: 13px; margin-bottom: 1rem;">
+        These settings apply to all users. Enter the app_table name (with underscores, e.g. <code>dev_ceps_contacts</code>) and choose cache strategy.
+      </p>
+      <div id="allUsersEntries"></div>
+      <button class="freezrButt small" id="addAllUsersBtn" style="margin-top: 0.75rem;">+ Add Table</button>
+    </div>
+
+    <!-- USER_SPECIFIC section -->
+    <div class="freezr-card">
+      <h3 style="margin-bottom: 0.5rem;">User-Specific Cache Settings</h3>
+      <p style="color: var(--freezr-text-muted); font-size: 13px; margin-bottom: 1rem;">
+        Override cache settings for specific users and their tables.
+      </p>
+      <div id="userSpecificEntries"></div>
+      <button class="freezrButt small" id="addUserSectionBtn" style="margin-top: 0.75rem;">+ Add User</button>
+    </div>
+
+    <!-- Save -->
+    <div class="freezr-card">
+      <h3 style="margin-bottom: 1rem;">Save Cache Preferences</h3>
+      <div style="text-align: center;">
+        <button id="saveButt" class="freezrButt" style="width: 50%; cursor: pointer;">Save Preferences</button>
+      </div>
+    </div>
+
+    <!-- Current Stats -->
+    <div class="freezr-card" style="border-left: 3px solid var(--freezr-accent);">
+      <h3 style="margin-bottom: 0.5rem;">Current Cache Stats</h3>
+      <pre id="cacheStatsArea" style="font-size: 12px; background: var(--freezr-bg); padding: 1rem; border-radius: var(--freezr-radius-sm); overflow-x: auto; max-height: 300px;">Loading...</pre>
+      <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+        <button id="refreshStatsBtn" class="freezrButt small">Refresh Stats</button>
+        <button id="clearAllCacheBtn" class="freezrButt small" style="background: #e74c3c; color: white;">Clear All Caches</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.cache-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+.cache-row input[type="text"] {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--freezr-border);
+  border-radius: var(--freezr-radius-sm);
+  font-size: 13px;
+  background: var(--freezr-bg);
+  color: var(--freezr-text);
+}
+.cache-row label {
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+}
+.cache-row .remove-btn {
+  background: none;
+  border: none;
+  color: #e74c3c;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 0.3rem;
+}
+.cache-row .remove-btn:hover {
+  color: #c0392b;
+}
+.user-section {
+  border: 1px solid var(--freezr-border);
+  border-radius: var(--freezr-radius-sm);
+  padding: 1rem;
+  margin-bottom: 1rem;
+  background: var(--freezr-bg);
+}
+.user-section-header {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+.user-section-header input {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--freezr-border);
+  border-radius: var(--freezr-radius-sm);
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--freezr-bg);
+  color: var(--freezr-text);
+}
+.patterns-input {
+  width: 160px;
+}
+.freezrButt.small {
+  padding: 0.4rem 0.8rem;
+  font-size: 13px;
+}
+</style>

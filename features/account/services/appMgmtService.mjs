@@ -63,7 +63,7 @@ export const removeAppFromHomePage = async (userAppListDb, userId, appName) => {
  */
 export const deleteApp = async (params) => {
   // onsole.log('🗑️  deleteApp called for:', { userId, appName })
-  const { userDS, userId, appName, freezrPrefs, publicManifestsDb, publicRecordsDb } = params
+  const { userDS, userId, appName, freezrPrefs, publicManifestsDb, publicRecordsDb, doNotDeletePublics } = params
 
   if (!userId) {
     throw new Error('Missing user id')
@@ -77,11 +77,13 @@ export const deleteApp = async (params) => {
   if (!freezrPrefs) {
     throw new Error('Missing freezr preferences')
   }
-  if (!publicManifestsDb) {
-    throw new Error('public manifests database not available')
-  }
-  if (!publicRecordsDb) {
-    throw new Error('Permissions database not available')
+  if (!doNotDeletePublics) {
+    if (!publicManifestsDb) {
+      throw new Error('public manifests database not available')
+    }
+    if (!publicRecordsDb) {
+      throw new Error('Permissions database not available')
+    }
   }
 
   try {
@@ -92,15 +94,17 @@ export const deleteApp = async (params) => {
     const permsOac = userPERMS_OAC(userId)
     const permsDb = await userDS.getorInitDb(permsOac, { freezrPrefs })
     if (!permsDb || !permsDb.delete_records) {
-      return sendFailure(res, 'Could not access permissions database', 'accountApiController.handleDeleteApp', 500)
+      throw new Error('Could not access permissions database')
     }
         
     // Step 1: Delete permission records
     await permsDb.delete_records({ requestor_app: appName }, null)
 
     // Step 2: Delete from public databases
-    await publicManifestsDb.delete_records({ user_id: userId, app_name: appName }, null)
-    await publicRecordsDb.delete_records({ data_owner: userId, requestor_app: appName }, null)
+    if (!doNotDeletePublics) {
+      await publicManifestsDb.delete_records({ user_id: userId, app_name: appName }, null)
+      await publicRecordsDb.delete_records({ data_owner: userId, requestor_app: appName }, null)
+    }
     
     // step 3 - remove all app files
     const appFS = await userDS.getorInitAppFS(appName, { freezrPrefs })
@@ -110,8 +114,7 @@ export const deleteApp = async (params) => {
     const topdb = await userDS.getorInitDb({ owner: userId, app_table: appName }, {})
     const allTableNamesForApp = await topdb.getAllAppTableNames(appName)
 
-    // Get table sizes
-    let gotErrors =  []
+    let gotErrors = []
     for (const tableName of allTableNamesForApp) {
       try {
         const db = await userDS.getorInitDb({ owner: userId, app_table: tableName }, {})
@@ -121,23 +124,20 @@ export const deleteApp = async (params) => {
       }
     }
     if (gotErrors.length > 0) {
-      throw new Error('Error getting table stats for some tables: ' + JSON.stringify(gotErrors))
+      throw new Error('Error deleting data from some tables: ' + JSON.stringify(gotErrors))
     }
 
-    // Step 4: Delete local folder (if exists)
+    // Step 5: Delete local folder (if exists)
     const folderPath = (userDS.fsParams?.rootFolder || FREEZR_USER_FILES_DIR) + '/' + userId + '/apps/' + appName
     try {
       await deleteLocalFolderAndContents(folderPath)
     } catch (err) {
-      // Ignore errors if folder doesn't exist
       if (!err?.message?.includes('ENOENT')) {
-        res.locals.flogger.error('⚠️  Error deleting local folder in delete app process :', { error: err, function: 'deleteApp' })
         console.warn('⚠️  Error deleting local folder - will still continue process :', err)
       }
     }
 
-    // Step 5: Delete from app list database
-    // onsole.log('🗑️  deleteApp: Step 7: Deleting from app list database, appNameId:', appNameId)
+    // Step 6: Delete from app list database
     const appNameId = constructAppIdStringFrom(userId, appName)
     const userAppListDb = await userDS.getorInitDb(userAppListOAC(userId), { freezrPrefs })
     await userAppListDb.delete_record(appNameId, null)

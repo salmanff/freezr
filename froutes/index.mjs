@@ -51,13 +51,13 @@ export async function mountAllModernRoutes(app, { dsManager, freezrPrefs, freezr
     
     // Import and mount app routes directly
     try {
-      const { createAppApiRoutes } = await import('../features/apps/appApiRoutes.mjs')
+      const { createFepsApiRoutes } = await import('../features/apps/fepsApiRoutes.mjs')
       const { createAppPageRoutes } = await import('../features/apps/appPageRoutes.mjs')
       // const { createAppFileRoutes } = await import('../features/apps/appFileRoutes.mjs')
       
       // Mount app API routes at /feps -> TEMPRARY UNTIL ROUTE FIGURED OUT
       // todo 2025-12-19 -> shoul logManager be included in older routes too eg appApiRoutes
-      const appApiRoutes = createAppApiRoutes({ dsManager, freezrPrefs, freezrStatus })
+      const appApiRoutes = createFepsApiRoutes({ dsManager, freezrPrefs, freezrStatus })
       app.use('/feps', appApiRoutes)
       results.mounted.push('app-api')
       // onsole.log('✅ Mounted app API routes at /feps')
@@ -108,6 +108,24 @@ export async function mountAllModernRoutes(app, { dsManager, freezrPrefs, freezr
       console.error('❌ Failed to mount register routes:', error)
       results.failed.push({ feature: 'register', error })
     }
+
+    // Import and mount creator routes
+    try {
+      const { createCreatorPageRoutes, createCreatorApiRoutes } = await import('../features/creator/creatorRoutes.mjs')
+
+      // Mount creator page routes at /creator
+      const creatorPageRoutes = createCreatorPageRoutes({ dsManager, freezrPrefs, freezrStatus })
+      app.use('/creator', creatorPageRoutes)
+      results.mounted.push('creator-pages')
+
+      // Mount creator API routes at /creatorapi
+      const creatorApiRoutes = createCreatorApiRoutes({ dsManager, freezrPrefs, freezrStatus })
+      app.use('/creatorapi', creatorApiRoutes)
+      results.mounted.push('creator-api')
+    } catch (error) {
+      console.error('❌ Failed to mount creator routes:', error)
+      results.failed.push({ feature: 'creator', error })
+    }
     
     // Import and mount admin routes
     try {
@@ -150,13 +168,18 @@ export async function mountAllModernRoutes(app, { dsManager, freezrPrefs, freezr
     
     // Import and mount public routes
     try {
-      const { createPublicRoutes, createPublicCatchAllRoutes } = await import('../features/public/publicRoutes.mjs')
+      const { createPublicRoutes, createPublicCatchAllRoutes, createPublicAppsRoutes } = await import('../features/public/publicRoutes.mjs')
       
       // Mount public routes at /public
       const publicRoutes = createPublicRoutes({ dsManager, freezrPrefs, freezrStatus })
       app.use('/public', publicRoutes)
       results.mounted.push('public')
       // onsole.log('✅ Mounted public routes at /public')
+
+      // Mount published apps browser at /publicapps
+      const publicAppsRoutes = createPublicAppsRoutes({ dsManager, freezrPrefs, freezrStatus })
+      app.use('/publicapps', publicAppsRoutes)
+      results.mounted.push('publicapps')
       
       // Mount catch-all for legacy public ID routes at root level
       // This catches /@user/app.table/objectId patterns

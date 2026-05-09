@@ -10,7 +10,27 @@
 // Location: adapters/http/
 // - This is an ADAPTER because it interfaces between the application and HTTP/web
 
-import { isPageRequest } from '../../common/helpers/utils.mjs'
+import { isPageRequest, isPageBrowserRequest, buildLoginRedirectUrl } from '../../common/helpers/utils.mjs'
+
+/**
+ * Decide whether to render a redirect (HTML page expected) or send JSON.
+ * Prefers Sec-Fetch-* metadata when a `req` is supplied; falls back to the
+ * URL-based heuristic so legacy callers without `req` keep their behavior.
+ */
+const wantsPageResponse = (context) => {
+  if (context && context.req) return isPageBrowserRequest(context.req)
+  return isPageRequest(context && context.path)
+}
+
+/**
+ * Resolve the final redirect URL. If we have a `req` we enrich it with a
+ * `fwdTo` query so the user lands back on their intended page after login.
+ */
+const resolveRedirectUrl = (context) => {
+  if (!context || !context.redirectUrl) return context && context.redirectUrl
+  if (!context.req) return context.redirectUrl
+  return buildLoginRedirectUrl(context.req, context.redirectUrl)
+}
 
 /**
  * 
@@ -115,8 +135,8 @@ export function sendFailure(res, err, context = 'unknown', statusCode = 500) {
 
   res.locals.flogger.error(message, context);
 
-  if (context.redirectUrl && isPageRequest(context.path)) {
-    res.redirect(context.redirectUrl)
+  if (context.redirectUrl && wantsPageResponse(context)) {
+    res.redirect(resolveRedirectUrl(context))
     res.end()
   } else {
     // Send standardized error response
@@ -163,6 +183,9 @@ export function sendFailure(res, err, context = 'unknown', statusCode = 500) {
  * @param {string|object} error - Error generated. This can be a string or object.
  * @param {Object|string} redirectUrl - redirect url in case of page failure
  * @param {Object|boolean} shouldBeAlertedToFailure - whether to count the auth guard to failure
+ * @param {Object} [context.req] - Express request; if provided, the redirect-vs-JSON
+ *   decision uses Sec-Fetch-* headers (preferred). Without it, falls back to the
+ *   URL-extension heuristic via context.path.
  */
 export function sendAuthFailure(res, context = {}) {
   // Log the error
@@ -177,8 +200,8 @@ export function sendAuthFailure(res, context = {}) {
   res.locals.flogger.auth(type, { user_id, error })
   
   // Send standardized error response
-  if (context.redirectUrl && isPageRequest(context.path)) {
-    res.redirect(context.redirectUrl)
+  if (context.redirectUrl && wantsPageResponse(context)) {
+    res.redirect(resolveRedirectUrl(context))
     res.end()
   } else {
     // onsole.log('sendAuthFailure called with context: ', context)

@@ -46,10 +46,12 @@ export const loadDataHtmlAndPage = async (appFS, res, options) => {
   try {
     // onsole.log('load_data_html_and_page for ' + JSON.stringify(options.page_url))
     
-    // Read the HTML content from appFS using native async method
+    // Read the HTML content from appFS .. and strip query string from page_url for URLs like /self?code=xxx&accessToken=yyy so as to avoid filetoolong errors
+    const pageFilePath = options.page_url.split('?')[0]
+    
     let htmlContent
     try {
-      htmlContent = await appFS.readAppFile(options.page_url, null) // await devTime('appFS.readAppFile', () => appFS.readAppFile(options.page_url, null))
+      htmlContent = await appFS.readAppFile(pageFilePath, null) // await devTime('appFS.readAppFile', () => appFS.readAppFile(options.page_url, null))
       
       // Development assertions for content validation
       devAssertNotNull(htmlContent, 'htmlContent after successful read')
@@ -57,9 +59,9 @@ export const loadDataHtmlAndPage = async (appFS, res, options) => {
       devAssert(htmlContent.length > 0, 'htmlContent should not be empty')
       
     } catch (err) {
-      console.error('load_data_html_and_page got err reading:', { user: options.user_id, app: options.app_name, page: options.page_url, error: err })
+      console.error('load_data_html_and_page got err reading:', { user: options.user_id, app: options.app_name, page: pageFilePath, originalUrl: options.page_url, error: err })
       // Fallback to file not found page
-      const fallbackPath = path.join(__dirname, '../../systemapps/info.freezr.public/public/pageNotFound.html')
+      const fallbackPath = path.join(__dirname, '../../../freezrsystmapps/info.freezr.public/public/pageNotFound.html')
       htmlContent = fs.readFileSync(fallbackPath, 'utf8')
       
       // Development assertion for fallback content
@@ -107,6 +109,7 @@ export const loadPageHtml = async (res, options) => {
       console.error('err reading skeleton file', skeletonFile, err)
       throw err
     }
+    // onsole.log('loadPageHtml 1', { options, contents, skeletonPath })
     
     // Set defaults
     if (!options.app_name) {
@@ -116,10 +119,12 @@ export const loadPageHtml = async (res, options) => {
     
     // Generate favicon link tag - use app logo if available, otherwise default
     // Cache-busting query param (app name) ensures browser loads correct favicon on navigation
-    const faviconUrl = options.hasLogo
-      ? `/app/info.freezr.account/app2app/${options.app_name}/static/logo.png?app=${options.app_name}`
-      : '/app/info.freezr.public/public/static/favicon.ico?app=system'
-    const faviconType = options.hasLogo ? 'image/png' : 'image/x-icon'
+    // options.faviconUrl can be passed for public pages that use a public logo route
+    const faviconUrl = options.faviconUrl
+      || (options.hasLogo
+        ? `/app/info.freezr.account/app2app/${options.app_name}/static/logo.png?app=${options.app_name}`
+        : '/app/info.freezr.public/public/static/favicon.ico?app=system')
+    const faviconType = (options.faviconUrl || options.hasLogo) ? 'image/png' : 'image/x-icon'
     const faviconHtml = `<link rel="icon" type="${faviconType}" href="${faviconUrl}">`
     
     // Replace template variables
@@ -201,19 +206,59 @@ export const loadPageHtml = async (res, options) => {
     } else {
       finalContents = finalContents.replace('{{OTHER_VARIABLES}}', 'null')
     }
+
+    // freezrMeta.notifications - user-facing warnings (storage, future: messages, cron, etc.)
+    // Sourced from userDS.getNotifications() so any page with a logged-in userDS gets them
+    // automatically, without each page controller having to opt in.
+    let notifications = []
+    try {
+      const userDS = res?.locals?.freezr?.userDS
+      if (userDS && typeof userDS.getNotifications === 'function') {
+        notifications = userDS.getNotifications() || []
+      }
+    } catch (e) {
+      console.warn('⚠️ pageLoader: error collecting userDS notifications', e)
+    }
+    finalContents = finalContents.replace('{{NOTIFICATIONS}}', JSON.stringify(notifications))
     
     // Add messages
     finalContents = finalContents.replace('{{MESSAGES}}', JSON.stringify(options.messages || {}))
     
     // Add page HTML content
     finalContents = finalContents.replace('{{HTML-BODY}}', options.page_html || 'Page Not found')
-    
+
+    // CSP capability permissions — relax specific directives when granted
+    // allow_self_frames: allow iframe preview (same-origin / blob)
+    if (options.allow_self_frames) {
+      finalContents = finalContents
+        .split(`frame-src 'none'`).join(`frame-src 'self' blob:`)
+    }
+    // external_fetch: allow connect to any domain (relaxes connect-src)
+    if (options.allow_external_fetch) {
+      finalContents = finalContents
+        .split(`connect-src 'self'`).join(`connect-src *`)
+    }
+    // external_scripts: allow loading scripts from external domains (relaxes script-src)
+    if (options.allow_external_scripts) {
+      finalContents = finalContents
+        .split(`script-src 'self'`).join(`script-src 'self' https:`)
+    }
+    // unsafe_eval: allow eval() and dynamic code execution
+    if (options.allow_unsafe_eval) {
+      finalContents = finalContents
+        .split(`script-src 'self'`).join(`script-src 'self' 'unsafe-eval'`)
+    }
+  
     // Send the final HTML
     sendContent(res, finalContents)
     
   } catch (error) {
-    console.error('Error in loadPageHtml:', error)
-    return res.status(500).send('Internal server error')
+    if (options?.page_title.includes('Page Not Found')) {
+      return sendFailure(res, 'critical Error getting pages', { error, function: 'loadPageHtml' }, 500 )
+    } else {
+      console.error('Error in loadPageHtml:', error)
+      return sendFailure(res, error, { function: 'loadPageHtml', redirectUrl: '/public/notfound?error=couldNotGetPage-' + options.page_url, path: options.page_url }, 500 )
+    }
   }
 }
 
@@ -251,7 +296,7 @@ const partUrlPathToLoggedInPathResource = (userId, appName, filePath) => {
   } else if (isSystemApp(appName)) {
     return `/app/${appName}/${filePath}`
   } else {
-    // console.log('partUrlPathToLoggedInPathResource', {userId, appName, filePath})
+    // onsole.log('partUrlPathToLoggedInPathResource', {userId, appName, filePath})
     return `${filePath}`
   }
 }

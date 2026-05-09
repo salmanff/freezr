@@ -22,7 +22,20 @@ export const checkPermValidity = (statedPerm) => {
   if (!name) {
     throw new Error('checkPermValidity: cannot make permission without a permissionname for ' + name)
   }
-  
+
+  if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
+    throw new Error('checkPermValidity: permission name must contain only alphanumeric characters, dots, underscores, and hyphens: ' + name)
+  }
+
+  // Validate table_id entries have safe characters (table_id is already cleaned to array by cleanTableIds)
+  if (statedPerm.table_id && Array.isArray(statedPerm.table_id)) {
+    for (const tid of statedPerm.table_id) {
+      if (typeof tid !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(tid)) {
+        throw new Error('checkPermValidity: table_id must contain only alphanumeric characters, dots, underscores, and hyphens: ' + tid)
+      }
+    }
+  }
+
   if (!hasRequiredFields(statedPerm.type, statedPerm)) {
     throw new Error('checkPermValidity: cannot make permission without a table or ' + name)
   }
@@ -100,7 +113,8 @@ export const cleanedPermissionObjectFromManifestParams = (appName, statedPerm) =
 export const permissionsAreSame = (p1, p2) => {
   return objectContentIsSame(p1, p2, [
     'granted', 'status', 'grantees', 'outDated', 'revokeIsWip', 
-    'previousGrantees', '_date_created', '_date_modified', '_id'
+    'previousGrantees', '_date_created', '_date_modified', '_id',
+    '__owner', '__appTable', 'hasPublic'
   ])
 }
 
@@ -135,6 +149,7 @@ export const cleanNewManifestAndMergeWithExistingToUpdatePermsDb = (cleanedManif
 
     if (!existingPermFromDb) {
       // Create new permission
+      console.log('cleanNewManifestAndMergeWithExistingToUpdatePermsDb: Creating new permission', permissionName)
       operations.push({
         action: 'create',
         permissionName,
@@ -147,6 +162,7 @@ export const cleanNewManifestAndMergeWithExistingToUpdatePermsDb = (cleanedManif
       })
     } else if (!cleanedManifestPerm) {
       // Permission removed from manifest - mark as removed
+      console.log('cleanNewManifestAndMergeWithExistingToUpdatePermsDb: Permission removed from manifest - mark as removed', permissionName)
       operations.push({
         action: 'update',
         permissionName,
@@ -164,6 +180,7 @@ export const cleanNewManifestAndMergeWithExistingToUpdatePermsDb = (cleanedManif
       existingPermFromDb.granted
     ) {
       // Permissions are the same and granted - check if status needs updating
+      console.log('cleanNewManifestAndMergeWithExistingToUpdatePermsDb: Permissions are the same and granted - check if status needs updating', permissionName)
       if (existingPermFromDb.status === 'removed' || existingPermFromDb.status === 'outdated') {
         operations.push({
           action: 'update',
@@ -176,6 +193,7 @@ export const cleanNewManifestAndMergeWithExistingToUpdatePermsDb = (cleanedManif
         })
       } else {
         // No change needed
+        console.log('cleanNewManifestAndMergeWithExistingToUpdatePermsDb: No change needed', permissionName)
         operations.push({
           action: 'skip',
           permissionName
@@ -218,7 +236,7 @@ export const createPublicManifestObjectFromManifest = (userId, appName, manifest
   return {
     manifest,
     cards,
-    ppages,
+    ppages, // legacy — ppages are no longer cached but kept for backward compatibility
     user_id: userId,
     app_name: appName,
     permissions: existingPermissions
@@ -226,48 +244,49 @@ export const createPublicManifestObjectFromManifest = (userId, appName, manifest
 }
 
 /**
- * Extracts the list of files that need to be read for public manifest
- * Pure function - determines what files to read without reading them
+ * Extracts the list of pcard files that need to be read for public manifest
+ * Checks both permission-level pcards (overrides) and app_table-level pcards (defaults)
+ * ppages are NOT cached — they are read at render time from appFS
  * 
  * @param {Object} manifest - The app manifest
- * @returns {Object} Object with two arrays: cardsToRead and pagesToRead
- *   - cardsToRead: Array of { permName, path }
- *   - pagesToRead: Array of { permName, path }
+ * @returns {Object} Object with cardsToRead array
+ *   - cardsToRead: Array of { permName, path } where permName is either
+ *     the permission name (for permission-level pcards) or '_table:tableKey'
+ *     (for table-level pcards)
  */
 export const extractPublicManifestFilesToRead = (manifest) => {
   const cardsToRead = []
-  const pagesToRead = []
 
-  if (!manifest || !manifest.permissions) {
-    return { cardsToRead, pagesToRead }
+  if (!manifest) {
+    return { cardsToRead }
   }
 
-  for (const [permName, permObj] of Object.entries(manifest.permissions)) {
-    // Only process permissions with pcard or ppage
-    if (!permObj.pcard && !(permObj.ppage && manifest.public_pages && manifest.public_pages[permObj.ppage])) {
-      continue
-    }
+  // 1. Check permissions for pcard overrides
+  if (manifest.permissions) {
+    for (const [permName, permObj] of Object.entries(manifest.permissions)) {
+      if (!permObj.pcard) continue
 
-    const name = permObj.name || permName
-
-    // Add card to read list
-    if (permObj.pcard) {
+      const name = permObj.name || permName
       cardsToRead.push({
         permName: name,
         path: 'public/' + permObj.pcard
       })
     }
+  }
 
-    // Add page to read list
-    if (permObj.ppage && manifest.public_pages && manifest.public_pages[permObj.ppage]?.html_file) {
-      pagesToRead.push({
-        permName: name,
-        path: 'public/' + manifest.public_pages[permObj.ppage].html_file
-      })
+  // 2. Check app_tables for default pcards
+  if (manifest.app_tables) {
+    for (const [tableKey, tableObj] of Object.entries(manifest.app_tables)) {
+      if (tableObj.pcard) {
+        cardsToRead.push({
+          permName: '_table:' + tableKey,
+          path: 'public/' + tableObj.pcard
+        })
+      }
     }
   }
 
-  return { cardsToRead, pagesToRead }
+  return { cardsToRead }
 }
 
 /**

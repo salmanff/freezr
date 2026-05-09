@@ -1,5 +1,7 @@
 
-/* Freezr menu button - minimal, works on any page design */
+/* Freezr menu button - minimal, works on any page design.
+   Visual style is provided by .freezr-logo-btn-negative-gradient (defined below);
+   this rule only handles position / size / cursor. */
 #freezer_img_button {
 	position: fixed;
 	top: 8px;
@@ -8,11 +10,61 @@
 	height: 32px;
 	cursor: pointer;
 	z-index: 10000;
-	transition: transform 0.15s ease, filter 0.15s ease;
 }
-#freezer_img_button:hover {
-	transform: scale(1.1);
-	filter: brightness(0.85);
+
+/* Notification badge on the freezr logo button.
+   Severity drives color (error/warning/info). Reused for the close-button copy
+   inside the slide-out menu so the badge stays visible while the menu is open. */
+.freezr-notif-badge {
+	position: absolute;
+	top: -3px;
+	right: -3px;
+	min-width: 14px;
+	height: 14px;
+	padding: 0 4px;
+	border-radius: 8px;
+	background: #d33;
+	color: #fff;
+	font-size: 10px;
+	font-weight: 700;
+	line-height: 14px;
+	text-align: center;
+	box-shadow: 0 0 0 2px #fff;
+	pointer-events: none;
+	box-sizing: border-box;
+}
+.freezr-notif-badge[data-severity="warning"] { background: #e89c1f; }
+.freezr-notif-badge[data-severity="info"] { background: #2a78c2; }
+
+/* Notifications block at the top of the slide-out menu */
+#freezer_menu_notifications {
+	border-bottom: 1px solid #ddd;
+}
+.freezr-notif-item {
+	padding: 10px 15px;
+	border-bottom: 1px solid #eee;
+	background: #fff8f8;
+	border-left: 3px solid #d33;
+}
+.freezr-notif-item[data-severity="warning"] { background: #fff7e8; border-left-color: #e89c1f; }
+.freezr-notif-item[data-severity="info"] { background: #eef5fc; border-left-color: #2a78c2; }
+.freezr-notif-title {
+	font-size: 11px;
+	font-weight: 700;
+	margin-bottom: 3px;
+	color: #333;
+}
+.freezr-notif-msg {
+	font-size: 10px;
+	color: #555;
+	line-height: 1.35;
+}
+.freezr-notif-action {
+	display: inline-block;
+	margin-top: 5px;
+	font-size: 10px;
+	color: #2a78c2;
+	text-decoration: underline;
 }
 
 #freezer_menu_overlay {
@@ -125,3 +177,60 @@
 @keyframes freezr-spinner-rotate {
 	to { transform: rotate(360deg); }
 }
+
+/* ============================================================
+   freezr logo (concentric-arcs / soundwave mark)
+   Auto-loaded everywhere via this stylesheet. Usage:
+     <div class="freezr-logo"></div>            (static)
+     <div class="freezr-logo-spinner"></div>     (rotating loader)
+   Sizes default to 32x32; override with width/height.
+   ============================================================ */
+:root {
+	/* Gradient (colored) version — for marketing / nav / static display. */
+	--freezr-logo-svg: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 72 72' fill='none'><defs><linearGradient id='g' x1='8' y1='8' x2='64' y2='64' gradientUnits='userSpaceOnUse'><stop offset='0%25' stop-color='%231a6bb5'/><stop offset='100%25' stop-color='%23a8d4f5'/></linearGradient></defs><g transform='rotate(45 36 36)'><circle cx='36' cy='36' r='4' fill='url(%23g)'/><path d='M23 49 A18 18 0 0 1 23 23' stroke='url(%23g)' stroke-width='2.5' stroke-linecap='round' fill='none'/><path d='M17 55 A26 26 0 0 1 17 17' stroke='url(%23g)' stroke-width='2.5' stroke-linecap='round' fill='none'/><path d='M11 61 A35 35 0 0 1 11 11' stroke='url(%23g)' stroke-width='2.5' stroke-linecap='round' fill='none'/><path d='M49 23 A18 18 0 0 1 49 49' stroke='url(%23g)' stroke-width='2.5' stroke-linecap='round' fill='none'/><path d='M55 17 A26 26 0 0 1 55 55' stroke='url(%23g)' stroke-width='2.5' stroke-linecap='round' fill='none'/><path d='M61 11 A35 35 0 0 1 61 61' stroke='url(%23g)' stroke-width='2.5' stroke-linecap='round' fill='none'/></g></svg>");
+	/* White (negative) version — used by the corner-button gradient pill. */
+	--freezr-logo-white-svg: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 72 72' fill='none'><g transform='rotate(45 36 36)' stroke='%23fff' stroke-width='2.5' stroke-linecap='round' fill='none'><circle cx='36' cy='36' r='4' fill='%23fff' stroke='none'/><path d='M23 49 A18 18 0 0 1 23 23'/><path d='M17 55 A26 26 0 0 1 17 17'/><path d='M11 61 A35 35 0 0 1 11 11'/><path d='M49 23 A18 18 0 0 1 49 49'/><path d='M55 17 A26 26 0 0 1 55 55'/><path d='M61 11 A35 35 0 0 1 61 61'/></g></svg>");
+}
+
+.freezr-logo {
+	display: inline-block;
+	width: 32px;
+	height: 32px;
+	background-image: var(--freezr-logo-svg);
+	background-repeat: no-repeat;
+	background-position: center;
+	background-size: contain;
+	vertical-align: middle;
+}
+
+.freezr-logo-spinner {
+	display: inline-block;
+	width: 32px;
+	height: 32px;
+	background-image: var(--freezr-logo-svg);
+	background-repeat: no-repeat;
+	background-position: center;
+	background-size: contain;
+	vertical-align: middle;
+	animation: freezr-logo-spin 1.4s linear infinite;
+	transform-origin: 50% 50%;
+}
+@keyframes freezr-logo-spin {
+	to { transform: rotate(360deg); }
+}
+
+/* ---- Corner-button: brand-gradient negative pill ----
+   Production class for #freezer_img_button (set in freezrApiV2.js).
+   Other variants (grey, soft-blue, frosted, sky, ice, ghost, faded) live in
+   /static/logo-preview.html for future experimentation. */
+.freezr-logo-btn-negative-gradient {
+	background-image: var(--freezr-logo-white-svg), linear-gradient(135deg, rgba(26, 107, 181, 0.55), rgba(168, 212, 245, 0.55));
+	background-repeat: no-repeat;
+	background-position: center, center;
+	background-size: 78%, cover;
+	border-radius: 8px;
+	backdrop-filter: blur(3px);
+	-webkit-backdrop-filter: blur(3px);
+	transition: filter 0.15s ease, transform 0.15s ease;
+}
+.freezr-logo-btn-negative-gradient:hover { filter: brightness(1.08) saturate(1.15); transform: scale(1.08); }

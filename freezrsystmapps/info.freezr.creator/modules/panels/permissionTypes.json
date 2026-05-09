@@ -1,0 +1,15 @@
+{
+  "permissionTypes": [
+    { "value": "share_records", "label": "Share Records" },
+    { "value": "read_all", "label": "Read All Records" },
+    { "value": "write_all", "label": "Write All Records" },
+    { "value": "write_own", "label": "Write Own Records" },
+    { "value": "upload_pages", "label": "Upload Pages" },
+    { "value": "use_llm", "label": "Use LLM" },
+    { "value": "external_scripts", "label": "External Scripts" },
+    { "value": "external_fetch", "label": "External Fetch" },
+    { "value": "unsafe_eval", "label": "Unsafe Eval" },
+    { "value": "use_serverless", "label": "Use Serverless" },
+    { "value": "use_3pFunction", "label": "Use 3P Function" }
+  ]
+}

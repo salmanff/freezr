@@ -26,7 +26,8 @@ describe('Config Module - Constants', () => {
       expect(RESERVED_FIELD_LIST).to.include('_id');
       expect(RESERVED_FIELD_LIST).to.include('_date_created');
       expect(RESERVED_FIELD_LIST).to.include('_date_modified');
-      expect(RESERVED_FIELD_LIST).to.include('_accessible');
+      expect(RESERVED_FIELD_LIST).to.include('_accessible'); // old format
+      expect(RESERVED_FIELD_LIST).to.include('_accessibles');
       expect(RESERVED_FIELD_LIST).to.include('_publicid');
       expect(RESERVED_FIELD_LIST).to.include('_date_accessibility_mod');
     });
@@ -48,7 +49,7 @@ describe('Config Module - Constants', () => {
     it('should be a positive number', () => {
       expect(MAX_USER_NAME_LEN).to.be.a('number');
       expect(MAX_USER_NAME_LEN).to.be.greaterThan(0);
-      expect(MAX_USER_NAME_LEN).to.equal(25);
+      expect(MAX_USER_NAME_LEN).to.equal(35);
     });
   });
 

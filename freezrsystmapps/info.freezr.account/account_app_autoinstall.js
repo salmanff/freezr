@@ -1,6 +1,6 @@
 // account_app_autoinstall.js
 
-/* global freezr, freezerRestricted */
+/* global freezr */
 
 freezr.initPageScripts = function () {
   const searchParams = new URLSearchParams(window.location.search)
@@ -9,24 +9,21 @@ freezr.initPageScripts = function () {
   const autoInstallApp = searchParams.get('autoInstallApp')
   console.log({ autoInstallApp, autoInstallUrl })
   if (!autoInstallUrl || !autoInstallApp) window.location = '/account/app/manage'
-  document.getElementById('message').innerHTML = searchParams.get('message')
-  document.getElementById('app_name').innerHTML = autoInstallApp
-  document.getElementById('app_url').innerHTML = autoInstallUrl
-  document.getElementById('app_name2').innerHTML = autoInstallApp
+  document.getElementById('message').textContent = searchParams.get('message')
+  document.getElementById('app_name').textContent = autoInstallApp
+  document.getElementById('app_url').textContent = autoInstallUrl
+  document.getElementById('app_name2').textContent = autoInstallApp
   document.getElementById('install').onclick = function () {
     document.getElementById('install').style.display = 'none'
     document.getElementById('spinner').style.display = 'block'
-    freezerRestricted.connect.ask('/acctapi/app_install_from_url.json', {
+    freezr.apiRequest('POST', '/acctapi/app_install_from_url', {
       app_url: autoInstallUrl,
-      app_name: autoInstallApp
-    }, function (error, returndata) {
-      const d = freezr.utils.parse(returndata)
-      if (error || d.err) {
-        showError(error.message || d.err || 'Error installing!')
-        document.getElementById('spinner').style.display = 'none'
-      } else {
-        window.location = '/account/app/settings/' + autoInstallApp + '?' + (action ? ('action=' + action + '&') : '') + 'code=newinstall&message=You successfully installed the app.'
-      }
+      app_name: autoInstallApp  
+    }).then(function (returndata) {
+      window.location = '/account/app/settings/' + autoInstallApp + '?' + (action ? ('action=' + action + '&') : '') + 'code=newinstall&message=You successfully installed the app.'
+    }).catch(function (error) {
+      showError(error.message || 'Error installing!')
+      document.getElementById('spinner').style.display = 'none'
     })
   }
 }

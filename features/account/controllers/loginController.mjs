@@ -4,10 +4,8 @@
 // Architecture: Controller layer - orchestrates calls to services
 // Receives context from middleware via res.locals (no req mutation)
 
-import { ensureDeviceCode } from '../../../middleware/auth/sessionUtils.mjs'
 import { loadDataHtmlAndPage } from '../../../adapters/rendering/pageLoader.mjs'
 import { devAssert, devAssertType, devAssertProps } from '../../../middleware/devAssertions.mjs'
-import helpers from '../../../common/helpers/utils.mjs'
 
 /**
  * Modern login page controller
@@ -42,20 +40,9 @@ export const generateLoginPage = async (req, res) => {
   
 
   
-  // Ensure session exists
-  if (!req.session) {
-    res.locals.flogger.debug('login 🔑 generateLoginPage: Session does not exist, creating new session')
-    req.session = {}
-  }
-  if (!req.session.device_code) {
-    res.locals.flogger.debug('login 🔑 generateLoginPage: Device code does not exist, creating new device code')
-    req.session.device_code = helpers.randomText(20)
-  }
-  res.locals.flogger.debug('login 🔑 generateLoginPage: Device code:', req.session.device_code)
-  // onsole.log('login 🔑 generateLoginPage: Device code:', req.session.device_code)
-  
-  // Ensure device code exists in session
-  // ensureDeviceCode(req.session, helpers)
+  // NOTE: Session and device_code are NOT created here to keep login page visits stateless.
+  // device_code is generated at login time in loginApiController.mjs
+  // This ensures no session files are created for anonymous/public visitors.
   
   // Build page options for rendering
   const options = {

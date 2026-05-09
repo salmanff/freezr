@@ -1,4 +1,4 @@
-// freezr.info - Modern Data Store Manager (WITH USERCACHE)
+// freezr.info - Modern Data Store Manager (WITH USERCACHE) 
 // 
 // Updated to pass UserCache instances to USER_DS instead of full CacheManager
 
@@ -84,9 +84,13 @@ function DATA_STORE_MANAGER () {
             userCache: self.userCaches[owner]  // Pass UserCache, not CacheManager
           })
           
-          if (ownerEntries[0].limits && ownerEntries[0].limits.storage) {
-            self.users[owner].setTimerToRecalcStorage()
-          }
+          // Storage recalc is triggered lazily on first write operation (create/update/delete)
+          // rather than on USER_DS creation, to avoid initializing all tables when
+          // the DS is created from a public/unauthenticated context
+          // ie removed this:
+          // if (ownerEntries[0].limits && ownerEntries[0].limits.storage) {
+          //   self.users[owner].setTimerToRecalcStorage()
+          // }
           return self.users[owner]
         } else {
           console.warn('🔴 ds.getOrSetUserDS', 'incomplete user ' + owner)

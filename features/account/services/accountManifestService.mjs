@@ -135,6 +135,18 @@ export const getAccountPageManifest = (params) => {
       initial_query_func: 'getReauthorizeData'
     },
 
+    resources: {
+      page_title: 'Account Resources (freezr)',
+      css_files: [
+        '/app/info.freezr.public/public/freezr_style.css',
+        'account_home.css'
+      ],
+      page_url: 'account_resources.html',
+      app_name: 'info.freezr.account',
+      script_files: ['account_resources.js'],
+      initial_query_func: null
+    },
+
     reset: {
       page_title: 'Account Reset (freezr)',
       css_files: [
@@ -208,7 +220,7 @@ export const getSystemDataPageManifest = (params) => {
   return {
     page_title: `App Data - ${params.action} (freezr)`,
     css_files: [
-      './@public/info.freezr.public/public/freezr_style.css',
+      '/app/info.freezr.public/public/freezr_style.css',
       'account_home.css'
     ],
     page_url: `account_${page}.html`,
@@ -247,10 +259,10 @@ export const getDefaultPageManifest = (pageName) => {
   return {
     page_title: `${pageName.charAt(0).toUpperCase() + pageName.slice(1)} (Freezr)`,
     css_files: [
-      './@public/info.freezr.public/public/freezr_style.css',
+      '/app/info.freezr.public/public/freezr_style.css',
       'account_home.css'
     ],
-    page_url: `./@public/info.freezr.public/public/pageNotFound`,
+    page_url: '/app/info.freezr.public/public/pageNotFound.html',
     app_name: 'info.freezr.account',
     initial_query_func: null
   }

@@ -46,9 +46,9 @@ export const createAddFreezrContextForSelfRegisteredNewUser = (dsManager, freezr
     if (source === 'checkResource' && !dsManager.freezrIsSetup) freezrSetUpStatus = 'firstSetUp'
 
     const existingFreezr = res.locals.freezr || {}
-      res.locals.freezr = {
-      ...createBaseFreezrContextForResLocals(req, dsManager, freezrPrefs, freezrStatus),
+    res.locals.freezr = {
       ...existingFreezr, // Preserve existing properties
+      ...createBaseFreezrContextForResLocals(req, dsManager, freezrPrefs, freezrStatus),
       freezrSetUpStatus,
       freezrInitialEnvCopy: JSON.parse(JSON.stringify(dsManager.initialEnvironment)),
       selfRegOptions: createSelfRegOptions(freezrPrefs),
@@ -59,6 +59,7 @@ export const createAddFreezrContextForSelfRegisteredNewUser = (dsManager, freezr
 }
 
 const createSelfRegOptions = (freezrPrefs) => {
+  // onsole.log('createSelfRegOptions in register context ', { freezrPrefs })
   return {
     allow: freezrPrefs?.allowSelfReg || false,
     allowAccessToSysFsDb: freezrPrefs?.allowAccessToSysFsDb || false,

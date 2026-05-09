@@ -10,7 +10,8 @@ export const RESERVED_FIELD_LIST = [
   '_id', 
   '_date_created', 
   '_date_modified',
-  '_accessible',
+  '_accessible', // old format
+  '_accessibles',
   '_publicid',
   '_date_accessibility_mod'
 ]
@@ -27,6 +28,7 @@ export const RESERVED_COLLECTION_NAMES = ['field_permissions', 'accessible_objec
 
 // System apps that are part of Freezr core
 export const SYSTEM_APPS = ['info.freezr', 'dev.ceps']
+// info.freezr.user is an exception to the system app rule
 
 // Freezr admin database names (used in dsManager)
 export const FREEZR_ADMIN_DBs = ['permissions', 'users', 'oauthors', 'app_tokens', 'params']
@@ -86,6 +88,9 @@ export const isSystemApp = (appName) => {
   if (!appName) return false
   
   const normalizedAppName = appName.replace(/\./g, '_')
+
+  const InfoFreezrUserApp = 'info_freezr_user_'
+  if (normalizedAppName.startsWith(InfoFreezrUserApp) && normalizedAppName.length > InfoFreezrUserApp.length + 3) return false
   
   return SYSTEM_APPS.some(systemApp => {
     const normalizedSystemApp = systemApp.replace(/\./g, '_')
@@ -110,6 +115,7 @@ export const validAppName = (appName) => {
   if (appName.includes('{')) return false
   if (appName.includes('}')) return false
   if (appName.includes('..')) return false
+  if (appName.endsWith('.')) return false
   
   const appSegments = appName.split('.')
   if (appSegments.length < 3) return false
@@ -127,6 +133,12 @@ export const userIdIsValid = (uid) => {
     !uid.includes("'") && 
     !uid.includes(' ') && 
     !uid.includes('/') && 
+    !uid.includes('=') && 
+    !uid.includes('?') && 
+    !uid.includes('&') && 
+    !uid.includes('#') && 
+    !uid.includes(' ') && 
+    !uid.includes(' ') && 
     !uid.includes('{') && 
     !uid.includes('}') && 
     !uid.includes('(') && 
@@ -156,7 +168,7 @@ export const validDirName = (dir) => {
 }
 
 export const validPermissionName = (name) => {
-  return !name.includes(' ') && !name.includes('/')
+  return !name.includes(' ') && !name.includes('/') && !name.includes('=') && !name.includes('?') && !name.includes('&') && !name.includes('#') && !name.includes(' ') && !name.includes('{') && !name.includes('}') && !name.includes('(') && !name.includes(')')
 }
 
 export const validCollectionName = (collectionName, isFileRecord) => {
@@ -169,6 +181,15 @@ export const validCollectionName = (collectionName, isFileRecord) => {
     collectionName.includes('/') ||
     collectionName.includes(' ') ||
     collectionName.includes('@') ||
+    collectionName.includes('=') ||
+    collectionName.includes('?') ||
+    collectionName.includes('&') ||
+    collectionName.includes('#') ||
+    collectionName.includes(' ') ||
+    collectionName.includes('{') ||
+    collectionName.includes('}') ||
+    collectionName.includes('(') ||
+    collectionName.includes(')') ||
     startsWithOneOf(collectionName, ['.', '-', '\\'])
   ) {
     return false
@@ -228,6 +249,14 @@ export const APP_TOKEN_OAC = {
 }
 
 /**
+ * Validation Tokens OAC - Stores validation tokens
+ */
+export const VALIDATION_TOKEN_OAC = {
+  app_table: 'dev.ceps.perms.validations',
+  owner: 'fradmin'
+}
+
+/**
  * User Database OAC - Stores all user records
  */
 export const USER_DB_OAC = {
@@ -254,13 +283,6 @@ export const PUBLIC_RECORDS_OAC = {
   owner: 'public'
 }
 
-/**
- * Validation Tokens OAC - Stores validation tokens
- */
-export const VALIDATION_TOKEN_OAC = {
-  app_table: 'dev.ceps.perms.validations',
-  owner: 'fradmin'
-}
 
 /**
  * Private Feed OAC - Stores private feed codes

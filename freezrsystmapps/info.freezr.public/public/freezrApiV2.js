@@ -47,24 +47,36 @@ const freezr = (function() {
 
     // Get access token
     const PATHS_WITHOUT_TOKEN = [
-      '/ceps/ping', '/acctapi/login', 'public/query',
+      '/ceps/ping', '/acctapi/login', '/public/query',
       '/register/api/checkresource', '/register/api/firstSetUp', '/register/api/newselfreg', 
       '/oauth/token', '/oauth/get_new_state', '/oauth/validate_state'
     ]
-    const coreUrl = url.split('?')[0]
+    let pathOnly;
+    if (url.startsWith('http')) {
+      try {
+        const parsedUrl = new URL(url);
+        pathOnly = parsedUrl.pathname;
+      } catch (e) {
+        pathOnly = url; // fallback in case of invalid URL
+      }
+    } else {
+      pathOnly = url.split('?')[0];
+    }
     
     const accessToken = options?.appToken || 
                        (freezr.app.isWebBased ? freezr.utils.getCookie('app_token_' + freezrMeta.userId) : freezrMeta.appToken)
 
-    if (!accessToken && !PATHS_WITHOUT_TOKEN.includes(coreUrl)) {
-      const error = new Error('Need to obtain an app token before sending data to ' + url)
+    if (!accessToken && !PATHS_WITHOUT_TOKEN.includes(pathOnly)) {
+      console.warn('apiRequest: Need to obtain an app token before sending data to ', {pathOnly, url})
+      const error = new Error('api Need to obtain an app token before sending data to ' + url)
       error.status = 401
       throw error
     }
 
     // Build headers
-    const headers = {
-      Authorization: 'Bearer ' + accessToken
+    const headers = {}
+    if (accessToken) {
+      headers.Authorization = 'Bearer ' + accessToken
     }
     
     // Handle different content types
@@ -80,7 +92,7 @@ const freezr = (function() {
     }
 
     // Make request
-    console.log('apiRequest', { method, url, headers })
+    // console.log('apiRequest', { method, url, headers })
     try {
       const response = await fetch(url, {
         method,
@@ -96,10 +108,6 @@ const freezr = (function() {
         const error = new Error(errorData.error || errorData.message || 'Unknown error')
         error.status = response.status
         
-        if (response.status === 401 && !freezr.app.isWebBased) {
-          freezr.app.offlineCredentialsExpired = true
-        }
-        
         throw error
       }
     } catch (error) {
@@ -110,6 +118,83 @@ const freezr = (function() {
       const networkError = new Error('Network error: ' + error.message)
       throw networkError
     }
+  }
+
+  /**
+   * Internal helper: reads an SSE response from the server and collates
+   * the final result. When callbacks (onDelta / onThinking) are provided
+   * via callbackOptions they fire as chunks arrive (streamBack mode).
+   * Otherwise the stream is consumed silently and the final result returned.
+   *
+   * @param {string} url - The endpoint URL
+   * @param {*} body - Request body (JSON-serialisable object or FormData)
+   * @param {Object} [options] - { appToken, onDelta, onThinking, isFormData }
+   * @returns {Promise<Object>} Final result { success, response, meta, thinking? }
+   */
+  async function _streamingAsk (url, body, options = {}) {
+    let fullUrl = url
+    if (!fullUrl.startsWith('http') && !freezr.app.isWebBased && freezrMeta.serverAddress) {
+      fullUrl = freezrMeta.serverAddress + fullUrl
+    }
+
+    const accessToken = options.appToken ||
+      (freezr.app.isWebBased ? freezr.utils.getCookie('app_token_' + freezrMeta.userId) : freezrMeta.appToken)
+
+    const headers = {}
+    if (accessToken) headers.Authorization = 'Bearer ' + accessToken
+
+    let requestBody
+    if (options.isFormData) {
+      requestBody = body
+    } else {
+      headers['Content-Type'] = 'application/json'
+      requestBody = JSON.stringify(body)
+    }
+
+    const response = await fetch(fullUrl, { method: 'PUT', headers, body: requestBody })
+
+    if (response.status !== 200) {
+      const errorData = await response.json().catch(() => ({}))
+      const error = new Error(errorData.error || errorData.message || 'Unknown error')
+      error.status = response.status
+      throw error
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let finalResult = null
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+
+      let lineEnd
+      while ((lineEnd = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, lineEnd).trim()
+        buffer = buffer.slice(lineEnd + 1)
+        if (!line.startsWith('data: ')) continue
+        try {
+          const data = JSON.parse(line.slice(6))
+          if (data.type === 'delta' && options.onDelta) {
+            options.onDelta(data.text)
+          } else if (data.type === 'thinking' && options.onThinking) {
+            options.onThinking(data.text)
+          } else if (data.type === 'done') {
+            finalResult = { success: data.success, response: data.response, meta: data.meta }
+            if (data.thinking) finalResult.thinking = data.thinking
+          } else if (data.type === 'error') {
+            throw new Error(data.error || 'LLM streaming error')
+          }
+        } catch (e) {
+          if (e.message && !e.message.startsWith('Unexpected')) throw e
+        }
+      }
+    }
+
+    if (!finalResult) throw new Error('Stream ended without a done event')
+    return finalResult
   }
 
   // ============================================
@@ -206,9 +291,11 @@ const freezr = (function() {
       const writeOptions = { appToken: options.appToken || null }
       
       if (shouldUseFeps(['permission_name', 'owner_id'], options)) {
-        if (!options._entity) throw new Error('need to provide _entity for feps update')
-        const url = (options.host || '') + '/feps/update/' + appTable + '/' + id + '?replaceAllFields=true'
-        return await apiRequest('PUT', url, data, writeOptions)
+        const body = { _entity: data, replaceAllFields: true }
+        const fepsKeys = ['permission_name', 'owner_id']
+        fepsKeys.forEach(k => { if (options?.[k]) body[k] = options[k] })
+        const url = (options.host || '') + '/feps/update/' + appTable + '/' + id
+        return await apiRequest('PUT', url, body, writeOptions)
       } else {
         // Note in ceps, replaceAllFields is always true
         const url = (options.host || '') + '/ceps/update/' + appTable + '/' + id
@@ -298,10 +385,11 @@ const freezr = (function() {
     // APP API - FILE OPERATIONS
     // ============================================
 
-    async upload(file, options = {}) {
+    async upload(file, options) {
       if (!file) {
         throw new Error('No file to upload')
       }
+      if (!options) options = {}
 
       options.overwrite = !options.doNotOverWrite
       const url = (options.host || '') + '/feps/upload/' + freezrMeta.appName
@@ -323,14 +411,13 @@ const freezr = (function() {
     getFileUrl(fileId, options = {}) {
       if (!fileId) return null
       
-      options.requestee_app = options.requestee_app || freezrMeta.appName
-      options.permission_name = options.permission_name || 'self'
-      options.requestee_user_id = options.requestee_user_id || freezrMeta.userId
+      const app = options.requestee_app || freezrMeta.appName
+      const userId = options.requestee_user_id || freezrMeta.userId
+      const permissionName = options.permission_name || null // not used / tested yet
       
       if (fileId.startsWith('/')) fileId = fileId.slice(1)
       
-      return `/feps/userfiles/${options.requestee_app}/${options.requestee_user_id}/${fileId}` +
-             `?permission_name=${options.permission_name}`
+      return `/feps/userfiles/${app}/${userId}/${fileId}` + (permissionName ? ('?permission_name=' + permissionName) : '')
     },
 
     async deleteFile(fileId, options = {}) {
@@ -360,7 +447,18 @@ const freezr = (function() {
       },
 
       async shareRecords(idOrQuery, options = {}) {
-        // to access a record from its public id pass { publicid }
+        // Identifier precedence for `idOrQuery`:
+        //   1. string             → original record _id (DEFAULT and recommended)
+        //   2. array of strings   → bulk by original _ids
+        //   3. object             → query_criteria; pass { publicid } when only the publicid is known
+        //
+        // Orphan recovery flags:
+        //   - forcePublicIdTakeover (grant): delete a conflicting orphaned public record and
+        //     (when same collection + same data_owner) clear the source _accessibles entry,
+        //     then publish in its place.
+        //   - forcePublicIdCleanup (deny): when paired with `query_criteria: { publicid }`,
+        //     delete the orphaned public record even if no source record is found.
+        //     For convenience, prefer `freezr.perms.unshareByPublicId(publicid, ...)`.
         if (!options.grantees && options.grantee) {
           options.grantees = [options.grantee]
         }
@@ -391,7 +489,19 @@ const freezr = (function() {
       },
 
       async shareFilePublicly(fileId, options = {}) {
-        // fileId is the id of the file when granting and the public id when ungranting
+        // fileId is the file's record _id (i.e. the file path used to address the record).
+        // For both grant AND revoke the default is to identify the record by its _id,
+        // matching the convention used by `shareRecords`.
+        //
+        // Options:
+        //   - fileStructure       : html main-page bundle (.html files only)
+        //   - publicid            : custom publicid to assign on grant
+        //   - forcePublicIdTakeover : on grant, delete a conflicting orphan public record
+        //   - byPublicId: true    : treat `fileId` as the publicid to revoke (use when you no
+        //                            longer have the original file record). Implies action: 'deny'.
+        //                            See also `freezr.perms.unshareByPublicId(...)`.
+        //   - forcePublicIdCleanup : on revoke + byPublicId, delete the orphaned public record
+        //                            even if no source file record is found.
         if (!fileId) {
           throw new Error('Must include file id')
         }
@@ -406,9 +516,37 @@ const freezr = (function() {
         // default to grant
         if (options.grant) {
           options.record_id = fileId
-        } else {
+        } else if (options.byPublicId) {
+          delete options.byPublicId
           options.query_criteria = { publicid: fileId }
+        } else {
+          options.record_id = fileId
         }
+
+        return await apiRequest('POST', '/ceps/perms/share_records', options)
+      },
+
+      async unshareByPublicId(publicid, options = {}) {
+        // Explicit "I only have the publicid" entry point for revoking shares.
+        // Use when the source record's _accessibles entry has been lost, or when a UI
+        // flow only knows the public URL. Safe orphan recovery: pass
+        // `forcePublicIdCleanup: true` to delete the public record even if its source
+        // record can no longer be found.
+        if (!publicid || typeof publicid !== 'string') {
+          throw new Error('Must include publicid string')
+        }
+        if (!options.name) {
+          throw new Error('Must include permission name')
+        }
+        if (!options.grantees && options.grantee) {
+          options.grantees = [options.grantee]
+        }
+        if (!options.grantees || !Array.isArray(options.grantees) || options.grantees.length === 0) {
+          options.grantees = ['_public']
+        }
+        options.action = 'deny'
+        options.grant = false
+        options.query_criteria = { publicid }
 
         return await apiRequest('POST', '/ceps/perms/share_records', options)
       },
@@ -550,7 +688,8 @@ const freezr = (function() {
       },
 
       async ping(options = {}) {
-        const response = await apiRequest('GET', '/ceps/ping', null, options)
+        const url = (options.server || '') + '/ceps/ping'
+        const response = await apiRequest('GET', url, null, options)
         if (!response.server_type) {
           throw new Error('No server type in ping response')
         }
@@ -600,51 +739,10 @@ const freezr = (function() {
         return '/app/@' + freezrMeta.userId + '/' + freezrMeta.appName + '/' + appFolderRelativePath
       },
 
-      async getFileToken (fileId, options, callback) {
-        // WIP - to be completed 2019
-        // check if exists - if not, check permissions and send back a token and keep a list of tokens
-        // return token
-        if (!options) options = {}
-        options.requestee_user_id = options.requestee_user_id || freezrMeta.userId
-        options.requestee_app = options.requestee_app || freezrMeta.appName
-        options.permission_name = options.permission_name || 'self'
-      
-        const url = '/feps/getuserfiletoken' + '/' + (options.permission_name || 'self') + '/' + options.requestee_app + '/' + options.requestee_user_id + '/' + fileId
-        try {
-          const resp = await apiRequest('GET', url, null)
-          const token = (resp && resp.fileToken) ? resp.fileToken : null
-          return token
-        } catch (err) {
-          console.warn('error in getting token ', err)
-          return null
-        }
-      },
-
-      refreshFileTokens(eltag = 'IMG', attr = 'src') {
-        const pictList = document.getElementsByTagName(eltag)
-        if (pictList.length > 0) {
-          const host = window.location.href.slice(0, (window.location.href.slice(8).indexOf('/') + 8))
-          const fepspath = '/feps/userfiles/'
-          for (let i = 0; i < pictList.length; i++) {
-            if (freezr.utils.startsWith(pictList[i][attr], host + fepspath)) {
-              const parts = pictList[i][attr].split('/')
-              const pictId = parts.slice(7).join('/').split('?')[0]
-              freezr.utils.setFilePath(pictList[i], attr, pictId) //, {'permission_name':'picts_share'}
-            }
-          }
-        }
-      },
-
-      async setFilePath (imgEl, attr, fileId, options) {
-        if (!options) options = {}
-        options.requestee_app = options.requestee_app || freezrMeta.appName
-        options.permission_name = options.permission_name || 'self'
-        options.requestee_user_id = options.requestee_user_id || freezrMeta.userId
+      userFilePath(fileId) {
         if (!fileId) return null
-        if (freezr.utils.startsWith(fileId, '/')) fileId = fileId.slice(1)
-        const fileToken = await freezr.utils.getFileToken(fileId, options)
-        if (!fileToken) return null
-        imgEl[attr] = '/feps/userfiles/' + options.requestee_app + '/' + options.requestee_user_id + '/' + fileId + '?fileToken=' + fileToken + (options.permission_name ? ('&permission_name=' + options.permission_name) : '')
+        if (fileId.startsWith('/')) fileId = fileId.slice(1)
+        return '/feps/userfiles/' + freezrMeta.appName + '/' + freezrMeta.userId + '/' + fileId
       },
 
       // Backward compatibility helper
@@ -720,30 +818,56 @@ const freezr = (function() {
             html += `${icon} ${perm.name.replace(/_/g, ' ')}</div>`
           })
           
-          html += `<div class="freezer_menu_button" onclick="window.location.href='/account/app/settings/${freezrMeta.appName}'" `
+          html += '<div class="freezer_menu_button freezr_settings_link" '
           html += 'style="margin-top: 10px; font-size: 10px; text-align: center;">Settings</div>'
           html += '</div>'
         } else if (window.location.pathname.indexOf('/apps') === 0) {
           html += '<div style="padding: 10px 15px; border-top: 1px solid #ddd;">'
-          html += `<div class="freezer_menu_button" onclick="window.location.href='/account/app/settings/${freezrMeta.appName}'" `
+          html += '<div class="freezer_menu_button freezr_settings_link" '
           html += 'style="font-size: 10px; text-align: center;">Settings</div>'
           html += '</div>'
         }
 
         contentDiv.innerHTML = html
+        contentDiv.querySelectorAll('.freezr_settings_link').forEach(el => {
+          el.addEventListener('click', () => { window.location.href = '/account/app/settings/' + freezrMeta.appName })
+        })
+      },
+
+      _highestSeverity(notifications) {
+        // error > warning > info
+        const order = { error: 3, warning: 2, info: 1 }
+        let best = null
+        let bestRank = 0
+        for (const n of (notifications || [])) {
+          const rank = order[n.severity] || 1
+          if (rank > bestRank) { best = n.severity || 'info'; bestRank = rank }
+        }
+        return best
+      },
+
+      _renderBadge(buttonEl) {
+        if (!buttonEl) return
+        const existing = buttonEl.querySelector('.freezr-notif-badge')
+        if (existing) existing.remove()
+        const notifications = (freezrMeta && freezrMeta.notifications) || []
+        if (!notifications.length) return
+        const badge = document.createElement('div')
+        badge.className = 'freezr-notif-badge'
+        badge.setAttribute('data-severity', this._highestSeverity(notifications) || 'error')
+        badge.textContent = notifications.length > 9 ? '9+' : String(notifications.length)
+        buttonEl.style.position = buttonEl.style.position || 'fixed'
+        buttonEl.appendChild(badge)
       },
 
       _createElements() {
-        // Create menu button
-        const imgUrl = freezr.app.isWebBased 
-          ? '/app/info.freezr.public/public/static/freezer_log_top.png'
-          : '../freezr/static/freezer_log_top.png'
-        const menuButton = document.createElement('img')
+        const menuButton = document.createElement('div')
         menuButton.id = 'freezer_img_button'
-        menuButton.src = imgUrl
+        menuButton.className = 'freezr-logo-btn-negative-gradient'
         if (!this.options.showButton) menuButton.style.display = 'none'
         menuButton.onclick = () => this.open()
         document.body.appendChild(menuButton)
+        this._renderBadge(menuButton)
 
         // Create overlay
         const overlay = document.createElement('div')
@@ -763,9 +887,9 @@ const freezr = (function() {
         textEl.textContent = 'Close'
         closeBtn.appendChild(textEl)
 
-        const imgCloseBtn = document.createElement('img')
-        imgCloseBtn.src = imgUrl
+        const imgCloseBtn = document.createElement('div')
         imgCloseBtn.id = 'freezer_menu_inner_close_img'
+        imgCloseBtn.className = 'freezr-logo-btn-negative-gradient'
         closeBtn.appendChild(imgCloseBtn)
         closeBtn.onclick = () => this.close()
         menu.appendChild(closeBtn)
@@ -782,6 +906,7 @@ const freezr = (function() {
           if (window.location.pathname !== `/apps/${freezrMeta.appName}/index` && 
               window.location.pathname.indexOf('/account') !== 0 &&
               window.location.pathname.indexOf('/register') !== 0 &&
+              window.location.pathname.indexOf('/creator') !== 0 &&
               window.location.pathname.indexOf('/admin') !== 0) {
             const appHomeBtn = document.createElement('div')
             appHomeBtn.className = 'freezer_menu_button'
@@ -800,12 +925,175 @@ const freezr = (function() {
 
         }
 
+        // Notifications block - rendered synchronously from freezrMeta.notifications.
+        // Sits above the per-app content so it shows on every page (apps + system).
+        const notifBlock = document.createElement('div')
+        notifBlock.id = 'freezer_menu_notifications'
+        menu.appendChild(notifBlock)
+        this._renderNotifications(notifBlock)
+
         // Content area for permissions
         const content = document.createElement('div')
         content.id = 'freezer_menu_content'
         menu.appendChild(content)
 
         document.body.appendChild(menu)
+      },
+
+      _renderNotifications(container) {
+        if (!container) return
+        const notifications = (freezrMeta && freezrMeta.notifications) || []
+        container.innerHTML = ''
+        if (!notifications.length) {
+          container.style.display = 'none'
+          return
+        }
+        container.style.display = 'block'
+        notifications.forEach(n => {
+          const item = document.createElement('div')
+          item.className = 'freezr-notif-item'
+          item.setAttribute('data-severity', n.severity || 'info')
+
+          const title = document.createElement('div')
+          title.className = 'freezr-notif-title'
+          title.textContent = n.title || ''
+          item.appendChild(title)
+
+          if (n.message) {
+            const msg = document.createElement('div')
+            msg.className = 'freezr-notif-msg'
+            msg.textContent = n.message
+            item.appendChild(msg)
+          }
+
+          if (n.action && n.action.url) {
+            const a = document.createElement('a')
+            a.className = 'freezr-notif-action'
+            a.href = n.action.url
+            a.textContent = n.action.label || 'View'
+            item.appendChild(a)
+          }
+
+          container.appendChild(item)
+        })
+      }
+    },
+
+    llm: {
+      /**
+       * Check if the user has any LLM keys configured
+       * @param {Object} [options]
+       * @param {string} [options.appToken] - App token
+       * @param {string} [options.provider] - Preferred provider for the returned snapshot
+       * @param {boolean} [options.refresh] - Refresh pricing metadata before returning
+       * @param {string} [options.host] - Remote host
+       * @returns {Promise<Object>} { success, exists, defaultProvider, defaultFamily, providers, imageProviders?, pricingMeta }
+       * `defaultProvider` is the user's chosen default provider name (e.g. 'Claude', 'ChatGPT').
+       * `defaultFamily` is the default model family for that provider (e.g. 'sonnet', 'mini').
+       * `providers[providerName]` is an array of `{ id, family, provider, version, latest, pricing }`.
+       * `imageProviders[providerName]` is an array of image models (present when image models exist).
+       * `latest` is true for the newest model in each family.
+       * `pricing` is `{ input, output, other? }` (cost per M tokens) or null.
+       * `pricingMeta[providerName]` is `{ lastUpdated, refreshNeeded }`.
+       */
+      async ping (options = {}) {
+        const url = (options.host || '') + '/feps/llm/ask'
+        const writeOptions = {}
+        if (options.appToken) writeOptions.appToken = options.appToken
+        const body = { ping: true }
+        if (options.provider) body.provider = options.provider
+        if (options.refresh) body.refresh = true
+        return apiRequest('PUT', url, body, { ...writeOptions, contentType: 'application/json' })
+      },
+      /**
+       * Send a prompt to an LLM via the user's stored API keys
+       * @param {string|Array} prompt - Text prompt or array of { role, content } messages for conversation history
+       * @param {Object} [options] - Optional settings
+       * @param {string} [options.context] - System message (LLM instructions/persona - eg 'you are a helpful assistant')
+       * @param {string} [options.provider] - Preferred provider ('Claude' or 'ChatGPT')
+       * @param {string} [options.family] - Model family shorthand ('sonnet', 'mini', 'opus' etc). Used when model is not specified.
+       * @param {string} [options.model] - Model shorthand ('sonnet', 'o3-mini' etc) or full model name
+       * @param {number} [options.max_tokens] - Max tokens for the response
+       * @param {boolean} [options.noCosts] - Skip pricing lookups/cost enrichment for this request
+       * @param {string} [options.role] - Default role when prompt is a string (defaults to 'user')
+       * @param {string} [options.responseType] - 'json' to auto-parse JSON from the LLM response
+       * @param {boolean|Object} [options.thinking] - Enable extended thinking/reasoning.
+       *   Claude: true for 10k budget, or { budget_tokens: N }. Returns full thinking text.
+       *   ChatGPT: true for medium effort, or { effort: 'low'|'medium'|'high' }. Auto-selects o-series model. Returns reasoning summary.
+       * @param {File|File[]} [options.files] - One or more File objects to include with the request
+       * @param {boolean} [options.streamBack] - Stream LLM response chunks back to the browser via SSE.
+       *   When true, onDelta/onThinking callbacks fire as text arrives. Incompatible with files and responseType:'json'.
+       * @param {function} [options.onDelta] - Called with each text chunk during streaming (requires streamBack:true)
+       * @param {function} [options.onThinking] - Called with each thinking/reasoning chunk during streaming
+       * @param {string} [options.appToken] - App token (if calling from another app context)
+       * @param {string} [options.host] - Remote host (for cross-server calls)
+       * @returns {Promise<Object>} Response with
+       *   { success, response, thinking?, meta: { provider, model, modelFamily, rawUsage, tokensUsed, cost?, pricing, availableFamilies, hasKey } }
+       */
+      async ask (prompt, options = {}) {
+        const url = (options.host || '') + '/feps/llm/ask'
+
+        const streamOpts = {
+          appToken: options.appToken,
+          onDelta: options.streamBack ? options.onDelta : undefined,
+          onThinking: options.streamBack ? options.onThinking : undefined
+        }
+
+        if (options.files) {
+          const uploadData = new FormData()
+          const fileList = Array.isArray(options.files) ? options.files : [options.files]
+          fileList.forEach(f => uploadData.append('file', f))
+          const bodyOptions = {
+            prompt,
+            context: options.context,
+            provider: options.provider,
+            family: options.family,
+            model: options.model,
+            max_tokens: options.max_tokens,
+            noCosts: options.noCosts,
+            role: options.role,
+            responseType: options.responseType,
+            thinking: options.thinking
+          }
+          uploadData.append('options', JSON.stringify(bodyOptions))
+          return _streamingAsk(url, uploadData, { ...streamOpts, isFormData: true })
+        }
+
+        const bodyOptions = {
+          provider: options.provider,
+          family: options.family,
+          model: options.model,
+          max_tokens: options.max_tokens,
+          noCosts: options.noCosts,
+          role: options.role,
+          responseType: options.responseType,
+          thinking: options.thinking
+        }
+
+        return _streamingAsk(url, { prompt, context: options.context, options: bodyOptions }, streamOpts)
+      },
+      /**
+       * Generate an image using the user's stored LLM API keys.
+       * OpenAI returns raster PNG; Anthropic generates SVG converted to PNG server-side.
+       * @param {string} prompt - Text description of the image to generate
+       * @param {Object} [options] - Optional settings
+       * @param {string} [options.size] - Image size (default '1024x1024')
+       * @param {string} [options.quality] - Quality level (default 'auto')
+       * @param {string} [options.outputFormat] - 'png' (default) or 'svg'
+       * @param {string} [options.provider] - LLM provider ('ChatGPT' or 'Claude')
+       * @param {string} [options.model] - Specific model to use (adapter picks default if omitted)
+       * @param {string} [options.appToken] - App token
+       * @param {string} [options.host] - Remote host
+       * @returns {Promise<Object>} { success, format, b64Data?, svgData?, revisedPrompt, meta, tokensUsed, cost }
+       */
+      async generateImage (prompt, options = {}) {
+        const url = (options.host || '') + '/feps/llm/generate_image'
+        const writeOptions = {}
+        if (options.appToken) writeOptions.appToken = options.appToken
+        const body = { prompt, size: options.size, quality: options.quality, outputFormat: options.outputFormat }
+        if (options.provider) body.provider = options.provider
+        if (options.model) body.model = options.model
+        return apiRequest('PUT', url, body, { ...writeOptions, contentType: 'application/json' })
       }
     },
 
@@ -988,7 +1276,7 @@ const freezr = (function() {
                                    (options.collection ? `${freezrMeta.appName}.${options.collection}` : null)
       if (options.updateRecord) {
         if (!callback) return freezr.update(collectionOrAppTable, data._id, data, options)
-        callbackToAsync(freezr.update, [collectionOrAppTable, data, options, callback])
+        callbackToAsync(freezr.update, [collectionOrAppTable, data._id, data, options, callback])
       } else {
         if (!callback) return freezr.create(collectionOrAppTable, data, options)
         callbackToAsync(freezr.create, [collectionOrAppTable, data, options, callback])
@@ -996,8 +1284,8 @@ const freezr = (function() {
     },
 
     write(data, ...optionsAndCallback) {
-      console.warn('DEPRECATED: freezr.feps.write() - Use freezr.create() instead')
-      return freezr.ceps.create(data, ...optionsAndCallback)
+      console.warn('DEPRECATED: freezr.feps.write() - Use freezr.create() instead', { data, optionsAndCallback })
+      return freezr.feps.create(data, ...optionsAndCallback)
     },
 
     getById(dataObjectId, options = {}, callback) {
@@ -1162,7 +1450,7 @@ const freezr = (function() {
 
 
   // Initialize menu elements on load
-  if (typeof document !== 'undefined') {
+  if (typeof document !== 'undefined' && freezrMeta.type !== 'extentionPopupException') {
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => {
         freezr.menu._createElements()
@@ -1192,5 +1480,9 @@ const freezr = (function() {
 
 // Legacy freepr alias
 const freepr = freezr.promise
+
+// Expose freezr on the global object so module scripts (<script type="module">,
+// e.g. bundled React/Vite apps) can see it.
+if (typeof window !== 'undefined') window.freezr = freezr
 
 console.log('freezrCoreV2.js loaded - API Version ' + freezr.API_VERSION)

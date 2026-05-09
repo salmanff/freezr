@@ -18,7 +18,7 @@ import { ENV_PARAMS } from '../../../adapters/datastore/environmentDefaults.mjs'
  */
 const generateFirstSetUpPage = async (req, res) => {
   try {
-    // console.log('🔄 generateFirstSetUpPage - res.locals.freezr:', { freezr: res.locals.freezr })
+    // onsole.log('🔄 generateFirstSetUpPage - res.locals.freezr:', { freezr: res.locals.freezr })
     // For first setup, we use a local manager with fradmin's public appFS
     // This is set up in the checkFirstSetUp middleware
     const appFS = res.locals.freezr?.localsAppFS
@@ -37,7 +37,7 @@ const generateFirstSetUpPage = async (req, res) => {
       tempEnvironment.dbParams.connectionString = null
       tempEnvironment.dbParams.has_password = true
     }
-    // console.log('todo - should do this for all otherDBs and otherFSs as well')
+    // onsole.log('todo - should do this for all otherDBs and otherFSs as well')
 
     // move secret codes out and leave a note that the secret tokens are on the server
     if (tempEnvironment.fsParams && (tempEnvironment.fsParams.accessToken || tempEnvironment.fsParams.refreshToken)) { // todo - need to also check code-verifier etc
@@ -67,10 +67,7 @@ const generateFirstSetUpPage = async (req, res) => {
         const thisPage = "firstSetUp"; `
       // initial_environment: tempEnvironment
     }
-    // res.locals.flogger = {
-    //   error: console.error,
-    //   track: console.log
-    // }
+
     res.locals.freezr.permGiven = true
     // Render page using modern page loader adapter
     return loadDataHtmlAndPage(appFS, res, options)
@@ -127,17 +124,18 @@ const generateFirstSetUpPage = async (req, res) => {
 //   }
 // }
 
-const freezrSelfRegPrefs = function (freezrPrefs) {
-  return {
-    allow: freezrPrefs.allowSelfReg,
-    allowAccessToSysFsDb: freezrPrefs.allowAccessToSysFsDb,
-    defaultMBStorageLimit: freezrPrefs.selfRegDefaultMBStorageLimit,
-    // useUserIdsAsDbName: freezrPrefs.useUserIdsAsDbName,
-    dbUnificationStrategy: freezrPrefs.dbUnificationStrategy,
-    // useUnifiedCollection: freezrPrefs.useUnifiedCollection,
-    hasNotbeenSave: true
-  }
-}
+// const freezrSelfRegPrefs = function (freezrPrefs) {
+//   onsole.log('freezrSelfRegPrefs in register page controller ', { freezrPrefs })
+//   return {
+//     allow: freezrPrefs?.allowSelfReg,
+//     allowAccessToSysFsDb: freezrPrefs?.allowAccessToSysFsDb,
+//     defaultMBStorageLimit: freezrPrefs?.selfRegDefaultMBStorageLimit,
+//     // useUserIdsAsDbName: freezrPrefs.useUserIdsAsDbName,
+//     dbUnificationStrategy: freezrPrefs?.dbUnificationStrategy,
+//     // useUnifiedCollection: freezrPrefs.useUnifiedCollection,
+//     hasNotbeenSave: true
+//   }
+// }
 
 /**
  * Generate user self registration page
@@ -162,12 +160,11 @@ const generateUserSelfRegistrationPage = async (req, res) => {
     // Use environment defaults from ES6 module
     const envParams = ENV_PARAMS
 
-    // console.log('setting page url to ', req.url + '.html') 
     // Build page options for rendering
     const options = {
       page_title: 'User Self Registration',
       css_files: ['/app/info.freezr.public/public/freezr_style.css', 'public/firstSetUp.css'],
-      page_url: req.url + '.html',
+      page_url: req.path + '.html', // // Use req.path instead of req.url to exclude query string
       app_name: 'info.freezr.register',
       script_files: ['public/selfregister.js'],
       modules: [],
@@ -182,7 +179,7 @@ const generateUserSelfRegistrationPage = async (req, res) => {
               const freezrServerStatus = ${JSON.stringify(res.locals.freezr.freezrSetUpStatus)};
               const userId = "";
               const ENV_PARAMS = ${JSON.stringify(envParams)};
-              const freezrSelfRegOptions = ${JSON.stringify(freezrSelfRegPrefs(res.locals.freezr.freezrPrefs))};`,
+              const freezrSelfRegOptions = ${JSON.stringify(res.locals.freezr.selfRegOptions)};`,
       self_reg_options: selfRegOptions
     }
     

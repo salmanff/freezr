@@ -8,6 +8,14 @@ freezr.initPageScripts = function () {
   document.getElementById('loginButt').onclick = logIn
   console.log('hello from account_login.js')
 
+  // Check if page is being viewed in an in-app browser (WebView)
+  // eg Facebook, Instagram, Twitter, TikTok, Snapchat, LinkedIn, etc.
+  if (isInAppBrowser()) {
+    const warningEl = document.getElementById('inAppSecurityWarning')
+    if (warningEl) warningEl.style.display = 'block'
+    console.warn('Login page opened in an in-app browser - security warning shown')
+  }
+
   try {
     if (warnings && warnings === 'setupfile-resave') showError("There has been a potentially serious error as a key file is missing from your system. If you are a developer, and you have deleted, that's okay. Other wise, this may be a more serious problem.")
   } catch (e) {
@@ -18,7 +26,8 @@ freezr.initPageScripts = function () {
   document.getElementById('password').addEventListener('keypress', function (e) { if (e.key === 'Enter') logIn(e) })
 
   const searchParams = new URLSearchParams(window.location.search)
-  fwdToUrl = searchParams.get('fwdTo')
+  const rawFwdTo = searchParams.get('fwdTo')
+  fwdToUrl = isSafeRelativeUrl(rawFwdTo) ? rawFwdTo : null
 
   const proposedUser = searchParams.get('userId') || searchParams.get('user')
   if (proposedUser) document.getElementById('user_id').value = proposedUser
@@ -79,4 +88,27 @@ const showError = function (errorText) {
   if (typeof errorText !== 'string') errorText = JSON.stringify(errorText)
   const errorBox = document.getElementById('errorBox')
   errorBox.innerHTML = errorText
+}
+
+// Same-origin relative URL guard: rejects protocol-relative (//evil),
+// absolute (http://…), and pseudo-protocol (javascript:) values that an
+// attacker could plant in the fwdTo query parameter.
+const isSafeRelativeUrl = function (url) {
+  if (typeof url !== 'string' || url.length === 0) return false
+  if (url[0] !== '/') return false
+  if (url.startsWith('//')) return false
+  if (url.indexOf('\\') !== -1) return false
+  if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return false
+  return true
+}
+
+const isInAppBrowser = function () {
+  const ua = navigator.userAgent || navigator.vendor || ''
+  // Android WebView includes 'wv' token
+  if (/Android/.test(ua) && /\bwv\b/.test(ua)) return true
+  // iOS WebView: has AppleWebKit but no Safari token
+  if (/(iPhone|iPod|iPad).*AppleWebKit/i.test(ua) && !/Safari/i.test(ua)) return true
+  // Common in-app browsers by app identifier
+  if (/FBAN|FBAV|Instagram|Twitter|Snapchat|TikTok|LinkedIn|Line\//i.test(ua)) return true
+  return false
 }

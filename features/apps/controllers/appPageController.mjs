@@ -204,6 +204,32 @@ const generateAppPage = async (req, res) => {
         }
       })
     }
+
+    // CSP capability permissions: single query, parsed locally for each type
+    // Covers allow_self_frames, external_scripts, external_fetch, unsafe_eval
+    const manifestPermList = Array.isArray(manifest.permissions)
+      ? manifest.permissions
+      : Object.values(manifest.permissions || {})
+    const CSP_PERM_TYPES = ['allow_self_frames', 'external_scripts', 'external_fetch', 'unsafe_eval']
+    const cspPermFlags = {}
+    if (res.locals.freezr?.ownerPermsDb) {
+      try {
+        const allAppPerms = await res.locals.freezr.ownerPermsDb.query({
+          requestor_app: appName
+        }, {})
+        for (const permType of CSP_PERM_TYPES) {
+          const manifestDeclares = manifestPermList.some((p) => p && p.type === permType)
+          cspPermFlags[permType] = manifestDeclares && Array.isArray(allAppPerms) &&
+            allAppPerms.some((p) => p.type === permType && p.granted === true && p.status !== 'removed')
+        }
+      } catch (e) {
+        console.warn('⚠️ CSP permission query failed', { appName, error: e })
+      }
+    }
+    options.allow_self_frames = cspPermFlags.allow_self_frames || false
+    options.allow_external_scripts = cspPermFlags.external_scripts || false
+    options.allow_external_fetch = cspPermFlags.external_fetch || false
+    options.allow_unsafe_eval = cspPermFlags.unsafe_eval || false
     
     // Set cookie with app token
     let appPrefix = '/apps/'
@@ -223,6 +249,9 @@ const generateAppPage = async (req, res) => {
         path: appPrefix2 + appName 
       })
     }
+    res.cookie('app_token_' + req.session.logged_in_user_id, tokenInfo.app_token, { 
+      path: '/feps/userfiles/' + appName 
+    })
     
     // Render page using modern page loader adapter
     return loadDataHtmlAndPage(appFS, res, options)

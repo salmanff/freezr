@@ -4,7 +4,8 @@
 
 import config from '../../common/helpers/config.mjs'
 import { removeLastPathElement } from '../../common/helpers/utils.mjs'
-import { sendFile, sendStream, pipeStream } from '../http/responses.mjs'
+import { filterRecords } from './cache/queryMatcher.mjs'
+import { sendFailure, sendFile, sendStream, pipeStream } from '../http/responses.mjs'
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
@@ -24,9 +25,10 @@ const FS_ENV_FILE_DIR = path.normalize(ROOT_DIR + 'node_modules' + pathSep + 'ne
 // Create a require function for dynamic imports
 const require = createRequire(import.meta.url)
 
-// Used for persisting old nedb file 
+// Used for persisting old nedb file
 const DB_PERSISTANCE_IDLE_TIME_THRESHOLD = 60 * 1000 // (= 1 minute)
 const DB_CHANGE_COUNT_THRESHOLD = 50
+const MAX_RECORD_SIZE_BYTES = 2 * 1024 * 1024 // 2 MB - prevents MongoDB BSON errors on oversized documents
 
 function USER_DS (owner, env) {
   const self = this
@@ -120,7 +122,9 @@ function USER_DS (owner, env) {
     const ds = this.appcoll[appTableName(OAC)]
   
     // CREATE APPTABLE CACHE using UserCache
-    if (this.userCache) {
+    // noCache: skip cache for temp managers during startup to avoid polluting
+    // the singleton CacheManager with stale/negative entries
+    if (this.userCache && !options.noCache) {
       // Get cache preferences from UserCache (scoped to this owner)
       const cachePrefs = this.userCache.getCachePrefsForTable(appTableName(OAC))
       
@@ -128,7 +132,10 @@ function USER_DS (owner, env) {
       const cacheConfig = {
         cacheAll: options.cacheAll !== undefined ? options.cacheAll : cachePrefs.cacheAll,
         cacheRecent: options.cacheRecent !== undefined ? options.cacheRecent : cachePrefs.cacheRecent,
-        cachePatterns: options.cachePatterns !== undefined ? options.cachePatterns : cachePrefs.cachePatterns
+        cachePatterns: options.cachePatterns !== undefined ? options.cachePatterns : cachePrefs.cachePatterns,
+        // Pass OAC and dbParams so the cache can revise _id for unified DB queries
+        oac: OAC,
+        dbParams
       }
       
       ds.cache = this.userCache.getOrCreateAppTableCache(
@@ -251,21 +258,32 @@ function USER_DS (owner, env) {
         }
       }
     }
-    
+
     // READ BY ID
     ds.read_by_id = async function (id) {
       ds.dbLastAccessed = new Date().getTime()
 
-      // onsole.log('🔄 cache - read_by_id - TRY CACHE', { id, appTableName  })
-      const cached = await ds.cache.query({ _id: id })
-      if (cached !== null) {
-        // Cache hit - return cached results
-        // onsole.log('📦 Cache hit for query for id ', id)
-        return cached[0]
-      } else {
-        // onsole.log('📦 Cache miss for query for id ', id )
+      if (ds.cache) {
+        const cached = await ds.cache.query({ _id: id })
+        if (cached !== null && cached.length > 0) {
+          // Cache hit - already logged in appTableCache
+          // cached is [] for negative cache (ID doesn't exist)
+          return cached[0]
+        } 
+        // else if (cached && cached.length === 0) {
+        //   console.warn('got null cache')
+        // } else if (cached && cached.length > 0 && !cached[0]) {
+        //   console.warn('Got null as first el of cache')
+        // }
       }
-      return await ds.db.read_by_id_async(id)
+      // Cache miss - go to DB (already logged in appTableCache)
+      const result = await ds.db.read_by_id_async(id)
+      // Cache the result (including null/not-found as empty array for negative caching)
+      if (ds.cache) {
+        ds.cache.setByKey('_id', id, result ? [result] : [])
+      }
+
+      return result
      }
      
     // CREATE - with cache integration
@@ -277,6 +295,8 @@ function USER_DS (owner, env) {
         const error = new Error('storageLimitExceeded')
         error.useage = userDs.getUseageWarning()
         throw error
+      } else if (JSON.stringify(entity).length > MAX_RECORD_SIZE_BYTES) {
+        throw new Error('Record too large - maximum size is ' + (MAX_RECORD_SIZE_BYTES / (1024 * 1024)) + 'MB')
       } else if (!entity || typeof entity !== 'object' || Array.isArray(entity)) {
         console.warn('🔴 Cannot create an invalid entity type', { entity, options })
         throw new Error(('Cannot create an invalid entity type' + (typeof entity)))
@@ -304,9 +324,10 @@ function USER_DS (owner, env) {
       
       // UPDATE CACHE after successful create
       if (ds.cache && results._id) {
-        // onsole.log('🔄 cache - create - UPDATE CACHE after write of ', { id: results._id })
+        console.log('C-M 📝📝📝📝📝 DB CREATE - updating cache', { table: appTableName(OAC), id: results._id })
         const cachedEntity = { ...entity, _id: results._id }
-        ds.cache.setByKey('_id', results._id, cachedEntity)
+        // ds.cache.setByKey('_id', results._id, cachedEntity)
+        ds.cache.setByKey('_id', results._id, [cachedEntity])
         ds.cache.markDirty(results._id)
       }
       
@@ -326,23 +347,38 @@ function USER_DS (owner, env) {
       if (ds.cache) { 
         const cached = await ds.cache.query(query, options)
         if (cached !== null) {
-          // Cache hit - return cached results
-          // onsole.log('📦 Cache hit for query', { table: appTableName(OAC), query, len: cached?.length })
+          // Cache hit - already logged in appTableCache
           return cached
-        } else {
-          // onsole.log('📦 Cache miss for query', { table: appTableName(OAC), query } )
         }
       }
       
-      // Cache miss - hit DB
+      // Cache miss - check if we should expand the query for caching
+      // For patterned queries, fetch up to cacheCountMax so we cache a full result set
+      let dbOptions = options
+      let isExpanded = false
+      if (ds.cache) {
+        const expandInfo = ds.cache.shouldExpandForCache(
+          ds.cache._stripUnifiedDbFields(query), options
+        )
+        if (expandInfo.expand) {
+          dbOptions = expandInfo.expandedOptions
+          isExpanded = true
+        }
+      }
+
       ds.dbLastAccessed = new Date().getTime()
-      const results = await ds.db.query_async(query, options)
+      const results = await ds.db.query_async(query, isExpanded ? dbOptions : options)
       // onsole.log(' query result from userDs', { results, query, options })
       
-      // Store in cache
+      // Store in cache (expanded results if applicable)
       if (ds.cache && results) {
-        await ds.cache.setQuery(query, results, options)
+        await ds.cache.setQuery(query, results, isExpanded ? dbOptions : options)
         // onsole.log('📦 Cache set for query', {query, results } )
+      }
+      
+      // If we expanded the DB fetch, slice results back to what the caller requested
+      if (isExpanded && results) {
+        return filterRecords(results, {}, options)
       }
       
       return results
@@ -360,6 +396,8 @@ function USER_DS (owner, env) {
         const error = new Error('storageLimitExceeded')
         error.useage = userDs.getUseageWarning()
         throw error
+      } else if (JSON.stringify(updatesToEntity).length > MAX_RECORD_SIZE_BYTES) {
+        throw new Error('Record too large - maximum size is ' + (MAX_RECORD_SIZE_BYTES / (1024 * 1024)) + 'MB')
       } else if (options.replaceAllFields) {
         userDs.useage.dbWritesSinceLastCalc++
         if (options.old_entity) {
@@ -379,6 +417,7 @@ function USER_DS (owner, env) {
           // INVALIDATE CACHE
           // onsole.log('🔄 cache update - INVALIDATE CACHE', { entityId, appTableName: appTableName(OAC)  })
           if (ds.cache) {
+            console.log('C-M 📝📝📝📝📝 DB UPDATE (replace) - invalidating cache', { table: appTableName(OAC), id: entityId })
             ds.cache.markDirty(entityId)
           }
           
@@ -420,6 +459,7 @@ function USER_DS (owner, env) {
           
             // INVALIDATE CACHE
             if (ds.cache) {
+              console.log('C-M 📝📝📝📝📝 DB UPDATE (replace by query) - invalidating cache', { table: appTableName(OAC), id: entityId })
               ds.cache.markDirty(entityId)
             }
             
@@ -454,6 +494,8 @@ function USER_DS (owner, env) {
           
           // INVALIDATE CACHE
           if (ds.cache) {
+            const invalidateId = typeof idOrQuery === 'string' ? idOrQuery : idOrQuery._id
+            console.log('C-M 📝📝📝📝📝 DB UPDATE (multi) - invalidating cache', { table: appTableName(OAC), id: invalidateId || 'ALL' })
             if (typeof idOrQuery === 'string') {
               ds.cache.markDirty(idOrQuery)
             } else if (idOrQuery._id) {
@@ -481,8 +523,10 @@ function USER_DS (owner, env) {
         const error = new Error('storageLimitExceeded')
         error.useage = userDs.getUseageWarning()
         throw error
+      } else if (JSON.stringify(updatedEntity).length > MAX_RECORD_SIZE_BYTES) {
+        throw new Error('Record too large - maximum size is ' + (MAX_RECORD_SIZE_BYTES / (1024 * 1024)) + 'MB')
       }
-      
+
       userDs.useage.dbWritesSinceLastCalc++
       let num = await ds.db.replace_record_by_id_async(entityId, updatedEntity)
       if (typeof num !== 'number' && typeof num === 'object') {
@@ -495,6 +539,7 @@ function USER_DS (owner, env) {
       
       // INVALIDATE CACHE
       if (ds.cache) {
+        console.log('C-M 📝📝📝📝📝 DB REPLACE - invalidating cache', { table: appTableName(OAC), id: entityId })
         ds.cache.markDirty(entityId)
       }
       
@@ -543,13 +588,14 @@ function USER_DS (owner, env) {
       ds.dbLastAccessed = new Date().getTime()
       resetPersistenceTimer(userDs, (ds.dbChgCount > DB_CHANGE_COUNT_THRESHOLD ? ds : null))
       const ret = await ds.delete_records(idOrQuery, { multi: false })
-      // console.log('      🔑 usrDsMgr  delete_record ret', { ret })
+      // onsole.log('      🔑 usrDsMgr  delete_record ret', { ret })
       if (ret && ret.nRemoved === 0) {
         throw new Error('Record not found to delete')
       }
       
       // INVALIDATE CACHE
       if (ds.cache && idOrQuery._id) {
+        console.log('C-M 📝📝📝📝📝 DB DELETE (single) - invalidating cache', { table: appTableName(OAC), id: idOrQuery._id })
         ds.cache.markDirty(idOrQuery._id)
       }
       
@@ -568,9 +614,10 @@ function USER_DS (owner, env) {
       if (typeof idOrQuery === 'string') idOrQuery = { _id: idOrQuery }
       
       const result = await ds.db.delete_record_async(idOrQuery, { multi })
-      // console.log('      🔑 usrDsMgr  delete_records result', { result })
+      // onsole.log('      🔑 usrDsMgr  delete_records result', { result })
       // INVALIDATE CACHE
       if (ds.cache) {
+        console.log('C-M 📝📝📝📝📝 DB DELETE (multi) - invalidating cache', { table: appTableName(OAC), query: idOrQuery })
         ds.cache.markDirty()  // Invalidate all for deletes
       }
       
@@ -732,6 +779,7 @@ function USER_DS (owner, env) {
       }
   
       ds.sendAppFile = function (endpath, res, options) {
+        // onsole.log('sendAppFile', { endpath, options })
         const isSystemApp = config.isSystemApp(this.appName)
         const partialPath = isSystemApp ? ('freezrsystmapps/' + this.appName + '/' + endpath) : (userRootFolder + '/' + this.owner + '/apps/' + appName + '/' + endpath)
         // onsole.log('🔍 sendAppFile - ', { partialPath })        
@@ -739,6 +787,7 @@ function USER_DS (owner, env) {
         const trackLocalFileCopy = (size = 0) => {
           try {
             if (userDs.userCache) {
+              // onsole.log('🔍 trackLocalFileCopy - ', { partialPath })
               userDs.userCache.trackLocalFileCopy(ds.appName, partialPath, 'appFile', size)
             }
           } catch (e) { /* ignore tracking errors */ }
@@ -772,6 +821,7 @@ function USER_DS (owner, env) {
         const localpath = path.normalize(ROOT_DIR + partialPath)
         const localFileExists = fs.existsSync(localpath)
         const shouldRefetchFromRemote = localFileExists && isLocalCopyStale()
+        // onsole.log('🔍 shouldRefetchFromRemote - ', { localFileExists, shouldRefetchFromRemote })
 
         if (localFileExists && !shouldRefetchFromRemote) {
           // Cache the file content for text-based files
@@ -781,20 +831,22 @@ function USER_DS (owner, env) {
               // onsole.log('📦 Cache set for sendAppFile', endpath)
             }).catch(() => {}) // Ignore cache errors
           }
-          sendFile(res, localpath)
+          // onsole.log('🔍 sendFile(res, localpath) - ', { localpath, partialPath })
+          return sendFile(res, localpath)
         } else if ((this.fsParams.type === 'local' || isSystemApp) && !localFileExists) {
           // Local fs and file doesn't exist - 404
           console.warn('🔴 sendAppFile', ' - missing file in  local ' + localpath)
-          res.status(404).send('file not found!')
+          return res.status(404).send('file not found!')
         } else {
           // Either: file doesn't exist locally (fetch from remote)
           // Or: file exists but is stale (re-fetch from remote)
+          // onsole.log('🔍 shouldRefetchFromRemote - fetching from remote', { partialPath })
           try {
             ds.fs.getFileToSend(partialPath, null, function (err, streamOrFile) {
+              // onsole.log('🔍 ds.fs.getFileToSend - ', { partialPath, err, streamOrFile })
               if (err) {
-                console.warn('sendAppFile', 'err in sendAppfile for ', { partialPath, err })
-                res.status(404).send('file not found!')
-                res.end()
+                // console.warn('sendAppFile', 'err in sendAppfile for ', { partialPath, err })
+                return sendFailure(res, 'file not found!', 'sendAppFile', 404)                
               } else {
                 if (streamOrFile.pipe) { // it is a stream
                   streamOrFile.pipe(res)
@@ -818,6 +870,7 @@ function USER_DS (owner, env) {
                     }
                   })
                 } else { // it is a file
+                  // onsole.log('🔍 sendStream(res, streamOrFile) - ', { partialPath })
                   sendStream(res, streamOrFile)
                   localCheckExistsOrCreateUserFolderSync(partialPath, true)
                   fs.writeFile(localpath, streamOrFile, null, function (err, name) {
@@ -837,8 +890,7 @@ function USER_DS (owner, env) {
             })
           } catch (err) {
             console.warn('🔴 sendAppFile', 'general err in sendAppfile for ', { msg: err.message })
-            res.status(404).send('err getting file')
-            res.end()
+            return sendFailure(res, 'err getting file', 'sendAppFile', 404)
           }
         }
       }
@@ -900,8 +952,7 @@ function USER_DS (owner, env) {
           try {
             this.fs.getFileToSend(partialPath, null, function (err, streamOrFile) {
               if (err) {
-                res.status(404).send('file not found!')
-                res.end()
+                return sendFailure(res, 'file not found!', 'sendPublicAppFile', 404)
               } else {
                 if (streamOrFile.pipe) { // it is a stream
                   streamOrFile.pipe(res)
@@ -927,8 +978,7 @@ function USER_DS (owner, env) {
               }
             })
           } catch (e) {
-            res.status(404).send('error getting file 23!')
-            res.end()
+            return sendFailure(res, 'error getting file 23!', 'sendPublicAppFile', 404)
           }
         }
       }
@@ -978,6 +1028,7 @@ function USER_DS (owner, env) {
       // READ USER FILE - with cache
       ds.readUserFile = async function (endpath, options = {}) {
         // Check cache first
+        // onsole.log('readUserFile', { endpath, options })
         if (!options.nocache && ds.cache) {
           const cached = ds.cache.getUserFile(endpath)
           if (cached !== null) {
@@ -1040,7 +1091,7 @@ function USER_DS (owner, env) {
         options = options || {}
         const pathToRead = userRootFolder + '/' + this.owner + '/files/' + this.appName + (endpath ? ('/' + endpath) : '')
         
-        // console.log('readUserDir', { pathToRead })
+        // onsole.log('readUserDir', { pathToRead })
         try {
           const files = await ds.fs.readdir_async(pathToRead, options || null)
           return files || []
@@ -1149,7 +1200,12 @@ function USER_DS (owner, env) {
       }
   
       ds.sendUserFile = function (endpath, res, options) {
-        const partialPath = (userRootFolder + '/' + this.owner + '/files/' + this.appName + '/' + endpath)        
+        const partialPath = (userRootFolder + '/' + this.owner + '/files/' + this.appName + '/' + endpath)
+        // onsole.log('sendUserFile', { partialPath })
+
+        if (endpath.slice(-3) === '.js') res.setHeader('content-type', 'application/javascript')
+        if (endpath.slice(-4) === '.css') res.setHeader('content-type', 'text/css')
+
         // Helper to track local file copy (using userCache, not CacheManager directly)
         const trackLocalFileCopy = (size = 0) => {
           try {
@@ -1199,8 +1255,7 @@ function USER_DS (owner, env) {
             this.fs.getFileToSend(partialPath, null, function (err, streamOrFile) {
               if (err) {
                 console.warn('🔴 sendUserFile', 'err in sendUserFile for ', partialPath)
-                res.status(404).send('file not found!')
-                res.end()
+                return sendFailure(res, 'file not found!', 'sendUserFile', 404)
               } else if (streamOrFile.pipe) { // it is a stream
                 streamOrFile.pipe(res)
                 localCheckExistsOrCreateUserFolderSync(partialPath, true)
@@ -1225,12 +1280,10 @@ function USER_DS (owner, env) {
             })
           } catch (err) {
             console.warn('🔴 sendUserFile', 'err in sendUserFile 2 for ', partialPath)
-            res.status(404).send('file error')
-            res.end()
+            return sendFailure(res, 'file error', 'sendUserFile', 404)
           }
         } else {
-          res.status(404).send('file not found!')
-          res.end()
+          return sendFailure(res, 'file not found!', 'sendUserFile', 404)
         }
       }
   
@@ -1428,6 +1481,7 @@ function USER_DS (owner, env) {
     if (!this.useage || !this.useage.storageLimit) return { ok: true }
     if (this.useage.errorInCalculating) console.warn('🔴 ERRR this.useage.errorInCalculating', this.useage.errorInCalculating)
     const isNotOk = this.useage.errorInCalculating ||
+      // storageLimit is configured in MB (decimal), totalSize is in bytes.
       (this.useage.lastStorageCalcs?.totalSize !== null && this.useage.lastStorageCalcs?.totalSize !== undefined && (this.useage.storageLimit * 1000000 < this.useage.lastStorageCalcs?.totalSize))
     const w = {
       ok: !isNotOk,
@@ -1436,6 +1490,31 @@ function USER_DS (owner, env) {
     }
     if (!w.ok) console.warn('🔴 not okay this.useage.errorInCalculating ', this.useage.errorInCalculating, 'this.useage.storageLimit ', this.useage.storageLimit, 'this.useage.lastStorageCalcs?.totalSize ', this.useage.lastStorageCalcs?.totalSize, { isNotOk })
     return w
+  }
+  // Aggregates user-facing notifications surfaced to the freezr menu/logo badge
+  // and the account home banner. Add new sources here (e.g. unread messages,
+  // failed cron jobs) by pushing more entries onto `notifications`.
+  USER_DS.prototype.getNotifications = function () {
+    const notifications = []
+
+    const useage = this.getUseageWarning()
+    if (useage && useage.ok === false) {
+      const limitMb = useage.storageLimit
+      const usedMb = useage.storageUse ? Math.round((useage.storageUse / 1000000) * 10) / 10 : null
+      const message = (usedMb !== null && limitMb)
+        ? `You are using ${usedMb} MB of your ${limitMb} MB allowance. Free up space or contact your administrator.`
+        : 'Your storage is over its allowance. Free up space or contact your administrator.'
+      notifications.push({
+        id: 'storageLimitExceeded',
+        severity: 'error',
+        title: 'Storage limit exceeded',
+        message,
+        detail: { storageLimit: limitMb, storageUse: useage.storageUse },
+        action: { url: '/account/resourceusage', label: 'View usage' }
+      })
+    }
+
+    return notifications
   }
   USER_DS.prototype.setTimerToRecalcStorage = function (force) {
     const self = this
@@ -1512,6 +1591,7 @@ function USER_DS (owner, env) {
           let allTableNamesForApp = []
           const tableSizes = {}
           let appFS
+          // All storage values tracked below are in bytes.
           const folderSizes = { apps: 0, files: 0 }
   
           try {
@@ -1559,6 +1639,7 @@ function USER_DS (owner, env) {
         }
   
         // Calculate totals
+        // totalSize is the cumulative number of bytes across app/files folders and db tables.
         let totalSize = 0
         const allTableSizes = {}
         resources.forEach(resource => {

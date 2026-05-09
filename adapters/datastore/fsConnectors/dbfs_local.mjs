@@ -34,7 +34,6 @@
 
 import fs from 'fs'
 import async from 'async'
-import mkdirp from 'mkdirp'
 import path from 'path'
 
 const localFS = {}
@@ -116,7 +115,7 @@ localFS.writeFile = function (path, contents, options, callback) {
     let dirs = path.split('/')
     dirs.pop()
     dirs = dirs.join('/')
-    mkdirp.sync(dirs)
+    fs.mkdirSync(dirs, { recursive: true })
     fs.writeFile(path, contents, options, callback)
   }
 }
@@ -155,7 +154,13 @@ localFS.readdir = function (path, options, callback) {
   })
 }
 
-localFS.mkdirp = mkdirp // to review if this is needed. (added not teste dby cursor 2025-10)
+localFS.mkdirp = function (dirs, callback) {
+  // Matches the legacy mkdirp 0.5 callback signature: mkdirp(path, cb).
+  // Uses Node's built-in recursive mkdir (available since Node 10.12).
+  fs.mkdir(dirs, { recursive: true }, function (err) {
+    if (callback) callback(err)
+  })
+}
 
 localFS.initFS = function(callback) { callback(null) }
 

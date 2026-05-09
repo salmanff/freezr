@@ -1,4 +1,4 @@
-<!-- account_settings.html
+<!-- account_settings.html account/settings
 options:
 settings: {
   page_title: 'Account Settings (freezr)',
@@ -20,7 +20,7 @@ settings: {
     <div class="freezr-card" id="account_params">
       <h3>System Configuration</h3>
       <p><b>File System:</b> <span id="fsParamsType" data-system-fs="{{systemFs}}">{{fsParamsType}}</span></p>
-      <p><b>Intelligence (LLMs):</b> <span id="lmParamsType">[Coming Soon]</span></p>
+      <p><b>Intelligence (LLMs):</b> <span id="lmParamsType"><a href="/account/resources">Manage LLM Keys</a></span></p>
       <p><b>Database:</b> <span id="dbParamsType" data-system-db="{{systemDb}}">{{dbParamsType}}</span></p>
       <p><b>Serverless (Compute):</b> <span id="slParamsType">{{#slParamsType}}{{slParamsType}}{{/slParamsType}}{{^slParamsType}}None{{/slParamsType}}</span>
         <a href="/account/serverless">{{#slParamsType}}Edit parameters{{/slParamsType}}{{^slParamsType}}Create Parameters{{/slParamsType}}</a>

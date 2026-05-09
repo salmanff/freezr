@@ -5,16 +5,38 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import Mustache from '../../../common/misc/mustache.mjs'
-import { loadPageHtml } from '../../../adapters/rendering/pageLoader.mjs'
+import { loadPageHtml, loadDataHtmlAndPage, fileExt } from '../../../adapters/rendering/pageLoader.mjs'
 import { sendFailure, sendAuthFailure, sendContent } from '../../../adapters/http/responses.mjs'
-import { endsWith } from '../../../common/helpers/utils.mjs' 
+import { endsWith, escapeRegex } from '../../../common/helpers/utils.mjs'
 import { isSystemApp } from '../../../common/helpers/config.mjs'
+import { getOrigIdWithOatRemoved, stripUnifiedPrefixFromPublicid } from '../../../adapters/datastore/dbConnectors/mongo_utils.mjs'
 
 // Get __dirname equivalent for ES modules
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const SYSTEM_APPS_PATH = path.resolve(__dirname, '../../../freezrsystmapps')
- 
+
+let _appCardTemplateCache = null
+const getAppCardTemplate = async () => {
+  if (_appCardTemplateCache) return _appCardTemplateCache
+  try {
+    _appCardTemplateCache = await fs.promises.readFile(
+      path.join(SYSTEM_APPS_PATH, 'info.freezr.public/public/appcard.html'), 'utf8'
+    )
+  } catch (e) {
+    _appCardTemplateCache = '<div>{{display_name}} by @{{_data_owner}}</div>'
+  }
+  return _appCardTemplateCache
+}
+
+const renderPublishedAppCard = (flattenedRecord, publicRecord) => {
+  const appName = publicRecord.original_record?.publishedAppName || ''
+  const logoPublicId = '@' + publicRecord.data_owner + '/app/' + appName + '/logo'
+  flattenedRecord._hasLogo = true
+  flattenedRecord._logoUrl = logoPublicId
+  flattenedRecord._logoLetter = (flattenedRecord.display_name || appName || '?').charAt(0).toUpperCase()
+  return flattenedRecord
+}
 
 /**
  * Maps a public record to a formatted record with metadata fields
@@ -59,7 +81,8 @@ const flattenPublicRecord = (publicRecord) => {
     }
   })
 
-  delete record._accessible
+  delete record._accessible // old format
+  delete record._accessibles
   
   return record
 }
@@ -122,24 +145,37 @@ const getFlattenedRecordAndCardHtml = (manifestData, publicRecord) => {
   let cardHtml = null
   const flattenedRecord = flattenPublicRecord(publicRecord)
 
-  if (!manifestData || !manifestData.manifest || !manifestData.cards) {
+  if (!manifestData || !manifestData.manifest) {
     return { cardHtml: null, flattenedRecord: null }
   }
 
   const permissionName = publicRecord.permission_name
+  const appName = publicRecord.requestor_app
   const { manifest, cards } = manifestData
 
-  // Find the permission and get the pcard
-  if (manifest.permissions) {
+  let pcardTemplate = null
+
+  // 1. Check permission-level pcard override
+  if (manifest.permissions && cards) {
     const permission = manifest.permissions.find(p => p.name === permissionName)
     if (permission?.pcard && cards[permission.name]) {
-      const pcardTemplate = cards[permission.name]
-      // Render pcard template with Mustache
-      try {
-        cardHtml = Mustache.render(pcardTemplate, flattenedRecord)
-      } catch (e) {
-        console.warn('Error rendering pcard template', { error: e.message, permissionName })
-      }
+      pcardTemplate = cards[permission.name]
+    }
+  }
+
+  // 2. Fall back to app_table-level pcard
+  if (!pcardTemplate && cards) {
+    const tableKey = publicRecord.original_app_table?.substring(appName.length + 1)
+    if (tableKey && manifest.app_tables?.[tableKey]?.pcard && cards['_table:' + tableKey]) {
+      pcardTemplate = cards['_table:' + tableKey]
+    }
+  }
+
+  if (pcardTemplate) {
+    try {
+      cardHtml = Mustache.render(pcardTemplate, flattenedRecord)
+    } catch (e) {
+      console.warn('Error rendering pcard template', { error: e.message, permissionName })
     }
   }
 
@@ -187,8 +223,8 @@ const renderPublicObjectPage = async (req, res, publicId, options = {}) => {
   const publicRecordsDb = res.locals.freezr?.publicRecordsDb
   const publicManifestsDb = res.locals.freezr?.publicManifestsDb
 
-  // 1. Look up the object in publicRecordsDb (catchAllPublicId has already looked it up and passes publicRecord as an option)
-  const publicRecord = options.publicRecord || await publicRecordsDb.read_by_id(publicId)
+  // 1. Look up the object in publicRecordsDb (middleware or catchAllPublicId may have already looked it up)
+  const publicRecord = options.publicRecord || res.locals.freezr?.publicRecord || await publicRecordsDb.read_by_id(publicId)
 
   // 2. Check if the record isPublic or is accessible via a code (if shared via private link) 
   if (!publicRecord) {
@@ -221,7 +257,10 @@ const renderPublicObjectPage = async (req, res, publicId, options = {}) => {
     const cssFiles = [] 
     if (Array.isArray(fileStructure.css)) {
       fileStructure.css.forEach(cssObject => {
-        const cssPath = cssObject.publicid
+        // Defensive: legacy fileStructure entries from records published before the
+        // shareRecords prefix-stripping fix carry `<owner>__<appTable>__` inside the
+        // publicid. Strip it so the rendered <link href> resolves. No-op on clean ids.
+        const cssPath = stripUnifiedPrefixFromPublicid(cssObject.publicid)
         // adding '/' as hack so absolute path is used on pageLoad rather than adding userId and appName
         cssFiles.push('/' + cssPath)
       })
@@ -229,14 +268,25 @@ const renderPublicObjectPage = async (req, res, publicId, options = {}) => {
     const jsFiles = [] 
     if (Array.isArray(fileStructure.js)) {
       fileStructure.js.forEach(jsObject => {
-        const jsPath = jsObject.publicid
+        const jsPath = stripUnifiedPrefixFromPublicid(jsObject.publicid)
         // adding '/' as hack so absolute path is used on pageLoad rather than adding userId and appName
         jsFiles.push('/' + jsPath)
       })
     }
 
+    let metaTags = ''
+    const meta = publicRecord.meta
+    if (meta && typeof meta === 'object') {
+      if (meta.title) metaTags += `<meta property="og:title" content="${escapeHtml(meta.title)}">`
+      if (meta.description) {
+        metaTags += `<meta name="description" content="${escapeHtml(meta.description)}">`
+        metaTags += `<meta property="og:description" content="${escapeHtml(meta.description)}">`
+      }
+      if (meta.image) metaTags += `<meta property="og:image" content="${escapeHtml(meta.image)}">`
+    }
+
     const pageOptions = {
-      page_title: fileStructure.name || publicId,
+      page_title: (meta?.title) || fileStructure.name || publicId,
       page_html: publicRecord.html_page || '',
       page_url: publicId,
       app_name: appName,
@@ -244,6 +294,7 @@ const renderPublicObjectPage = async (req, res, publicId, options = {}) => {
       app_version: 'N/A',
       css_files: cssFiles,
       script_files: jsFiles,
+      meta_tags: metaTags,
       freezr_server_version: res.locals.freezr?.freezrVersion,
       server_name: res.locals.freezr?.serverName,
       user_queried: dataOwner,
@@ -255,37 +306,132 @@ const renderPublicObjectPage = async (req, res, publicId, options = {}) => {
     return loadPageHtml(res, pageOptions)
   }
   // 3b Check if it is a file
-  // onsole.log('Public file check', { publicRecord, publicId, apptable: publicRecord.original_app_table, hadOptions: options.publicRecord ? 'yes' : 'no' , cardOnly })
   if (publicRecord && endsWith(publicRecord.original_app_table, '.files') && !cardOnly) {
-    // onsole.log('Public file check - sending file')
-    const filePath = publicRecord.original_record_id
+    // Defensive: legacy public records created on unified-DB Mongo may have stored
+    // `original_record_id` as `<owner>__<appTable>__<originalPath>`. Strip the prefix
+    // so we resolve the actual blob/file path. New records (post-fix in cepsfepsApiController)
+    // already store the unprefixed value, in which case this is a no-op.
+    const filePath = getOrigIdWithOatRemoved(
+      publicRecord.original_record_id,
+      { owner: publicRecord.data_owner, app_table: publicRecord.original_app_table }
+    )
     if (!filePath || !res.locals.freezr.appFS) {
       console.warn('File or appfs not found', { filePath, appFS: res.locals.freezr.appFS })
       return sendFailure(res, 'File or appfs not found', 'public.objectPage', 404 )
+    }
+    // If we do not set the 'Content-Disposition' header, the browser may try to display the zip file contents
+    // in the browser window, or handle it using its default behavior for unknown types,
+    // rather than prompting the user to download the file as an attachment with a specific filename.
+    // Setting these headers ensures the user is prompted to download the file with the correct type and name.
+    // Not setting the 'Content-Type' header to 'application/zip' might result in the browser not recognizing
+    // the file as a zip archive, potentially leading to incorrect handling (e.g., treating as plain text).
+    if (filePath.endsWith('.zip')) {
+      const downloadName = publicRecord.original_record?.fileName || path.basename(filePath)
+      res.setHeader('Content-Disposition', 'attachment; filename="' + downloadName + '"')
+      res.setHeader('Content-Type', 'application/zip')
     }
     res.locals.freezr.permGiven = true
     return res.locals.freezr.appFS.sendUserFile(filePath, res)
   } else {
     // onsole.log('Public file check - not sending file', { publicRecord, publicId, apptable: publicRecord.original_app_table, hadOptions: options.publicRecord ? 'yes' : 'no' , cardOnly, endswithfiles: endsWith(publicRecord.original_app_table, '.files') })
   }
-  // ========================== 4 - 9  Regular Object Page or Card (4-6) rendering ==========================
+  // ========================== 4 - 10  Regular Object Page or Card rendering ==========================
   // 4. Get manifest and card HTML
   const { manifest, cardHtml, flattenedRecord } = await getManifestAndCardHtml(publicManifestsDb, publicRecord)
-
-  // 5. Render the inner content (use cardHtml if available, otherwise generate generic)
-  const manifestMissing = !manifest
-  const innerHtml = cardHtml || generateGenericCardHtml(flattenedRecord, manifestMissing)
   res.locals.freezr.permGiven = true
 
-  // 6.If cardOnly, just return the card HTML without any wrapper
+  // 5. Resolve ppage (full page template) — check permission override first, then app_table
+  const tableKey = publicRecord.original_app_table?.substring(appName.length + 1)
+  let ppageConfig = null
+  if (manifest) {
+    const permissionName = publicRecord.permission_name
+    if (manifest.permissions) {
+      const permission = manifest.permissions.find(p => p.name === permissionName)
+      if (permission?.ppage && typeof permission.ppage === 'object') {
+        ppageConfig = permission.ppage
+      }
+    }
+    if (!ppageConfig && tableKey && manifest.app_tables?.[tableKey]?.ppage) {
+      ppageConfig = manifest.app_tables[tableKey].ppage
+    }
+  }
+
+  // 6. If ppage exists and not cardOnly, render full page from app's public/ directory
+  //    appFS is set up by middleware (prepAppFSForPublicRecord or prepUserDSsForPublicFiles)
+  const appFS = res.locals.freezr?.appFS
+  if (ppageConfig && !cardOnly && appFS) {
+    try {
+      const metaTags = ppageConfig.header_map
+        ? createHeaderTags(ppageConfig.header_map, [flattenedRecord])
+        : ''
+
+      const htmlFile = ppageConfig.html_file?.startsWith('public/')
+        ? ppageConfig.html_file
+        : 'public/' + ppageConfig.html_file
+
+      const cssFiles = []
+      if (ppageConfig.css_files) {
+        const cssArray = Array.isArray(ppageConfig.css_files) ? ppageConfig.css_files : [ppageConfig.css_files]
+        cssArray.forEach(cssFile => {
+          if (fileExt(cssFile) === 'css') {
+            const publicPath = cssFile.startsWith('public/') ? cssFile : 'public/' + cssFile
+            cssFiles.push(`/public/app/@${dataOwner}/${appName}/${publicPath}`)
+          }
+        })
+      }
+
+      const scriptFiles = []
+      if (ppageConfig.script_files) {
+        const scriptArray = Array.isArray(ppageConfig.script_files) ? ppageConfig.script_files : [ppageConfig.script_files]
+        scriptArray.forEach(jsFile => {
+          if (fileExt(jsFile) === 'js') {
+            const publicPath = jsFile.startsWith('public/') ? jsFile : 'public/' + jsFile
+            scriptFiles.push(`/public/app/@${dataOwner}/${appName}/${publicPath}`)
+          }
+        })
+      }
+
+      const recordTitle = flattenedRecord[ppageConfig.header_map?.title?.field_name] || ''
+      const pageTitle = (recordTitle || ppageConfig.page_title || 'Public Record') +
+        ' - ' + (manifest?.display_name || appName)
+
+      const pageOptions = {
+        page_title: pageTitle,
+        page_url: htmlFile,
+        css_files: cssFiles,
+        script_files: scriptFiles,
+        meta_tags: metaTags,
+        queryresults: flattenedRecord,
+        app_name: appName,
+        app_display_name: manifest?.display_name || appName,
+        app_version: manifest?.version || 'N/A',
+        faviconUrl: `/public/app/@${dataOwner}/${appName}/logo`,
+        freezr_server_version: res.locals.freezr?.freezrVersion,
+        server_name: res.locals.freezr?.serverName,
+        user_queried: dataOwner,
+        owner_id: dataOwner,
+        isPublic: true
+      }
+
+      return loadDataHtmlAndPage(appFS, res, pageOptions)
+    } catch (err) {
+      console.warn('Error rendering ppage, falling back to card layout', { error: err.message, appName, tableKey })
+    }
+  }
+
+  // 7. Render the inner content (use cardHtml if available, otherwise generate generic)
+  const manifestMissing = !manifest
+  const innerHtml = cardHtml || generateGenericCardHtml(flattenedRecord, manifestMissing)
+
+  // 8. If cardOnly, just return the card HTML without any wrapper
   if (cardOnly) {
     return sendContent(res, innerHtml)
   }
 
-  // 7. Wrap in freezr texture layout
+  // 9. Wrap in freezr texture layout
   const pageHtml = await tranformToCardLayout(innerHtml, flattenedRecord)
 
-  // 8. Build page options
+  // 10. Build page options and serve with html_skeleton_public.html wrapper
   const pageOptions = {
     page_title: 'Public Record - freezr.info from ' + dataOwner + ' using ' + (manifest?.display_name || appName),
     page_html: pageHtml,
@@ -295,6 +441,7 @@ const renderPublicObjectPage = async (req, res, publicId, options = {}) => {
     app_version: manifest?.version || 'N/A',
     css_files: ['/app/info.freezr.public/public/objectPage.css'],
     script_files: ['/app/info.freezr.public/public/objectPage.js'],
+    faviconUrl: `/public/app/@${dataOwner}/${appName}/logo`,
     freezr_server_version: res.locals.freezr?.freezrVersion,
     server_name: res.locals.freezr?.serverName,
     user_queried: dataOwner,
@@ -302,12 +449,11 @@ const renderPublicObjectPage = async (req, res, publicId, options = {}) => {
     isPublic: true
   }
 
-  // 9. Serve with html_skeleton_public.html wrapper
   return loadPageHtml(res, pageOptions)
 }
 
 /**
- * Creates public page controller with dependency injection
+ * Creates public page controller with dependency injection 
  * 
  * @param {Object} dsManager - Data store manager
  * @param {Object} freezrPrefs - Freezr preferences
@@ -315,43 +461,6 @@ const renderPublicObjectPage = async (req, res, publicId, options = {}) => {
  */
 export const createPublicPageController = () => {
   return {
-    /**
-     * GET /public/objectpage/:publicid
-     * GET /public/objectpage/@:user_id/:app_table/:data_object_id
-     * 
-     * Renders a public object page using the pcard template from manifest
-     */
-    objectPage: async (req, res) => {
-      const publicRecordsDb = res.locals.freezr?.publicRecordsDb
-      if (!publicRecordsDb) {
-        return sendFailure(res, 'missingSystemDb', { function: 'public.objectPage', redirectUrl: publicOrLoggedInHomePage(req) + '?error=Database is Unavailable' }, 500 )
-      }
-
-      try {
-        // Publicid or build it from params
-        let publicId
-        if (req.params.publicid) {
-          publicId = req.params.publicid
-        } else {
-          const userId = req.params.user_id?.toLowerCase()
-          const appTable = req.params.app_table?.toLowerCase()
-          const dataObjectId = req.params.data_object_id
-          
-          if (!userId || !appTable || !dataObjectId) {
-            return res.redirect(publicOrLoggedInHomePage(req) + '?error=missing_params')
-          }
-          
-          publicId = `@${userId}/${appTable}/${dataObjectId}`
-        }
-
-        // Render using shared helper
-        return renderPublicObjectPage(req, res, publicId)
-
-      } catch (error) {
-        return sendFailure(res, error, { function: 'public.objectPage', redirectUrl: publicOrLoggedInHomePage(req) + '?error=Server Error fetching page ' + req.path }, 500 )
-      }
-    },
-
     /**
      * GET /public/objectcard/:publicid
      * GET /public/objectcard/@:user_id/:app_table/:data_object_id
@@ -384,6 +493,7 @@ export const createPublicPageController = () => {
           
           publicId = `@${userId}/${appTable}/${dataObjectId}`
         }
+        res.locals.freezr.permGiven = true
 
         // Render using shared helper with cardOnly option
         return renderPublicObjectPage(req, res, publicId, { cardOnly: true })
@@ -402,8 +512,8 @@ export const createPublicPageController = () => {
       const manifests = {
         oauth_start_oauth: {
           page_title: 'freezr.info - o-auth - starting process',
-          css_files: ['/@public/info.freezr.public/public/freezr_style.css'],
-          page_url: 'public/oauth_start_oauth.html',
+          css_files: ['/app/info.freezr.public/public/freezr_style.css'],
+          page_url: 'oauth_start_oauth.html',
           app_name: 'info.freezr.public',
           script_files: ['public/oauth_start_oauth.js'],
           modules: []
@@ -411,10 +521,10 @@ export const createPublicPageController = () => {
 
         oauth_validate_page: {
           page_title: 'freezr.info - o-auth validating page',
-          css_files: ['/@public/info.freezr.public/public/freezr_style.css'],
-          page_url: 'public/oauth_validate_page.html',
+          css_files: ['/app/info.freezr.public/public/freezr_style.css'],
+          page_url: 'oauth_validate_page.html',
           app_name: 'info.freezr.public',
-          script_files: ['public/oauth_validate_page.js'],
+          script_files: ['/app/info.freezr.public/public/oauth_validate_page.js'],
           modules: []
         }
       }
@@ -424,6 +534,13 @@ export const createPublicPageController = () => {
       }
       if (!res.locals.freezr) res.locals.freezr = {}
       res.locals.freezr.permGiven = true
+
+      try {
+        manifest.page_html = await fs.promises.readFile(path.join(__dirname, '../../../freezrsystmapps/info.freezr.public/public/' + manifest.page_url), 'utf8')
+      } catch (err) {
+        console.error('err reading oauth page file', manifest.page_url, err)
+        return sendFailure(res, 'err reading oauth page file', { function: 'public.oauthActions' }, 500 )
+      }
       return loadPageHtml(res, manifest)
     },
 
@@ -453,7 +570,11 @@ export const createPublicPageController = () => {
         const message = req.query.message
 
         // Build query
-        const queryParams = { isPublic: true }
+        // doNotList should be false, null, or not exist (anything but true)
+        const queryParams = { 
+          isPublic: true, 
+          doNotList: { $ne: true } 
+        }
         
         if (owner) {
           queryParams.data_owner = owner.toLowerCase()
@@ -467,12 +588,12 @@ export const createPublicPageController = () => {
         if (search) {
           const searchTerm = decodeURIComponent(search).trim().toLowerCase()
           if (searchTerm.indexOf(' ') < 0) {
-            queryParams.search_words = new RegExp(searchTerm)
+            queryParams.search_words = new RegExp(escapeRegex(searchTerm))
           } else {
             const theAnds = [{ ...queryParams }]
             const searchTerms = searchTerm.split(' ').filter(term => term.length > 0)
             searchTerms.forEach(term => {
-              theAnds.push({ search_words: new RegExp(term) })
+              theAnds.push({ search_words: new RegExp(escapeRegex(term)) })
             })
             searchConditions = { $and: theAnds }
           }
@@ -493,14 +614,27 @@ export const createPublicPageController = () => {
         const manifestCache = {}
 
         for (const publicRecord of displayResults) {
-          // Use getManifestAndCardHtml with cache to avoid repeated DB queries
-          const { cardHtml, flattenedRecord } = await getManifestAndCardHtml(publicManifestsDb, publicRecord, manifestCache)
-          
+          let cardHtml, flattenedRecord
+
+          if (publicRecord.requestor_app === 'info.freezr.creator' && publicRecord.permission_name === 'publish_app' && !publicRecord.original_record?.isLogo) {
+            flattenedRecord = flattenPublicRecord(publicRecord)
+            renderPublishedAppCard(flattenedRecord, publicRecord)
+            const appCardTpl = await getAppCardTemplate()
+            try {
+              cardHtml = Mustache.render(appCardTpl, flattenedRecord)
+            } catch (e) {
+              cardHtml = null
+            }
+          } else {
+            const result = await getManifestAndCardHtml(publicManifestsDb, publicRecord, manifestCache)
+            cardHtml = result.cardHtml
+            flattenedRecord = result.flattenedRecord
+          }
+
           if (cardHtml) {
             flattenedRecord._card = cardHtml
           }
 
-          // If no card and no common displayable fields, add JSON preview
           if (!flattenedRecord._card) {
             const hasDisplayableContent = flattenedRecord.title || flattenedRecord.description || 
               flattenedRecord.text || flattenedRecord.content || flattenedRecord.body || flattenedRecord.message
@@ -591,8 +725,7 @@ export const createPublicPageController = () => {
         return loadPageHtml(res, options)
 
       } catch (error) {
-        flogger?.error('systemError', { function: 'public.feedPage' })
-        return res.status(500).send('<div class="freezr_public_error">System Error - sorry !</div>')        
+        return sendFailure(res, error, { function: 'public.feedPage', redirectUrl: '/public/notfound?error=couldNotGetPublicPage ', path: '/public' }, 500 )
       }
     },
 
@@ -634,12 +767,12 @@ export const createPublicPageController = () => {
         if (search) {
           const searchTerm = decodeURIComponent(search).trim().toLowerCase()
           if (searchTerm.indexOf(' ') < 0) {
-            queryParams.search_words = new RegExp(searchTerm)
+            queryParams.search_words = new RegExp(escapeRegex(searchTerm))
           } else {
             const theAnds = [{ ...queryParams }]
             const searchTerms = searchTerm.split(' ').filter(term => term.length > 0)
             searchTerms.forEach(term => {
-              theAnds.push({ search_words: new RegExp(term) })
+              theAnds.push({ search_words: new RegExp(escapeRegex(term)) })
             })
             searchConditions = { $and: theAnds }
           }
@@ -786,13 +919,104 @@ export const createPublicPageController = () => {
      * Handles routes like /@user/app.table/objectId
      * Checks if the path exists as a public ID and renders the object page
      */
+    publicAppsPage: async (req, res) => {
+      try {
+        let htmlContent
+        try {
+          const templatePath = path.join(SYSTEM_APPS_PATH, 'info.freezr.public/public/publicApps.html')
+          htmlContent = await fs.promises.readFile(templatePath, 'utf8')
+        } catch (err) {
+          return sendFailure(res, err, { function: 'public.publicAppsPage.template' }, 500)
+        }
+
+        const options = {
+          page_title: 'Published Apps - freezr',
+          page_html: htmlContent,
+          page_url: '/publicapps',
+          app_name: 'info.freezr.public',
+          app_display_name: 'freezr Published Apps',
+          app_version: 'N/A',
+          css_files: [
+            '/app/info.freezr.public/public/publicFeed.css',
+            '/app/info.freezr.public/public/publicApps.css'
+          ],
+          script_files: [
+            '/app/info.freezr.public/public/publicApps.js'
+          ],
+          freezr_server_version: res.locals.freezr?.freezrVersion,
+          server_name: res.locals.freezr?.serverName,
+          isPublic: true
+        }
+
+        res.locals.freezr.permGiven = true
+        return loadPageHtml(res, options)
+      } catch (error) {
+        console.error('Error in publicAppsPage:', error)
+        return sendFailure(res, error, { function: 'public.publicAppsPage' }, 500)
+      }
+    },
+
+    publicAppCard: async (req, res) => {
+      try {
+        const publicRecordsDb = res.locals.freezr?.publicRecordsDb
+        if (!publicRecordsDb) return sendFailure(res, 'No public records DB', { function: 'public.publicAppCard' }, 500)
+
+        const userId = req.params?.user_id
+        const appName = req.params?.app_name
+        if (!userId || !appName) return sendFailure(res, 'user_id and app_name required', { function: 'public.publicAppCard' }, 400)
+
+        const publicId = '@' + userId + '/app/' + appName
+        const record = await publicRecordsDb.read_by_id(publicId)
+        if (!record) return sendFailure(res, 'App not found or not public', { function: 'public.publicAppCard' }, 404)
+
+        const flat = flattenPublicRecord(record)
+        flat._hasLogo = true
+        flat._logoUrl = publicId + '/logo'
+        flat._logoLetter = (flat.display_name || flat.publishedAppName || '?').charAt(0).toUpperCase()
+
+        let appCardTemplate
+        try {
+          const templatePath = path.join(SYSTEM_APPS_PATH, 'info.freezr.public/public/appcard.html')
+          appCardTemplate = await fs.promises.readFile(templatePath, 'utf8')
+        } catch (e) {
+          appCardTemplate = '<div>{{display_name}} by @{{_data_owner}}</div>'
+        }
+
+        const cardHtml = Mustache.render(appCardTemplate, flat)
+        return sendContent(res, cardHtml)
+      } catch (error) {
+        console.error('Error in publicAppCard:', error)
+        return sendFailure(res, error, { function: 'public.publicAppCard' }, 500)
+      }
+    },
+
+    publicAppDownload: async (req, res) => {
+      try {
+        const publicRecordsDb = res.locals.freezr?.publicRecordsDb
+        if (!publicRecordsDb) return sendFailure(res, 'No public records DB', { function: 'public.publicAppDownload' }, 500)
+
+        const userId = req.params?.user_id
+        const appName = req.params?.app_name
+        if (!userId || !appName) return sendFailure(res, 'user_id and app_name required', { function: 'public.publicAppDownload' }, 400)
+
+        const publicId = '@' + userId + '/app/' + appName
+        const record = await publicRecordsDb.read_by_id(publicId)
+        if (!record) return sendFailure(res, 'App not found or not public', { function: 'public.publicAppDownload' }, 404)
+
+        return res.redirect('/' + publicId)
+      } catch (error) {
+        console.error('Error in publicAppDownload:', error)
+        return sendFailure(res, error, { function: 'public.publicAppDownload' }, 500)
+      }
+    },
+
     catchAllPublicId: async (req, res) => {
       const flogger = res.locals.flogger
       const publicRecordsDb = res.locals.freezr?.publicRecordsDb
 
       if (req.params.app_name && isSystemApp(req.params.app_name)) {
-        // onsole.log('System app ', { app_name: req.params.app_name, url: req.originalUrl })
-        return 
+        // return res.status(404).end()
+        return sendFailure(res, 'missingSystemDb', { function: 'public.catchAllPublicId', redirectUrl: '/public?error=no cpulc id in system aps' }, 404 )
       }
 
       if (res.locals.freezr.appFS && res.locals.freezr.publicRecord) {
@@ -814,7 +1038,7 @@ export const createPublicPageController = () => {
       } catch (error) {
         flogger?.error('Error in catch-all public ID handler', { error, path: req.path })
         console.error('❌ Error in catchAllPublicId:', error)
-        return res.redirect(publicOrLoggedInHomePage(req) + '?error=server_error')
+        return res.redirect(publicOrLoggedInHomePath(req) + '?error=server_error')
       }
     }
   }
@@ -898,17 +1122,22 @@ const escapeHtml = (str) => {
  */
 const createHeaderTags = (headerMap, results) => {
   let headerText = results?.[0]?._app_name 
-    ? `<meta name="application-name" content="${results[0]._app_name} - a freezr app" >` 
+    ? `<meta name="application-name" content="${escapeHtml(results[0]._app_name)} - a freezr app">` 
     : ''
   
   if (headerMap) {
     Object.keys(headerMap).forEach(header => {
       const keyObj = headerMap[header]
+      let content = null
       if (keyObj.field_name && results?.[0]?.[keyObj.field_name]) {
-        const content = (keyObj.text ? (keyObj.text + ' ') : '') + results[0][keyObj.field_name]
-        headerText += `<meta name="${header}" content="${content}" >`
+        content = (keyObj.text ? (keyObj.text + ' ') : '') + results[0][keyObj.field_name]
       } else if (keyObj.text) {
-        headerText += `<meta name="${header}" content="${keyObj.text} - a freezr app" >`
+        content = keyObj.text
+      }
+      if (content) {
+        // Use 'property' for Open Graph tags, 'name' for everything else
+        const attr = header.startsWith('og:') ? 'property' : 'name'
+        headerText += `<meta ${attr}="${header}" content="${escapeHtml(content)}">`
       }
     })
   }

@@ -27,6 +27,12 @@ class FreezrSessionStore extends Store {
     // In-memory cache (Map maintains insertion order)
     this.cache = new Map()
     this.dirty = new Set() // Track which sessions need to be written
+
+    // Lazy filename index: random-part-of-sid -> 'session_YYYYMMDD_<random>.json'
+    // Lets us find a session's current filename on disk after it has been
+    // renamed due to a rolling-expiry extension. Built lazily on first miss.
+    this.randomToFilename = new Map()
+    this.randomToFilenameBuilt = false
     
     // Initialize
     this._startSyncTimer()
@@ -60,13 +66,40 @@ class FreezrSessionStore extends Store {
         return callback(null, null)
       }
       
-      // Load from fradminAdminFs in sessions subdirectory
-      const filename = `sessions/${this._generateFilenameFromSessionId(sid)}`
-      
+      // Resolve the current filename for this sid (may have been renamed
+      // when the session was extended). Falls back to canonical session_<sid>.json.
+      const filename = `sessions/${await this._findFilenameForSid(sid)}`
+
       try {
-        const data = await this.fradminAdminFs.readUserFile(filename, {})
-        const session = JSON.parse(data.toString())
-        
+        // nocache: true so a corrupt entry in the in-memory or local-disk cache
+        // doesn't keep poisoning every request. We re-cache below on success.
+        const data = await this.fradminAdminFs.readUserFile(filename, { nocache: true })
+        const dataStr = data == null ? '' : (typeof data === 'string' ? data : data.toString())
+
+        // Empty / whitespace / "null" cache values are treated as a missing
+        // session. We deliberately keep the (possibly empty) value cached so
+        // we don't hammer storage on every request - express-session will just
+        // generate a fresh session for this request.
+        if (!dataStr || !dataStr.trim() || dataStr.trim() === 'null') {
+          return callback(null, null)
+        }
+
+        let session
+        try {
+          session = JSON.parse(dataStr)
+        } catch (parseErr) {
+          // Corrupt JSON: log once at warn level, treat as missing session.
+          // Express-session will generate a new session. The bad file will be
+          // reaped by the date-based cleanup once its filename date passes.
+          console.warn('⚠️ sessionStore.get: corrupt session JSON, treating as missing', {
+            filename,
+            length: dataStr.length,
+            preview: dataStr.slice(0, 80),
+            error: parseErr.message
+          })
+          return callback(null, null)
+        }
+
         // Check if expired
         if (session.expires && session.expires < Date.now()) {
           this.destroy(sid, () => {})
@@ -89,9 +122,20 @@ class FreezrSessionStore extends Store {
 
   /**
    * Save session
+   * 
+   * PRIVACY NOTE: Sessions are only persisted when they contain authenticated user data.
+   * This keeps public/anonymous visits fully stateless - no session files, no tracking.
+   * Sessions are only created and persisted when a user logs in (logged_in_user_id is set).
    */
   async set(sid, session, callback) {
     try {
+      // Only persist sessions with authenticated users
+      // This prevents creating files for anonymous public visitors
+      // and keeps public browsing fully stateless (no tracking)
+      if (!session.logged_in_user_id) {
+        return callback(null)
+      }
+
       const expires = this._getExpiry(session)
       const sessionObj = {
         data: session,
@@ -106,12 +150,48 @@ class FreezrSessionStore extends Store {
       }
       
       this.dirty.add(sid)
-      
-      // Write to fradminAdminFs in sessions subdirectory
-      const filename = `sessions/${this._generateFilenameFromSessionId(sid)}`
-      
-      await this.fradminAdminFs.writeToUserFiles(filename, JSON.stringify(sessionObj, null, 2), { doNotOverWrite: false })
+
+      // Guard: never persist an empty / unserializable payload. This is what
+      // produces 0-byte session files that later blow up JSON.parse on read.
+      let serialized
+      try {
+        serialized = JSON.stringify(sessionObj, null, 2)
+      } catch (serErr) {
+        console.error('❌ sessionStore.set: failed to serialize session, skipping write', { sid, error: serErr.message })
+        this.dirty.delete(sid)
+        return callback(null)
+      }
+      if (!serialized || serialized.length < 2) {
+        console.error('❌ sessionStore.set: refusing to write empty session payload', { sid, length: serialized ? serialized.length : 0 })
+        this.dirty.delete(sid)
+        return callback(null)
+      }
+
+      // Compute new filename based on the current expiry, and find the
+      // previous filename (if any) so we can delete it if the date changed.
+      // Filename = session_<currentExpiryDate>_<random>.json. Cleanup uses the
+      // date prefix, so keeping it in sync with the actual expiry prevents
+      // valid sessions from being deleted prematurely.
+      const newFilenameBase = this._filenameForSidAndExpiry(sid, expires)
+      const oldFilenameBase = await this._findFilenameForSid(sid)
+      const newFilenameFull = `sessions/${newFilenameBase}`
+
+      await this.fradminAdminFs.writeToUserFiles(newFilenameFull, serialized, { doNotOverWrite: false })
+      this._rememberFilename(sid, newFilenameBase)
       this.dirty.delete(sid)
+
+      // If the date prefix changed, the session was extended into a new day -
+      // remove the previous file so cleanup keeps working off filename dates.
+      if (oldFilenameBase && oldFilenameBase !== newFilenameBase) {
+        try {
+          await this.fradminAdminFs.removeFile(`sessions/${oldFilenameBase}`, {})
+        } catch (rmErr) {
+          if (rmErr && !rmErr.message?.includes('not found') && rmErr.code !== 'ENOENT') {
+            console.warn('⚠️ sessionStore.set: failed to remove previous filename after rename', { oldFilenameBase, newFilenameBase, error: rmErr.message })
+          }
+        }
+      }
+
       callback(null)
     } catch (err) {
       callback(err)
@@ -132,9 +212,11 @@ class FreezrSessionStore extends Store {
         return callback(null)
       }
       
-      // Remove from fradminAdminFs
-      const filename = `sessions/${this._generateFilenameFromSessionId(sid)}`
-      
+      // Resolve the current filename - sessions may have been renamed when
+      // they were extended, so we can't assume session_<sid>.json.
+      const filenameBase = await this._findFilenameForSid(sid)
+      const filename = `sessions/${filenameBase}`
+
       try {
         await this.fradminAdminFs.removeFile(filename, {})
       } catch (err) {
@@ -143,6 +225,8 @@ class FreezrSessionStore extends Store {
           throw err
         }
       }
+      // Drop from filename index (also try canonical, in case index was wrong)
+      this._forgetFilename(sid)
       callback(null)
     } catch (err) {
       callback(err)
@@ -167,12 +251,13 @@ class FreezrSessionStore extends Store {
       for (const filename of sessionFiles) {
         try {
           const sessionObj = await this._readSessionFile(filename)
+          if (!sessionObj) continue // empty/corrupt - skip; cleanup will remove if expired
           const sessionUserId = sessionObj?.data?.logged_in_user_id
           if (sessionUserId === userId) {
-            const sid = filename.replace(/^session_/, '').replace(/\.json$/, '')
-            await new Promise((resolve, reject) => {
-              this.destroy(sid, (err) => (err ? reject(err) : resolve()))
-            })
+            // Filename may have been renamed (date prefix updated when session
+            // was extended), so we can't reconstruct the sid reliably. Delete
+            // the file directly and clear any matching cache entries.
+            await this._destroyByFilename(filename)
             destroyed++
           }
         } catch (err) {
@@ -285,10 +370,32 @@ class FreezrSessionStore extends Store {
 
 
   async _writeSession(sid, session) {
-    const filename = `sessions/${this._generateFilenameFromSessionId(sid)}`
-    // writeToUserFiles is async
-    await this.fradminAdminFs.writeToUserFiles(filename, JSON.stringify(session, null, 2), { doNotOverWrite: false })
+    // Same rename-on-extension logic as set(). session here is the
+    // cached object: { data, expires }.
+    const expires = session && session.expires ? session.expires : this._getExpiry(session?.data)
+    const newFilenameBase = this._filenameForSidAndExpiry(sid, expires)
+    const oldFilenameBase = await this._findFilenameForSid(sid)
+
+    const serialized = JSON.stringify(session, null, 2)
+    if (!serialized || serialized.length < 2) {
+      console.error('❌ sessionStore._writeSession: refusing to write empty session payload', { sid })
+      this.dirty.delete(sid)
+      return
+    }
+
+    await this.fradminAdminFs.writeToUserFiles(`sessions/${newFilenameBase}`, serialized, { doNotOverWrite: false })
+    this._rememberFilename(sid, newFilenameBase)
     this.dirty.delete(sid)
+
+    if (oldFilenameBase && oldFilenameBase !== newFilenameBase) {
+      try {
+        await this.fradminAdminFs.removeFile(`sessions/${oldFilenameBase}`, {})
+      } catch (rmErr) {
+        if (rmErr && !rmErr.message?.includes('not found') && rmErr.code !== 'ENOENT') {
+          console.warn('⚠️ sessionStore._writeSession: failed to remove previous filename after rename', { oldFilenameBase, newFilenameBase, error: rmErr.message })
+        }
+      }
+    }
   }
 
   async _syncDirty() {
@@ -354,9 +461,10 @@ class FreezrSessionStore extends Store {
         const expiryDateStr = this._extractExpiryFromFilename(filename)
         
         if (expiryDateStr && expiryDateStr < currentDateStr) {
-          // Session is expired based on filename, remove the file
+          // Session is expired based on filename, remove the file (and clear
+          // any matching in-memory cache entries so we don't serve a stale copy)
           try {
-            await this._removeSessionFile(filename)
+            await this._destroyByFilename(filename)
             cleanedCount++
             console.log(`🧹 Cleaned up expired session file: ${filename}`)
           } catch (removeErr) {
@@ -403,12 +511,52 @@ class FreezrSessionStore extends Store {
   async _readSessionFile(filename) {
     // readUserFile is async
     const data = await this.fradminAdminFs.readUserFile(`sessions/${filename}`, {})
-    return JSON.parse(data.toString())
+    const dataStr = data == null ? '' : (typeof data === 'string' ? data : data.toString())
+    if (!dataStr || !dataStr.trim() || dataStr.trim() === 'null') {
+      // Empty or null payload - treat as missing rather than throwing
+      console.warn('⚠️ sessionStore._readSessionFile: empty payload', { filename })
+      return null
+    }
+    try {
+      return JSON.parse(dataStr)
+    } catch (parseErr) {
+      console.warn('⚠️ sessionStore._readSessionFile: corrupt JSON', { filename, length: dataStr.length, preview: dataStr.slice(0, 80), error: parseErr.message })
+      return null
+    }
   }
 
   async _removeSessionFile(filename) {
     // removeFile is async (from modern dsManager)
     await this.fradminAdminFs.removeFile(`sessions/${filename}`, {})
+  }
+
+  /**
+   * Remove a session by its on-disk filename. Used by cleanup and by
+   * destroyAllForUserId, both of which iterate files (where the sid that's in
+   * the user's cookie may not be reconstructible from the renamed filename).
+   * Also clears any in-memory cache entries that match the file's random part.
+   */
+  async _destroyByFilename(filenameBase) {
+    const m = filenameBase.match(/^session_\d{8}_(.+)\.json$/)
+    const random = m ? m[1] : null
+
+    if (random) {
+      for (const [sid] of this.cache) {
+        if (this._extractRandomFromSid(sid) === random) {
+          this.cache.delete(sid)
+          this.dirty.delete(sid)
+        }
+      }
+      this.randomToFilename.delete(random)
+    }
+
+    try {
+      await this.fradminAdminFs.removeFile(`sessions/${filenameBase}`, {})
+    } catch (err) {
+      if (err && !err.message?.includes('not found') && err.code !== 'ENOENT') {
+        throw err
+      }
+    }
   }
 
   /**
@@ -450,10 +598,85 @@ class FreezrSessionStore extends Store {
   }
 
   /**
-   * Generate filename from session ID (which already contains expiry date)
+   * Generate filename from session ID (which already contains expiry date).
+   * Used as the canonical fallback - the actual filename on disk may have
+   * been renamed if the session was extended (see _filenameForSidAndExpiry).
    */
   _generateFilenameFromSessionId(sid) {
     return `${this.prefix}${sid}.json`
+  }
+
+  /**
+   * Extract the random/non-date portion of a sid.
+   * sid format: <YYYYMMDD>_<random>
+   * Returns the <random> part, or the full sid if no date prefix is present.
+   */
+  _extractRandomFromSid(sid) {
+    if (!sid) return null
+    const m = sid.match(/^(\d{8})_(.+)$/)
+    return m ? m[2] : sid
+  }
+
+  /**
+   * Compute the filename for a sid given a specific (possibly extended) expiry.
+   * Format: session_<YYYYMMDD-of-expiry>_<random>.json
+   * For freshly-created sessions this equals session_<sid>.json (since the
+   * sid already encodes the initial expiry). For sessions that have been
+   * extended via a save, the date prefix moves forward and the file is renamed.
+   */
+  _filenameForSidAndExpiry(sid, expires) {
+    const expiryDateStr = this._formatDateForFilename(expires)
+    const random = this._extractRandomFromSid(sid)
+    return `${this.prefix}${expiryDateStr}_${random}.json`
+  }
+
+  /**
+   * Build a one-time random->filename index from the sessions directory.
+   * Lets us find the current on-disk filename for a sid after process restart
+   * without doing a directory scan on every cache miss.
+   */
+  async _ensureFilenameIndex() {
+    if (this.randomToFilenameBuilt) return
+    if (!this.fradminAdminFs) return
+    try {
+      const files = await this._listSessionFiles()
+      this.randomToFilename.clear()
+      for (const f of files) {
+        const m = f.match(/^session_\d{8}_(.+)\.json$/)
+        if (m) this.randomToFilename.set(m[1], f)
+      }
+      this.randomToFilenameBuilt = true
+    } catch (err) {
+      console.warn('⚠️ sessionStore: failed to build filename index, will retry', err.message)
+      // Don't mark as built - next call will retry
+    }
+  }
+
+  /**
+   * Resolve the current on-disk filename (basename, not including 'sessions/')
+   * for a sid. Falls back to canonical session_<sid>.json if no match is found.
+   */
+  async _findFilenameForSid(sid) {
+    const random = this._extractRandomFromSid(sid)
+    if (random && this.randomToFilename.has(random)) {
+      return this.randomToFilename.get(random)
+    }
+    await this._ensureFilenameIndex()
+    if (random && this.randomToFilename.has(random)) {
+      return this.randomToFilename.get(random)
+    }
+    // Fallback to canonical - works for sessions that have never been renamed.
+    return this._generateFilenameFromSessionId(sid)
+  }
+
+  _rememberFilename(sid, filenameBase) {
+    const random = this._extractRandomFromSid(sid)
+    if (random) this.randomToFilename.set(random, filenameBase)
+  }
+
+  _forgetFilename(sid) {
+    const random = this._extractRandomFromSid(sid)
+    if (random) this.randomToFilename.delete(random)
   }
 
   /**

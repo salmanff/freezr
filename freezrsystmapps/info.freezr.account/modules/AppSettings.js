@@ -34,8 +34,9 @@ const appHeaderFor = async function (manifest, versionInfo = {}) { // Logo and n
 
   return dg.div( // grid with..
     {
-      style: { 
-        display: 'grid', 
+      className: 'appHeaderGrid',
+      style: {
+        display: 'grid',
         'grid-template-columns': (LOGO_SIZE + 'px 1fr auto'),
         gap: '1rem',
         'align-items': 'center'
@@ -43,6 +44,7 @@ const appHeaderFor = async function (manifest, versionInfo = {}) { // Logo and n
     },
 
     dg.img({ // logo to the left
+      className: 'appHeaderLogo',
       width: LOGO_SIZE,
       height: LOGO_SIZE,
       style: { 'border-radius': '8px' },
@@ -167,7 +169,7 @@ const createPermissionsDiv = function (outerPermissions, currentAppName) {
           const acceptAll = (e.target.innerText === ACCEPT_ALL)
           e.target.onclick = null
           let errors = 0
-          e.target.innerHTML = '<img src="/app/info.freezr.public/public/static/ajaxloaderBig.gif" alt="">'
+          e.target.innerHTML = '<div class="freezr-logo-spinner" style="width:24px;height:24px;"></div>'
           for (const permissionObject of outerPermissions) {
             if ((acceptAll && !permissionObject.granted) || (!acceptAll && permissionObject.granted)) {
               const change = {
@@ -227,7 +229,7 @@ const createPermissionsDiv = function (outerPermissions, currentAppName) {
       }
     }
 
-    const GROUPS = ['thisAppToThisApp', 'otherAppsToThisApp', 'thisAppToOtherApps', 'unknowns']
+    const GROUPS = ['thisAppToThisApp', 'otherAppsToThisApp', 'thisAppToOtherApps', 'appCapabilities', 'unknowns']
     GROUPS.forEach(group => {
       outer.appendChild(writeForGroup(groupedPermissions, group, currentAppName))
     })
@@ -237,19 +239,21 @@ const createPermissionsDiv = function (outerPermissions, currentAppName) {
     return dg.div('This App is not asking for any permissions.')
   }
 }
+const CAPABILITY_TYPES = ['external_scripts', 'external_fetch', 'unsafe_eval', 'use_serverless', 'use_llm', 'use_3pFunction', 'auto_update_local_3pFunction', 'allow_self_frames']
 function groupPermissions (permList, appName) {
   const groupedPermissions = {
     thisAppToThisApp: [],
     thisAppToOtherApps: [],
     otherAppsToThisApp: [],
+    appCapabilities: [],
     unknowns: []
   }
 
   if (permList && permList.length > 0) {
     permList.forEach(aPerm => {
-      if (['share_records', 'message_records', 'db_query'].indexOf(aPerm.type) > -1 && aPerm.requestor_app === appName && startsWith(aPerm.table_id, appName)) {
-        groupedPermissions.thisAppToThisApp.push(aPerm)
-      } else if (['upload_pages'].indexOf(aPerm.type) > -1 && aPerm.requestor_app === appName) {
+      if (CAPABILITY_TYPES.indexOf(aPerm.type) > -1) {
+        groupedPermissions.appCapabilities.push(aPerm)
+      } else if (['share_records', 'message_records', 'db_query', 'upload_pages'].indexOf(aPerm.type) > -1 && aPerm.requestor_app === appName && (!aPerm.table_id || startsWith(aPerm.table_id, appName))) {
         groupedPermissions.thisAppToThisApp.push(aPerm)
       } else if (['share_records', 'read_all', 'message_records', 'write_own', 'write_all', 'db_query'].indexOf(aPerm.type) > -1 && aPerm.requestor_app !== appName && startsWith(aPerm.table_id, appName)) {
         groupedPermissions.otherAppsToThisApp.push(aPerm)
@@ -257,48 +261,108 @@ function groupPermissions (permList, appName) {
         groupedPermissions.thisAppToOtherApps.push(aPerm)
       } else {
         groupedPermissions.unknowns.push(aPerm)
-        console.warn('groupPermissions', 'ERROR - why this . uknown permission ' + JSON.stringify(aPerm))
+        console.warn('groupPermissions', 'unknown permission type: ' + JSON.stringify(aPerm))
       }
     })
   }
   return groupedPermissions
 }
 const IntroText = {
-  thisAppToThisApp: 'Permission to share data from this app:',
-  thisAppToOtherApps: 'Permissions to access and / or modify data from other apps:',
-  otherAppsToThisApp: 'Other apps are asking for permission to see your data from this app:',
-  unkowns: 'These permissions are uknkown to freezr'
+  thisAppToThisApp: 'Permissions to share data from this app:',
+  thisAppToOtherApps: 'Permissions to access and/or modify data from other apps:',
+  otherAppsToThisApp: 'Other apps are asking for permission to access your data from this app:',
+  appCapabilities: 'App capabilities and external access:',
+  unknowns: 'Other permissions:'
 }
 const getPermSentence = function (aPerm, currentAppName) {
-  let sentence = ''
   const hasBeenAccepted = (aPerm.granted && !aPerm.outDated)
   const otherApp = currentAppName !== aPerm.requestor_app
   const otherTable = !startsWith(aPerm.table_id, currentAppName)
-  const accessWord = otherApp ? ('read ' + (aPerm.type === 'write_all' ? 'write ' : (aPerm.type === 'write_own' ? 'write (own) ' : '')) + 'and share') : 'share'
-  sentence += otherApp ? ('The app, <b style="color:purple;">' + aPerm.requestor_app + '</b>,') : 'This app'
-  sentence += hasBeenAccepted ? ' is able to ' : ' wants to be able to '
-  if (aPerm.type === 'db_query') {
-    sentence += accessWord + ': ' + (aPerm.return_fields ? (aPerm.return_fields.join(', ')) : 'ERROR') + ' with the following groups: ' + aPerm.sharable_groups.join(' ') + '.<br/>'
-  } else if (aPerm.type === 'object_delegate') {
-    sentence += accessWord + ' individual data records from the table <b ' + (otherTable ? 'style="color:purple;")' : '') + '>' + aPerm.table_id + '</b>, with ' + (aPerm.sharable_groups ? ('the following groups:  ' + aPerm.sharable_groups.join(' ')) : 'others') + '.<br/>'
+  const tableStyle = otherTable ? ' style="color:purple;"' : ''
+
+  const subject = otherApp
+    ? ('The app <b style="color:purple;">' + aPerm.requestor_app + '</b>')
+    : 'This app'
+  const verb = hasBeenAccepted ? ' can ' : ' is requesting to '
+
+  const tableRef = aPerm.table_id
+    ? (' the table <b' + tableStyle + '>' + aPerm.table_id + '</b>')
+    : ''
+  const groupsRef = aPerm.sharable_groups
+    ? (' with the following groups: ' + aPerm.sharable_groups.join(', '))
+    : ''
+
+  let sentence = subject + verb
+  let risk = ''
+
+  if (aPerm.type === 'share_records') {
+    sentence += 'share individual records from' + tableRef + groupsRef + '.'
+    sentence += '<br/>Shared records become accessible to the people or groups they are shared with, including publicly if shared with everyone.'
+
   } else if (aPerm.type === 'read_all') {
-    sentence += accessWord + ' individual data records from the table <b ' + (otherTable ? 'style="color:purple;")' : '') + '>' + aPerm.table_id + '</b>, with  ' + (aPerm.sharable_groups ? ('the following groups:  ' + aPerm.sharable_groups.join(' ')) : 'others') + '.<br/>'
-  } else if (aPerm.type === 'write_all') {
-    sentence += accessWord + ' individual data records from the table <b ' + (otherTable ? 'style="color:purple;")' : '') + '>' + aPerm.table_id + '</b>, with  ' + (aPerm.sharable_groups ? ('the following groups:  ' + aPerm.sharable_groups.join(' ')) : 'others') + '.<br/> This permission gives full read and <b>WRITE</b> permission on the table.'
+    sentence += 'read <b>all</b> records in' + tableRef + groupsRef + '.'
+    if (otherApp) risk = 'This gives the app full read access to every record in this collection.'
+
   } else if (aPerm.type === 'write_own') {
-    sentence += accessWord + ' individual data records from the table <b ' + (otherTable ? 'style="color:purple;")' : '') + '>' + aPerm.table_id + '</b>, with  ' + (aPerm.sharable_groups ? ('the following groups:  ' + aPerm.sharable_groups.join(' ')) : 'others') + '.<br/> This permission gives full read permission and will allow the app to <b>WRITE</b> new records and edit the records it has created.'
+    sentence += 'read all records and <b>write its own</b> records in' + tableRef + groupsRef + '.'
+    sentence += '<br/>The app can create new records and edit records it created, but cannot modify records created by other apps.'
+
+  } else if (aPerm.type === 'write_all') {
+    sentence += 'read and <b>write any</b> record in' + tableRef + groupsRef + '.'
+    risk = 'This is a powerful permission. The app can create, modify, or delete any record in this collection.'
+
+  } else if (aPerm.type === 'db_query') {
+    const fields = aPerm.return_fields ? aPerm.return_fields.join(', ') : 'all fields'
+    sentence += 'run database queries on' + tableRef + ', returning: ' + fields + groupsRef + '.'
+
   } else if (aPerm.type === 'message_records') {
-    sentence += accessWord + ' individual data records from the table <b ' + (otherTable ? 'style="color:purple;")' : '') + '>' + aPerm.table_id + '</b>, with  ' + (aPerm.sharable_groups ? ('the following groups:  ' + aPerm.sharable_groups.join(' ')) : 'others') + '.<br/> This allows the app to send specific records and related messgaes to third parties.'
-  } else if (aPerm.type === 'share_records') {
-    sentence += accessWord + ' individual data records from the table <b ' + (otherTable ? 'style="color:purple;")' : '') + '>' + aPerm.table_id + '</b>, with  ' + (aPerm.sharable_groups ? ('the following groups:  ' + aPerm.sharable_groups.join(' ')) : 'others') + '.<br/> This allows the app to give access to any third party to specific records even after they change.'
+    sentence += 'send records from' + tableRef + ' as messages to other users' + groupsRef + '.'
+    sentence += '<br/>This allows the app to share specific records and related messages with third parties.'
+
+  } else if (aPerm.type === 'upload_pages') {
+    sentence += 'upload and serve public HTML pages.'
+    sentence += '<br/>Uploaded pages are accessible by anyone visiting your server.'
+
+  } else if (aPerm.type === 'external_scripts') {
+    sentence += 'load JavaScript from <b>external websites</b>.'
+    risk = 'External scripts run with full access to the page and could read or modify your data. Only grant this if you trust the app developer and the external script sources.'
+
+  } else if (aPerm.type === 'external_fetch') {
+    sentence += 'send and receive data to/from <b>external websites</b>.'
+    risk = 'The app could transmit your data to third-party servers. Only grant this if you trust the app developer and understand which external services it connects to.'
+
+  } else if (aPerm.type === 'unsafe_eval') {
+    sentence += 'use JavaScript <b>eval()</b> and dynamic code execution.'
+    risk = 'This weakens browser security protections. Some JavaScript frameworks require this to function. Only grant this if the app needs it.'
+
   } else if (aPerm.type === 'use_serverless') {
-    sentence += accessWord + ' your serverless credentials and run compute.'
+    sentence += 'use your <b>cloud compute credentials</b> to run functions on external services.'
+    risk = 'This uses your cloud account resources and may incur costs.'
+
+  } else if (aPerm.type === 'use_llm') {
+    sentence += 'use your <b>AI / LLM API keys</b> to make requests to AI services.'
+    risk = 'This uses your API quota and may incur costs. The app can send prompts using your credentials.'
+
+  } else if (aPerm.type === 'use_3pFunction') {
+    const funcName = aPerm.function_name || aPerm.name
+    sentence += 'run the third-party function <b>' + funcName + '</b> installed on this server.'
+
   } else if (aPerm.type === 'auto_update_local_3pFunction') {
-    sentence += accessWord + ' update the app microservice for all users (admin only).'
+    sentence += 'automatically update a local third-party function for all users. <b>Admin only.</b>'
+
+  } else if (aPerm.type === 'allow_self_frames') {
+    sentence += 'embed same-origin iframes (e.g. for page previews).'
+
   } else {
-    sentence += accessWord + ' some records - UNKNOWN SCOPE'
+    sentence += 'perform an action with unknown scope (' + aPerm.type + ').'
   }
-  if (aPerm.outDated) sentence += 'This permission was previously granted but the permission paramteres have changed to you would need to re-authorise it.<br/>'
+
+  if (risk) {
+    sentence += '<br/><span style="color:#c62828;"><b>Risk:</b> ' + risk + '</span>'
+  }
+  if (aPerm.outDated) {
+    sentence += '<br/><span style="color:#e65100;">This permission was previously granted but the parameters have changed. You need to re-authorise it.</span>'
+  }
   return sentence
 }
 const makePermissionElementFrom = function (permissionObject, currentAppName, message) {
@@ -308,9 +372,10 @@ const makePermissionElementFrom = function (permissionObject, currentAppName, me
     {
       class: 'freezer_butt',
       id: 'freezerperm_' + permissionObject.requestee_app_table + '_' + permissionObject.requestor_app + '_' + (permissionObject.granted ? 'Deny' : 'Accept') + '_' + permissionObject.permission_name,
+      style: { 'justify-self': 'start', 'align-self': 'start', 'min-width': '70px' },
       onclick: async function (e) {
         if (freezrMeta.appName === 'info.freezr.account') {
-          acceptButt.innerHTML = '<img src="/app/info.freezr.public/public/static/ajaxloaderBig.gif" alt="">'
+          acceptButt.innerHTML = '<div class="freezr-logo-spinner" style="width:24px;height:24px;"></div>'
           await changePermission(e, permissionObject, currentAppName, changePermissionCallBack)
         } else {
           openPermConfirmationWindow(e, permissionObject)
@@ -328,12 +393,13 @@ const makePermissionElementFrom = function (permissionObject, currentAppName, me
   )
 
   return dg.div(
+    { className: 'permissionRow' },
     dg.div( // header
       { class: 'freezer_BoxTitle' },
       (currentAppName + ' is asking to: "' + (permissionObject.description ? (permissionObject.description + '" (' + permissionObject.name + ')') : (permissionObject.name + '"')))
     ),
     dg.div( // button and description
-      { style: { display: 'grid', 'grid-template-columns': '100px 2fr' } },
+      { className: 'permissionGrid', style: { display: 'grid', 'grid-template-columns': 'auto 1fr', gap: '0.75rem', 'align-items': 'start' } },
       acceptButt, detailText
     ),
     dg.div({ style: { color: 'red', 'font-size': '16px' } }, message) // message after granting / revoking
@@ -373,8 +439,8 @@ const changePermissionCallBack = function (error, returnJson, permissionObject, 
       : 'Permission has been DENIED!'
   }
   const parentEl = evt.target.parentElement.parentElement
-  parentEl.innerHTML = ''
-  parentEl.appendChild(makePermissionElementFrom(permissionObject, currentAppName, message))
+  const replacement = makePermissionElementFrom(permissionObject, currentAppName, message)
+  parentEl.replaceWith(replacement)
 }
 
 const openPermConfirmationWindow = function (e, permissionObject) {

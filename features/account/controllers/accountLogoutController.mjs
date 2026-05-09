@@ -32,19 +32,17 @@ export const createLogoutAction = (dsManager) => {
       // Continue logout even if token update fails
     }
       
-    const deviceCode = req.session.device_code
-    
-    // Regenerate session for security (ensures clean app logout)
-    req.session.regenerate(async (regenerateErr) => {
-      if (regenerateErr) {
-        res.locals.flogger.error('Error regenerating session after log out', { function: 'createLogoutAction', error: regenerateErr })
-        // Continue with logout even if regeneration fails
+    // Destroy session completely - deletes session file and clears cookie
+    // device_code will be regenerated at next login (stateless design)
+    req.session.destroy(async (destroyErr) => {
+      if (destroyErr) {
+        res.locals.flogger.error('Error destroying session on logout', { function: 'createLogoutAction', error: destroyErr })
+        // Continue with logout even if destruction fails
       }
       if (res.headersSent) {
         console.error('Headers already sent in createLogoutAction - investigate!', { function: 'createLogoutAction' })
         return
       }
-      req.session.device_code = deviceCode
       // return res.redirect('/account/login')
 
       const theDs = dsManager.users.fradmin 

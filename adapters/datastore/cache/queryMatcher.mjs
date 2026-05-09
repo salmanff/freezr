@@ -51,10 +51,36 @@ export function isDateModifiedGtQuery(query) {
 }
 
 /**
- * Check if a value is a valid cacheable value (string or number only)
+ * Check if a sort is a "default" sort that we always use in queries
+ * Default sorts are: no sort, { _date_modified: -1 }, or { _date_modified: -1, _id: -1 }
+ * These are safe to accept for caching because the cache can re-apply them in memory
+ */
+export function isDefaultSort(sort) {
+  if (!sort || typeof sort !== 'object') return true
+  const keys = Object.keys(sort)
+  if (keys.length === 0) return true
+  if (keys.length === 1 && sort._date_modified === -1) return true
+  if (keys.length === 2 && sort._date_modified === -1 && sort._id === -1) return true
+  return false
+}
+
+/**
+ * Check if a value is a valid cacheable value (string, number, or boolean)
  */
 export function isCacheableValue(value) {
-  return typeof value === 'string' || typeof value === 'number'
+  // Accept string, number, or boolean directly
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return true
+  // Accept { $ne: true } or { $ne: false }
+  if (
+    value &&
+    typeof value === 'object' &&
+    Object.keys(value).length === 1 &&
+    value.hasOwnProperty('$ne') &&
+    (value.$ne === true || value.$ne === false)
+  ) {
+    return true
+  }
+  return false
 }
 
 /**
@@ -64,8 +90,9 @@ export function isCacheableValue(value) {
  */
 export function isSimpleQuery(query, options = {}) {
   if (!query || typeof query !== 'object') return { isSimple: false }
-  // easy route of getting rid of any sort or limit - but this van be refined to cehck for smaller limits etc
-  if (options && (options.limit || options.count || options.sort || options.skip)) return { isSimple: false }
+  // Sort, skip, count are all handled at the appTableCache level:
+  // - sort is included in the cache hash key (different sorts = different cache entries)
+  // - skip + count are applied in memory from the cached result set
   
   const keys = Object.keys(query)
   
@@ -99,12 +126,12 @@ export function isSimpleQuery(query, options = {}) {
  * @returns {Object} { matches: boolean, pattern: Array|null }
  */
 export function matchesCompoundPattern(query, patterns, options = {}) {
+  // onsole.log('matchesCompoundPattern', { query, patterns, options })
   if (!query || typeof query !== 'object') return { matches: false, pattern: null }
   
-  // Reject queries with options - we don't cache those
-  if (options && (options.limit || options.count || options.sort || options.skip)) {
-    return { matches: false, pattern: null }
-  }
+  // Sort, skip, count are all handled at the appTableCache level:
+  // - sort is included in the cache hash key (different sorts = different cache entries)
+  // - skip + count are applied in memory from the cached result set
   
   const queryFields = Object.keys(query).sort()
   
@@ -129,6 +156,7 @@ export function matchesCompoundPattern(query, patterns, options = {}) {
     }
     
     if (allCacheable) {
+      // onsole.log('matchesCompoundPattern found a match', { queryFields, patternFields })
       return { matches: true, pattern }
     }
   }
@@ -493,6 +521,7 @@ export function isRecentCacheComplete(recentRecords, queryTimestamp) {
 
 export default {
   hashQuery,
+  isDefaultSort,
   isDateModifiedGtQuery,
   isSimpleQuery,
   isCacheableValue,

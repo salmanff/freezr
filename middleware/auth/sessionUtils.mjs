@@ -8,6 +8,10 @@
  * Ensures session has a device code
  * Pure function - takes session as input, returns modified session
  * 
+ * NOTE: "device_code" is a legacy name - it's really a "login_instance_id" since
+ * sessions are destroyed on logout. It binds app tokens to this specific login
+ * session for security and provides an audit trail.
+ * 
  * @param {object} session - User session
  * @param {object} helpers - Helpers module with randomText function
  * @returns {object} Session with device_code

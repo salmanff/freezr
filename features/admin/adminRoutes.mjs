@@ -34,7 +34,7 @@ export const createAdminPageRoutes = ({ dsManager, freezrPrefs, freezrStatus }) 
   // Guards
   const setupGuard = createSetupGuard(dsManager)
   const adminAuthGuard = createAdminAuthGuard()
-  const loggedInGuard = createAuthGuard()
+  const loggedInGuard = createAuthGuard('/account/home')
 
   // Context middleware
   const addFradminDs = createAddFradminDs(dsManager, freezrPrefs, freezrStatus)

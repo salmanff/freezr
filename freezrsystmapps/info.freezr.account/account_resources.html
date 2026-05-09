@@ -1,0 +1,77 @@
+<!-- 
+account/resources
+freezr Account Resources (LLM Keys etc)
+resources: {
+  page_title: 'Account Resources (freezr)',
+  page_url: 'account_resources.html',
+  css_files: ['/app/info.freezr.public/public/freezr_style.css', 'account_home.css'],
+  script_files: ['account_resources.js']
+}
+-->
+
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">Account Resources</span>
+    <a href="/account/home">Home</a>
+    <a href="/account/settings">Account Settings</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div id="warnings" class="errorBox"></div>
+
+    <div class="freezr-card">
+      <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
+        <h3 style="margin: 0;">LLM API Keys</h3>
+        <button class="freezrButt" id="button_addnew_llm">Add LLM Key</button>
+      </div>
+      <p class="smallText" style="margin-top: 0.5rem;">Manage your LLM API keys. One key can be marked as the default.</p>
+    </div>
+
+    <!-- Overlay for add/edit form -->
+    <div id="overlay" class="overlay" style="display: none;">
+      <div class="overlay-content">
+        <button class="overlay-close" id="overlay_close">&times;</button>
+
+        <div id="llm_form_area">
+          <h3 id="llmFormTitle">Add a New LLM Key</h3>
+          <div style="max-width: 400px;">
+            <label class="texttop">Name</label>
+            <input type="text" class="input" id="llm_name" placeholder="e.g. My Claude Key"/>
+            <p class="smallText">A friendly name to identify this key</p>
+
+            <label class="texttop">Provider</label>
+            <select class="input" id="llm_provider" style="width: auto; min-width: 200px;">
+              <option value="Claude">Claude</option>
+              <option value="ChatGPT">ChatGPT</option>
+            </select>
+
+            <label class="texttop">API Key</label>
+            <input type="password" class="input" id="llm_key" placeholder="sk-..."/>
+
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin: 1rem 0;">
+              <input type="checkbox" class="freezer_largeCheckBox" id="llm_default"/>
+              <span>Set as default</span>
+            </label>
+
+            <input type="hidden" id="llm__id" value=""/>
+
+            <div class="button-row" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+              <button class="freezrButt" id="button_llmSave">Save</button>
+              <button class="freezrButt" id="button_llmDelete" style="background: #dc2626; display: none;">Delete</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="text-align: center;">
+      <img id="loader" src="/app/info.freezr.public/public/static/ajaxloaderBig.gif" style="display: none;"/>
+    </div>
+
+    <div id="llm_table" class="freezr-card">
+      <div id="llmGridDetails" style="margin-top: 0.5rem;"></div>
+    </div>
+
+  </div>
+</div>

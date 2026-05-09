@@ -1,0 +1,70 @@
+<div class="creator-root">
+    <div class="creator-error-box" id="creatorErrorBox" role="alert" aria-live="assertive" hidden></div>
+    <div class="creator-loading-overlay" id="creatorLoadingOverlay" hidden>
+        <div class="creator-loading-modal">
+            <div class="creator-loading-spinner" aria-hidden="true"></div>
+            <p id="creatorLoadingText">Loading...</p>
+        </div>
+    </div>
+    <button class="creator-mobile-menu-toggle" id="creatorMobileMenuToggle" title="Open creator toolbar" aria-controls="creatorToolbar" aria-expanded="false">☰</button>
+    <button class="creator-toolbar-backdrop" id="creatorToolbarBackdrop" aria-label="Close creator toolbar" hidden></button>
+    <div class="creator-toolbar" id="creatorToolbar" aria-label="Creator toolbar">
+        <div class="creator-toolbar-section">
+            <div class="creator-toolbar-item">
+                <button class="panel-refresh" id="creatorRefreshApp" title="Change app">↻</button>
+                <span class="creator-toolbar-label">Switch</span>
+            </div>
+            <div class="creator-toolbar-item">
+                <button class="panel-launch" id="creatorLaunchApp" title="Launch current app">🚀</button>
+                <span class="creator-toolbar-label">Launch</span>
+            </div>
+        </div>
+        <div class="creator-toolbar-icons" aria-label="Toggle panels">
+            <div class="creator-toolbar-section-title">Panels</div>
+            <div class="creator-toolbar-item">
+                <button class="panel-toggle is-active" data-panel="project" title="Show Project panel">🛠️</button>
+                <span class="creator-toolbar-label">Project</span>
+            </div>
+            <div class="creator-toolbar-item">
+                <button class="panel-toggle is-active" data-panel="index" title="Show History panel">🗂️</button>
+                <span class="creator-toolbar-label">History</span>
+            </div>
+            <div class="creator-toolbar-item">
+                <button class="panel-toggle is-active" data-panel="chat" title="Show Chat panel">💬</button>
+                <span class="creator-toolbar-label">Chat</span>
+            </div>
+            <div class="creator-toolbar-item">
+                <button class="panel-toggle is-active" data-panel="file" title="Show File panel">📄</button>
+                <span class="creator-toolbar-label">File</span>
+            </div>
+        </div>
+        <div class="creator-toolbar-appname-wrap" aria-hidden="true">
+            <span class="creator-toolbar-appname" id="creatorToolbarAppName"></span>
+        </div>
+    </div>
+
+    <main class="workspace" id="workspace" aria-label="Creator workspace">
+        <section class="workspace-panels" id="panelStack">
+            <section class="workspace-panel" data-panel-id="project" style="flex:0 0 100%">
+                <div class="panel-content" data-panel-content="project">
+                    <div class="project-initial-loader">
+                        <div class="creator-loading-spinner"></div>
+                        <p>Loading Creator...</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="workspace-panel" data-panel-id="index" style="display:none">
+                <div class="panel-content" data-panel-content="index"></div>
+            </section>
+
+            <section class="workspace-panel" data-panel-id="chat" style="display:none">
+                <div class="panel-content" data-panel-content="chat"></div>
+            </section>
+
+            <section class="workspace-panel" data-panel-id="file" style="display:none">
+                <div class="panel-content" data-panel-content="file"></div>
+            </section>
+        </section>
+    </main>
+</div>

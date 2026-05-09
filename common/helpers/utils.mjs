@@ -2,6 +2,7 @@
 // General utility functions
 
 import path from 'path'
+import crypto from 'crypto'
 
 // Array utilities
 export const addToListAsUnique = (aList, anItem) => {
@@ -47,14 +48,22 @@ export const expiryDatePassed = (expiry) => {
 
 // Random utilities
 export const randomText = (textLen) => {
-  let text = ""
-  const possible = "ABCDEFGHIJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789"
   if (!textLen) textLen = 10
+  return crypto.randomBytes(Math.ceil(textLen * 0.75)).toString('base64url').slice(0, textLen)
+}
 
-  for (let i = 0; i < textLen; i++) {
-    text += possible.charAt(Math.floor(Math.random() * possible.length))
-  }
-  return text
+// Regex safety utilities
+export const escapeRegex = (str) => {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+export const isSafeRegex = (pattern) => {
+  if (!pattern || typeof pattern !== 'string') return false
+  if (pattern.length > 200) return false
+  // Reject nested quantifiers — the core of almost all ReDoS patterns
+  // Matches: group containing a quantifier, followed by a quantifier
+  // e.g., (a+)+  (a*)*  (a+){2,}  (\w+)*
+  if (/\([^)]*[+*}]\)?[+*{]/.test(pattern)) return false
+  return true
 }
 
 // Version comparison
@@ -152,9 +161,122 @@ export const removeLastPathElement = (statedPath, depth) => {
  * @returns {boolean} True if the resource is a page, false if it's a file
  */
 export const isPageRequest = (pathToCheck) => {
-  if (!pathToCheck) return false
+  if (!pathToCheck) return false  
   // Check if resource ends with .html or has no extension (no ".")
-  return pathToCheck.endsWith('.html') || !pathToCheck.includes('.')
+  return pathToCheck.endsWith('.html') || !pathToCheck.split('/')?.pop().includes('.') || pathToCheck.endsWith('?') || pathToCheck.startsWith('/app/settings/')
+}
+
+/**
+ * Paths we should never use as a post-login fwdTo target (would loop or
+ * land the user back on a credential / setup page).
+ */
+const FWDTO_SKIP_PREFIXES = [
+  '/account/login',
+  '/account/logout',
+  '/account/reset',
+  '/account/reauthorise',
+  '/acctapi/',
+  '/register/',
+  '/admin/'
+]
+
+/**
+ * True if `url` is a safe same-origin relative URL we can hand to the browser
+ * for navigation. Blocks protocol-relative (`//evil`), absolute (`http://…`),
+ * and pseudo-protocol (`javascript:`) URLs to prevent open-redirect abuse.
+ *
+ * @param {string} url
+ * @returns {boolean}
+ */
+export const isSafeRelativeUrl = (url) => {
+  if (typeof url !== 'string' || url.length === 0) return false
+  if (!url.startsWith('/')) return false
+  if (url.startsWith('//')) return false
+  if (url.includes('\\')) return false
+  if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return false
+  return true
+}
+
+/**
+ * Build a login redirect URL that preserves the user's intended destination
+ * via a `fwdTo` query parameter. The login page (`account_login.js`) reads
+ * `fwdTo` and navigates there once the user authenticates.
+ *
+ * Rules:
+ *  - If `redirectUrl` already carries a `fwdTo`, return it unchanged
+ *    (something upstream already decided where to forward to).
+ *  - Prefer an existing `req.query.fwdTo` if present and safe — that lets the
+ *    target survive multi-hop redirect chains (e.g. /apps/foo → /account/home
+ *    → /account/login) without being overwritten with the intermediate URL.
+ *  - Otherwise capture `req.originalUrl`.
+ *  - Skip if the candidate target is itself a login/logout/register/admin
+ *    page (avoids pointless or looping forwards).
+ *  - Validate with `isSafeRelativeUrl` to block open-redirect payloads.
+ *
+ * @param {object} req - Express request object (may be undefined)
+ * @param {string} redirectUrl - Base URL to redirect the user to (e.g. /account/home)
+ * @returns {string} The redirect URL, possibly enriched with `?fwdTo=…`
+ */
+export const buildLoginRedirectUrl = (req, redirectUrl) => {
+  if (!redirectUrl || typeof redirectUrl !== 'string') return redirectUrl
+  if (!req) return redirectUrl
+  if (redirectUrl.includes('fwdTo=')) return redirectUrl
+
+  // Prefer an already-captured fwdTo so it survives redirect chains.
+  let target = req.query && req.query.fwdTo
+  if (!isSafeRelativeUrl(target)) target = req.originalUrl
+  if (!isSafeRelativeUrl(target)) return redirectUrl
+
+  const pathOnly = target.split('?')[0]
+  if (FWDTO_SKIP_PREFIXES.some(p => pathOnly === p || pathOnly.startsWith(p + (p.endsWith('/') ? '' : '/')))) {
+    return redirectUrl
+  }
+
+  const sep = redirectUrl.includes('?') ? '&' : '?'
+  return `${redirectUrl}${sep}fwdTo=${encodeURIComponent(target)}`
+}
+
+/**
+ * Decide whether the *browser* expected a top-level page response (HTML)
+ * versus a sub-resource fetch (script / style / image / xhr / etc.).
+ *
+ * Uses Fetch Metadata Request Headers (Sec-Fetch-*) which are sent by all
+ * modern browsers (Chrome 76+, Firefox 90+, Safari 16.4+):
+ *   - Sec-Fetch-Dest: document | iframe | frame  -> top-level / framed page
+ *   - Sec-Fetch-Mode: navigate                   -> navigation request
+ *   - Sec-Fetch-Dest: script|style|image|font|...|empty -> sub-resource / fetch
+ *
+ * Falls back to the Accept header (text/html dominant) for older clients,
+ * and finally to the URL-extension heuristic so server-to-server callers and
+ * tests still get a sensible answer.
+ *
+ * Use this when deciding the *response shape* (HTML redirect vs JSON 401).
+ * For routing dispatch based on the resource path itself, keep using
+ * `isPageRequest(path)` instead.
+ *
+ * @param {object} req - Express request object
+ * @returns {boolean} True if the browser is asking for a page
+ */
+export const isPageBrowserRequest = (req) => {
+  if (!req) return false
+  const headers = req.headers || {}
+  const dest = headers['sec-fetch-dest']
+  const mode = headers['sec-fetch-mode']
+
+  // Modern browsers always send at least one Sec-Fetch-* header.
+  if (dest || mode) {
+    if (dest === 'document') return true // || dest === 'iframe' || dest === 'frame'
+    if (mode === 'navigate') return true
+    return false
+  }
+
+  // Older clients / non-browser callers: prefer Accept negotiation.
+  const accept = headers.accept || ''
+  if (accept.includes('text/html')) return true
+  if (accept && !accept.includes('*/*')) return false
+
+  // Last-ditch fallback: URL heuristic (note: misclassifies dotted app names).
+  return isPageRequest(req.path || req.url)
 }
 
 // Object comparison utilities
@@ -262,6 +384,10 @@ export default {
   
   // Random utilities
   randomText,
+
+  // Regex safety utilities
+  escapeRegex,
+  isSafeRegex,
   
   // Version comparison
   newVersionNumberIsHigher,

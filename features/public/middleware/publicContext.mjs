@@ -69,7 +69,6 @@ export const createAddPublicRecordsDB = (dsManager, freezrPrefs, freezrStatus) =
       if (privateFeedDb) {
         res.locals.freezr.privateFeedDb = privateFeedDb
       }
-      
       // onsole.log('✅ Public records DBs set up in res.locals.freezr, proceeding to next middleware')
       next()
       
@@ -135,7 +134,8 @@ export const createAddUserPermsDbForParamsUser = (dsManager, freezrPrefs, freezr
 
 /**
  * Middleware to add the user's appFS for public user files so they can be served
- * Looks up the public record and if it's a file record, sets up the user's appFS
+ * Looks up the public record and sets up the data owner's appFS
+ * Used by catch-all routes where publicId comes from req.path
  * 
  * @param {Object} dsManager - Data store manager
  * @param {Object} freezrPrefs - Freezr preferences
@@ -171,27 +171,19 @@ export const createPrepUserDSsForPublicFiles = (dsManager, freezrPrefs, freezrSt
       res.locals.freezr.publicRecord = publicRecord
       res.locals.freezr.publicid = publicId
 
-      // onsole.log('prepUserDSsForPublicFiles middleware', { publicRecord, publicId })
+      // Set up appFS for the data owner's app (needed for both files and ppage rendering)
+      const dataOwner = publicRecord.data_owner
+      const appName = publicRecord.requestor_app
 
-      // Check if this is a file record (app_table ends with .files)
-      if (endsWith(publicRecord.original_app_table, '.files')) {
-        const dataOwner = publicRecord.data_owner
-        const appTable = publicRecord.original_app_table
-        const appName = appTable.substring(0, appTable.lastIndexOf('.'))
-
-        // Get the user's appFS
+      if (dataOwner && appName) {
         try {
-          // onsole.log('prepUserDSsForPublicFiles middleware - getting userDS', { dataOwner, appName })
           const userDS = await dsManager.getOrSetUserDS(dataOwner, { freezrPrefs })
           const appFS = await userDS.getorInitAppFS(appName, { freezrPrefs })
           if (appFS) {
             res.locals.freezr.appFS = appFS
-          } else {
-            console.warn('⚠️  Could not get appFS for public file:', { dataOwner, appName })
           }
         } catch (error) {
-          console.error('❌ Error in prepUserDSsForPublicFiles middleware:', error)
-          // Continue anyway - controller will handle missing data
+          console.warn('Could not set up appFS for public record:', { dataOwner, appName })
         }
       }
 
@@ -199,7 +191,61 @@ export const createPrepUserDSsForPublicFiles = (dsManager, freezrPrefs, freezrSt
       
     } catch (error) {
       console.error('❌ Error in prepUserDSsForPublicFiles middleware:', error)
-      // Continue anyway - controller will handle missing data
+      next()
+    }
+  }
+}
+
+/**
+ * Middleware to look up a public record and set up the data owner's appFS
+ * Used by objectpage routes where publicId comes from req.params
+ * Sets res.locals.freezr.publicRecord and res.locals.freezr.appFS
+ * 
+ * @param {Object} dsManager - Data store manager
+ * @param {Object} freezrPrefs - Freezr preferences
+ * @param {Object} freezrStatus - Freezr status
+ * @returns {Function} Express middleware function
+ */
+export const createPrepAppFSForPublicRecord = (dsManager, freezrPrefs, freezrStatus) => {
+  return async (req, res, next) => {
+    try {
+      const publicRecordsDb = res.locals.freezr?.publicRecordsDb
+      if (!publicRecordsDb) return next()
+
+      // Build publicId from route params
+      let publicId
+      if (req.params.publicid) {
+        publicId = req.params.publicid
+      } else if (req.params.user_id && req.params.app_table && req.params.data_object_id) {
+        publicId = `@${req.params.user_id.toLowerCase()}/${req.params.app_table.toLowerCase()}/${req.params.data_object_id}`
+      }
+      if (!publicId) return next()
+
+      const publicRecord = await publicRecordsDb.read_by_id(publicId)
+      if (!publicRecord) return next()
+
+      res.locals.freezr.publicRecord = publicRecord
+      res.locals.freezr.publicid = publicId
+
+      // Set up appFS for the data owner's app (for ppage rendering)
+      const dataOwner = publicRecord.data_owner
+      const appName = publicRecord.requestor_app
+
+      if (dataOwner && appName) {
+        try {
+          const userDS = await dsManager.getOrSetUserDS(dataOwner, { freezrPrefs })
+          const appFS = await userDS.getorInitAppFS(appName, { freezrPrefs })
+          if (appFS) {
+            res.locals.freezr.appFS = appFS
+          }
+        } catch (error) {
+          console.warn('Could not set up appFS for public record:', { dataOwner, appName })
+        }
+      }
+
+      next()
+    } catch (error) {
+      console.error('❌ Error in prepAppFSForPublicRecord:', error)
       next()
     }
   }

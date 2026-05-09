@@ -52,7 +52,7 @@ export const handleCheckResource = async (req, res) => {
     const resource = req.body.resource
     const options = {}
 
-    // console.log('handleCheckResource - req.body.env', { env: req.body.env, isSetup, options })
+    // onsole.log('handleCheckResource - req.body.env', { env: req.body.env, isSetup, options })
     
     if (req.body.getRefreshToken) options.getRefreshToken = true
     if (!isSetup) options.okToCheckOnLocal = true
@@ -94,7 +94,7 @@ export const handleFirstSetUp = async (req, res) => {
     const { password } = req.body
     const userId = userIdFromUserInput(req.body.userId)
 
-    // console.log('firstSetUp - first time register (or resetting of parameters) for ' + userId + ' withfreezrInitialEnvCopy: ', freezrInitialEnvCopy)
+    // onsole.log('firstSetUp - first time register (or resetting of parameters) for ' + userId + ' withfreezrInitialEnvCopy: ', freezrInitialEnvCopy)
     
     // Validation
     if (isSetup) {
@@ -413,6 +413,7 @@ export const handleViaAdmin = async (req, res) => {
     const registerType = req.body.register_type // must be 'normal' for the moment
     const rawPassword = req.body.password
     const userId = userIdFromUserInput(req.body.user_id)
+    console.log('handleViaAdmin - userId', { userId, reqBody: req.body })
 
     // Validation
     if (!req.session.logged_in_as_admin || registerType !== 'normal') {
@@ -469,6 +470,17 @@ export const handleViaAdmin = async (req, res) => {
     if (existingUser) {   
       return sendAuthFailure(res, {
         error: 'User exists',
+        type: 'auth-userExists',
+        message: 'User exists',
+        statusCode: 409
+      })
+    }
+
+    // legacy check
+    const existinglegacyUser = await allUsersDb.query({ user_id: userId }, null)
+    if (existinglegacyUser && existinglegacyUser.length > 0) {
+      return sendAuthFailure(res, {
+        error: 'User exists legacy',
         type: 'auth-userExists',
         message: 'User exists',
         statusCode: 409
@@ -550,8 +562,6 @@ const handleSetupNewUserParams = async (req, res, action) => {
     const { password, email } = req.body
     const fsParams = checkAndCleanFs(req.body.env.fsParams, freezrInitialEnvCopy)
     const dbParams = checkAndCleanDb(req.body.env.dbParams, freezrInitialEnvCopy)
-
-    // console.log('setupNewUserParams', 'setupParams - setting of parameters for user :', req.body, { fsParams, dbParams })
 
     // Validation
     if (!uid) {

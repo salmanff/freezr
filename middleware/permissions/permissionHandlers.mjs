@@ -85,7 +85,7 @@ export const allRequestorAppPermissions = async (req, res) => {
 
 export const currentAppPermissions = async (req, res) => {
   try {
-    // console.log('🔐 allRequestorAppPermissions called')
+    // onsole.log('🔐 currentAppPermissions called')
     
     const targetApp = res.locals?.freezr?.tokenInfo?.app_name
     // console.log('🔐 Target app:', targetApp)

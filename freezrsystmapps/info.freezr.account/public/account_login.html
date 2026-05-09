@@ -19,8 +19,11 @@ options:
 
       <div id="errorBox" class="errorBox" style="margin-bottom: 1rem;"></div>
 
-      <div class="errorBox freezer_spacer" style="padding: 1rem; display: none; margin-bottom: 1rem;">
-        Security Warning: Do not use this page to login from a phone app. Only use this if you are on a web browser.
+      <div id="inAppSecurityWarning" class="errorBox freezer_spacer" style="padding: 1.5rem; display: none; margin-bottom: 1rem; border: 3px solid red; background-color: #ffe0e0; color: #a00; font-size: 16px; font-weight: bold; text-align: center; line-height: 1.5;">
+        ⚠️ SECURITY WARNING ⚠️<br/>
+        You appear to be viewing this page inside another app's browser.<br/>
+        Do NOT enter your full login details here — the app could potentially access your credentials and expose ALL your data.<br/>
+        Please open this page in your regular browser (Safari, Chrome, Firefox, etc.) to log in .... <br><br>... and then visit your app's settings to capture a login code or url for logging in safely.
       </div>
 
       <form name="login" id="login">
@@ -36,6 +39,9 @@ options:
 
       <div style="text-align: center;">
         <div class="freezrButt" id="loginButt" style="width: 50%;">Log In</div>
+        <div id="cookieNotice" style="margin-top: 0.75rem; font-size: 11px; color: var(--freezr-text-muted, #888); line-height: 1.4; max-width: 380px; margin-left: auto; margin-right: auto;">
+          🍪 freezr uses cookies to keep you logged in. Third party images / videos within apps may also add cookies, and unsafe apps you install could send the data from their app to their own servers.
+        </div>
       </div>
 
       <div style="margin-top: 2rem; text-align: center; display: none;" id="self_register_link">

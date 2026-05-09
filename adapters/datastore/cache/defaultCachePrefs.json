@@ -31,6 +31,14 @@
         "cacheAll": false,
         "cacheRecent": false,
         "cachePatterns": ["app_token"]
+      },
+      "info_freezr_admin_public_manifests": {
+        "cachePatterns": [["user_id", "app_name"]]
+      }
+    },
+    "public": {
+      "info_freezr_public_public_records": {
+        "cachePatterns": [["isPublic", "doNotList"], ["isPublic", "data_owner", "requestor_app"]]
       }
     }
   }

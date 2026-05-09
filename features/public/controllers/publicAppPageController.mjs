@@ -75,6 +75,12 @@ const generatePublicAppPage = async (req, res) => {
       return sendFailure(res, 'missingSystemAppFS', { function: 'public.generatePublicAppPage', redirectUrl: '/public?error=AppFS is Unavailable' }, 500 )
     }
     
+    // If page declares initial_data, fetch from public records DB for server-side mustache rendering
+    let queryresults = null
+    if (pageParams.initial_data && pageParams.initial_data.url) {
+      queryresults = await fetchInitialData(res, userId, appName, req, pageParams.initial_data)
+    }
+
     // Build page options for rendering
     const options = {
       use_non_public_skeleton: true,
@@ -94,7 +100,7 @@ const generatePublicAppPage = async (req, res) => {
       other_variables: null,
       freezr_server_version: res.locals.freezr.freezrVersion,
       server_name: res.locals.freezr.serverName,
-      queryresults: null,
+      queryresults,
       isPublic: true
     }
     
@@ -223,6 +229,88 @@ const servePublicPageOrFile = (req, res) => {
   } else {
     // It's a file - serve it
     return servePublicAppFile(req, res)
+  }
+}
+
+/**
+ * Recursively convert _$ prefixed keys back to $ (e.g. _$ne → $ne).
+ * nedb rejects keys starting with $ on storage, so manifests use _$ as an escape.
+ */
+function restoreDollarKeys (obj) {
+  if (Array.isArray(obj)) return obj.map(restoreDollarKeys)
+  if (obj === null || typeof obj !== 'object') return obj
+  const out = {}
+  for (const [k, v] of Object.entries(obj)) {
+    const key = k.startsWith('_$') ? '$' + k.slice(2) : k
+    out[key] = restoreDollarKeys(v)
+  }
+  return out
+}
+
+/**
+ * Fetch initial data from the public records DB for server-side mustache rendering.
+ * Mirrors the logic in publicApiController.query but runs internally (no HTTP round-trip).
+ *
+ * @param {Object} res - Express response (for accessing publicRecordsDb)
+ * @param {string} userId - Data owner
+ * @param {string} appName - App identifier
+ * @param {Object} req - Express request (for query-string params like maxdate)
+ * @returns {Object|null} { results: [...] } or null on error
+ */
+async function fetchInitialData (res, userId, appName, req, initialData) {
+  try {
+    const publicRecordsDb = res.locals.freezr?.publicRecordsDb
+    if (!publicRecordsDb) {
+      console.warn('fetchInitialData: publicRecordsDb not available')
+      return null
+    }
+
+    const queryParams = {
+      data_owner: userId.toLowerCase(),
+      requestor_app: appName.toLowerCase(),
+      isPublic: true
+    }
+
+    // Merge manifest-declared query filters
+    // Keys use _$ prefix in manifest to avoid nedb's $ restriction; restore here
+    if (initialData && initialData.query) {
+      Object.assign(queryParams, restoreDollarKeys(initialData.query))
+    }
+
+    // Support ?maxdate=<timestamp> for pagination
+    if (req.query && req.query.maxdate) {
+      const before = parseInt(req.query.maxdate)
+      if (!isNaN(before)) {
+        queryParams._date_published = { $lt: before }
+      }
+    }
+
+    const sort = { _date_published: -1 }
+    const count = 20
+    const skip = 0
+
+    console.log('fetchInitialData: queryParams:', queryParams)
+
+    const results = await publicRecordsDb.query(queryParams, { sort, count, skip })
+    if (!results || !results.length) return { results: [] }
+
+    const mapped = results.map(rec => {
+      if (!rec || !rec.original_record) return null
+      const out = { ...rec.original_record }
+      out._app_name = rec.requestor_app
+      out._data_owner = rec.data_owner
+      out._date_published = rec._date_published || rec._date_created
+      out.__date_published = rec._date_published
+        ? new Date(rec._date_published).toLocaleDateString()
+        : 'n/a'
+      out._id = rec._id
+      return out
+    }).filter(Boolean)
+
+    return { results: mapped }
+  } catch (err) {
+    console.error('fetchInitialData error:', err)
+    return null
   }
 }
 

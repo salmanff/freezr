@@ -125,6 +125,31 @@ const renderStreamingFiles = (files) => {
   return `<div class="stream-file-list" id="chatStreamingFiles">${items}</div>`
 }
 
+const REFACTOR_DISMISS_REGROW = 200
+
+const visibleRefactorBanners = (chatState) => {
+  const largeFiles = chatState.largeFiles || []
+  const dismissed = chatState.refactorBannerDismissed || {}
+  return largeFiles.filter((f) => {
+    const prev = dismissed[f.path]
+    if (typeof prev !== 'number') return true
+    return f.lineCount >= prev + REFACTOR_DISMISS_REGROW
+  })
+}
+
+const renderRefactorBanner = (chatState) => {
+  const visible = visibleRefactorBanners(chatState)
+  if (visible.length === 0) return ''
+  const items = visible.map((f) => `<div class="chat-refactor-banner-item">
+    <div class="chat-refactor-banner-text"><strong>${escHtml(f.path)}</strong> is ${f.lineCount} lines. Refactor into smaller modules before continuing?</div>
+    <div class="chat-refactor-banner-actions">
+      <button class="panel-cta panel-cta-sm" data-action="refactor-yes" data-file-path="${escHtml(f.path)}" data-line-count="${f.lineCount}">Yes, refactor</button>
+      <button class="panel-cta panel-cta-sm panel-cta-secondary" data-action="refactor-dismiss" data-file-path="${escHtml(f.path)}" data-line-count="${f.lineCount}">Not now</button>
+    </div>
+  </div>`).join('')
+  return `<div class="chat-refactor-banner">${items}</div>`
+}
+
 const renderUsageInfo = (msg) => {
   const parts = []
   if (msg.llmModel) parts.push(escHtml(msg.llmModel))
@@ -324,6 +349,7 @@ export const renderChatPanel = ({ container, state, setState, renderOptions }) =
         ${showNewChat ? `<button class="panel-cta panel-cta-sm" data-action="new-chat" ${sending ? 'disabled' : ''}>New Chat</button>` : ''}
       </div>
       ${hasMessages ? '' : inputAreaHtml}
+      ${renderRefactorBanner(chatState)}
       <div class="chat-messages" id="chatMessages">
         ${messagesHtml}
         ${sending
@@ -456,6 +482,36 @@ export const renderChatPanel = ({ container, state, setState, renderOptions }) =
       })
     }
   }
+
+  container.querySelectorAll('[data-action="refactor-yes"]').forEach((btn) => {
+    btn.onclick = () => {
+      const filePath = btn.dataset.filePath
+      if (!filePath) return
+      const prompt = 'Please refactor `' + filePath + '` into smaller modules grouped by concern (data, UI, helpers, etc.). Keep behavior unchanged. Update manifest.json\'s `modules` array and `files` list so each new file is registered with a one-sentence Description.'
+      setState((next) => {
+        if (!next.chat) next.chat = {}
+        next.chat.draftMessage = prompt
+        if (next.chat.largeFiles) {
+          next.chat.largeFiles = next.chat.largeFiles.filter((f) => f.path !== filePath)
+        }
+        return next
+      }, { sourcePanel: 'chat' })
+    }
+  })
+
+  container.querySelectorAll('[data-action="refactor-dismiss"]').forEach((btn) => {
+    btn.onclick = () => {
+      const filePath = btn.dataset.filePath
+      const lineCount = parseInt(btn.dataset.lineCount, 10)
+      if (!filePath || !Number.isFinite(lineCount)) return
+      setState((next) => {
+        if (!next.chat) next.chat = {}
+        if (!next.chat.refactorBannerDismissed) next.chat.refactorBannerDismissed = {}
+        next.chat.refactorBannerDismissed[filePath] = lineCount
+        return next
+      }, { sourcePanel: 'chat' })
+    }
+  })
 
   const retryBtn = container.querySelector('[data-action="retry"]')
   if (retryBtn) {

@@ -57,7 +57,10 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
     /**
    * GET /ceps/ping
    * Ping endpoint to check server status and authentication
-   * 
+   *
+   * Auth: session cookie OR Authorization: Bearer <oauth_access_token>.
+   * If neither is present, responds with logged_in:false (no error).
+   *
    * Returns:
    * - logged_in: boolean
    * - logged_in_as_admin: boolean (if logged in)
@@ -66,7 +69,15 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * - server_version: string
    * - storageLimits: object (if logged in)
    */
-    router.get('/ping', setupGuard, addStorageLimits, cepsApiController.ping)
+    // Run Bearer-token validation only when no session cookie exists but an
+    // Authorization header is supplied -- so native clients (iOS, curl) get
+    // storageLimits while anonymous callers still get a clean logged_in:false.
+    const pingOptionalBearer = (req, res, next) => {
+      if (req.session?.logged_in_user_id) return next()
+      if (!req.headers.authorization || !req.headers.authorization.startsWith('Bearer ')) return next()
+      return getAppTokenInfo(req, res, next)
+    }
+    router.get('/ping', setupGuard, pingOptionalBearer, addStorageLimits, cepsApiController.ping)
 
   /**
    * POST /ceps/write/:app_table

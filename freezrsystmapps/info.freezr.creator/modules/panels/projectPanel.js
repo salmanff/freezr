@@ -6,7 +6,7 @@ import { fetchFolderTree } from '../fileTree.js'
 import { renderManifestEditor, loadManifestForApp } from './manifestRenderer.js'
 import { calculateProjectCost, calculateEntryCost, formatCost, formatTokens } from '../priceService.js'
 import { escHtml } from '../utils.js'
-import { sendChatMessage } from '../chatService.js'
+import { sendChatMessage, detectLargeFiles } from '../chatService.js'
 
 const ACCOUNT_RESOURCES_LINK = '/account/resources'
 const formatAppNameForHeader = (name) => escHtml(name || 'Project').replace(/\./g, '.<wbr>')
@@ -151,6 +151,9 @@ export const loadApp = async (appName, setState) => {
       if (!next.file) next.file = {}
       next.file.openFilePath = null
       next.file.openFileContent = null
+      if (!next.chat) next.chat = {}
+      next.chat.largeFiles = []
+      next.chat.refactorBannerDismissed = {}
       calculateAndStoreProjectCost(next, history)
       next.loading.active = false
       next.loading.text = ''
@@ -159,6 +162,7 @@ export const loadApp = async (appName, setState) => {
     })
 
     loadManifestForApp(appName, setState)
+    detectLargeFiles(appName, setState)
   } catch (error) {
     setState((next) => {
       if (!next.loading) next.loading = {}

@@ -334,7 +334,9 @@ const freezr = (function() {
       const isSingleRecord = typeof idOrQuery === 'string'
       const id = typeof idOrQuery === 'string' ? idOrQuery : null
       
-      if (shouldUseFeps(['permission_name', 'owner_id'], options) || !isSingleRecord) {
+      if (shouldUseFeps(['permission_name', 'owner_id'], options) || 
+          !isSingleRecord || 
+          collectionOrAppTable === 'files' || collectionOrAppTable.endsWith('.files')) {
         const url = (options.host || '') + '/feps/delete/' + appTable + 
                     (id ? ('/' + id) : '')
         const body = id ? {} : { q: idOrQuery }

@@ -286,15 +286,35 @@ const fetchAllFiles = async (appName) => {
 
 const EXCLUDED_FROM_CONTEXT = new Set(['freezrApiV2.js'])
 
+const REFACTOR_LINE_THRESHOLD = 600
+
 const buildFilesContext = (files) => {
   return files
     .filter((f) => !EXCLUDED_FROM_CONTEXT.has(f.path))
     .map((f) => {
       if (f.readOnly) return '--- FILE: ' + f.path + ' (READ-ONLY reference) ---\n' + f.content + '\n--- END FILE ---'
-      const lineCount = (f.content || '').split('\n').length
-      const sizeHint = lineCount > 80 ? ' (' + lineCount + ' lines — use action="edit" for targeted changes)' : ''
-      return '--- FILE: ' + f.path + sizeHint + ' ---\n' + (f.content || '') + '\n--- END FILE ---'
+      return '--- FILE: ' + f.path + ' ---\n' + (f.content || '') + '\n--- END FILE ---'
     }).join('\n\n')
+}
+
+const computeLargeFiles = (files) => (files || [])
+  .filter((f) => !f.readOnly && f.content && !EXCLUDED_FROM_CONTEXT.has(f.path))
+  .map((f) => ({ path: f.path, lineCount: (f.content || '').split('\n').length }))
+  .filter((f) => f.lineCount > REFACTOR_LINE_THRESHOLD)
+
+export const detectLargeFiles = async (appName, setState) => {
+  if (!appName) return
+  try {
+    const files = await fetchAllFiles(appName)
+    const largeFiles = computeLargeFiles(files)
+    setState((next) => {
+      if (!next.chat) next.chat = {}
+      next.chat.largeFiles = largeFiles
+      return next
+    }, { rerender: true, sourcePanel: 'chat' })
+  } catch (error) {
+    console.warn('Could not detect large files for', appName, error)
+  }
 }
 
 const PERMISSION_TYPES_WITH_TARGET_MANIFEST = new Set(['read_all', 'write_all', 'write_own'])
@@ -435,6 +455,13 @@ export const sendChatMessage = async (userMessage, state, setState) => {
 
     const currentState = { ...state, chat: { ...state.chat, chatId, messages: [...(state.chat?.messages || []), { role: 'user', content: userMessage, timestamp }] } }
     const { messages, context, allFiles } = await buildPrompt(userMessage, currentState)
+
+    const largeFiles = computeLargeFiles(allFiles)
+    setState((next) => {
+      if (!next.chat) next.chat = {}
+      next.chat.largeFiles = largeFiles
+      return next
+    }, { rerender: false })
 
     console.log('messages', messages)
     const requestedModel = state.llm?.model || null

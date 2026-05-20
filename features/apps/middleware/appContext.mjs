@@ -393,12 +393,12 @@ export const createAddStorageLimits = (dsManager, freezrPrefs) => {
     // onsole.log('💾 addUserDs middleware called')
     
     try {
-      const owner = req.session?.logged_in_user_id
+      const owner = req.session?.logged_in_user_id || res.locals.freezr?.tokenInfo?.requestor_id
 
       if (!owner) {
         return next()
       }
-      
+
       // Get userDS
       const userDS = await dsManager.getOrSetUserDS(owner, { freezrPrefs })
       

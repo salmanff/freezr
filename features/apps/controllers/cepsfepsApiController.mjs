@@ -59,10 +59,13 @@ export const createCepsApiController = () => {
   const ping = function (req, res) {
     if (!res.locals.freezr) res.locals.freezr = {}
     res.locals.freezr.permGiven = true
-    if (!req.session?.logged_in_user_id) {
+    const sessionUserId = req.session?.logged_in_user_id
+    const tokenUserId = res.locals.freezr?.tokenInfo?.requestor_id
+    const userId = sessionUserId || tokenUserId
+    if (!userId) {
       return sendApiSuccess(res, { logged_in: false, server_type: 'info.freezr', server_version: res.locals.freezr?.freezrPrefs?.version })
     } else {
-      return sendApiSuccess(res, { logged_in: true, logged_in_as_admin: req.session.logged_in_as_admin, user_id: req.session.logged_in_user_id, server_type: 'info.freezr', storageLimits: res.locals?.freezr?.freezrStorageLimits  })
+      return sendApiSuccess(res, { logged_in: true, logged_in_as_admin: !!req.session?.logged_in_as_admin, user_id: userId, server_type: 'info.freezr', server_version: res.locals.freezr?.freezrPrefs?.version, storageLimits: res.locals?.freezr?.freezrStorageLimits })
     }
   }
   /**

@@ -1,0 +1,87 @@
+{
+  "_documentation": [
+    "Registry of system-app permission exceptions. Each entry documents a permission",
+    "that is auto-granted (or otherwise resolved) for a system app outside the standard",
+    "user-grant flow.",
+    "",
+    "Field names mirror freezr's existing permission record schema (see",
+    "middleware/permissions/permissionDefinitions.mjs) so the same vocabulary applies:",
+    "  - requestor_app:    the app the grant is for",
+    "  - type:             permission type from PERMISSION_DEFINITIONS (use_mail, use_llm, ...)",
+    "  - name:             permission name (matches manifest, used for keying)",
+    "  - granted, description:  pass through to the fabricated record",
+    "  - PERMISSION_FIELD_EXCEPTIONS_BY_TYPE fields (connection_names, scopes, ...): typed defaults",
+    "  - system_perm:      always true here; marker for audits",
+    "  - reason:           human-readable rationale for the exception",
+    "",
+    "How shortcuts are applied at runtime:",
+    "  Middleware (llmContext.mjs, mailContext.mjs, ...) loads the user's granted perms",
+    "  for (requestor_app, type) from the DB, then asks getSystemPermissionsFor to layer",
+    "  any matching entries from this file on top. The fabricated record is in-memory only;",
+    "  it is NOT written to the user's permissions DB. Removing an entry here disables",
+    "  the shortcut immediately for all users — no DB cleanup needed.",
+    "",
+    "Long-term: when the full system-app install pipeline lands",
+    "(see freezr_system_apps_design.md) this file becomes the source of truth for those",
+    "shortcuts, and the install pipeline reads it to know which permissions to auto-grant",
+    "vs. leave pending."
+  ],
+
+  "exceptions": [
+    {
+      "requestor_app": "info.freezr.connections",
+      "type": "use_mail",
+      "name": "mail_readwrite",
+      "granted": true,
+      "system_perm": true,
+      "connection_names": ["*"],
+      "scopes": ["read", "write"],
+      "description": "Built-in connections app reads and writes (send, mark-read, trash, delete) on any of the user's mail-enabled connections.",
+      "reason": "info.freezr.connections is the system viewer + workable client surfacing data the user manages at /account/resources. Write scope is needed for the Part-3 mail client (send / draft / mark-read / trash / delete). Per-connection write is still gated user-side by connection.access.mail === 'readwrite' — the system shortcut just removes the app-side grant dialog."
+    },
+
+    {
+      "requestor_app": "info.freezr.connections",
+      "type": "use_contacts",
+      "name": "contacts_readwrite",
+      "granted": true,
+      "system_perm": true,
+      "connection_names": ["*"],
+      "scopes": ["read", "write"],
+      "description": "Built-in connections app reads and writes contacts on any of the user's contacts-enabled connections.",
+      "reason": "Mirrors use_mail. Per-connection write is still gated user-side by connection.access.contacts === 'readwrite'."
+    },
+
+    {
+      "requestor_app": "info.freezr.connections",
+      "type": "use_calendar",
+      "name": "calendar_readwrite",
+      "granted": true,
+      "system_perm": true,
+      "connection_names": ["*"],
+      "scopes": ["read", "write"],
+      "description": "Built-in connections app reads and writes calendar events on any of the user's calendar-enabled connections.",
+      "reason": "Mirrors use_mail. Per-connection write is still gated user-side by connection.access.calendar === 'readwrite'."
+    },
+
+    {
+      "requestor_app": "info.freezr.creator",
+      "type": "use_llm",
+      "name": "creator_llm",
+      "granted": true,
+      "system_perm": true,
+      "description": "Built-in creator app uses the user's LLM keys.",
+      "reason": "Legacy exception (predates the §2.4 principle). Consolidated here from a middleware-side `if (requestorApp === 'info.freezr.creator')` block. Behavior unchanged."
+    },
+
+    {
+      "requestor_app": "info.freezr.admin",
+      "type": "use_3pFunction",
+      "name": "admin_local_functions",
+      "granted": true,
+      "system_perm": true,
+      "description": "Admin app installs / removes / lists local (trusted) 3rd-party functions on the server.",
+      "reason": "info.freezr.admin/addlocalmicroservice.js calls freezr.serverless.upsertLocal / deleteLocal / getAllLocalFunctions. Pulls in the freezrApiV2.serverless.js add-on for admin pages."
+    }
+  ]
+}

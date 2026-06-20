@@ -1,0 +1,117 @@
+<!--
+  info.freezr.connections / mail.html
+  Three-pane mail client: folders | message list | reading pane.
+  All interactivity is wired up from mail.js (CSP blocks inline scripts).
+-->
+<div class="mail-app" id="mailApp" data-mobile-view="list">
+
+  <!-- Top toolbar -->
+  <div class="mail-toolbar">
+    <span class="mail-toolbar-title">Mail</span>
+    <select id="accountPicker" aria-label="Account"></select>
+    <span class="mail-account-meta" id="accountMeta"></span>
+    <span class="mail-toolbar-spacer"></span>
+    <button class="mail-btn" id="btnGetNew" title="Fetch new messages since last sync (falls back to a full reload if the delta cursor has expired)">&#x2193; Get new</button>
+    <button class="mail-btn mail-btn-primary" id="btnCompose" title="Compose a new message">&#x270E; Compose</button>
+  </div>
+
+  <!-- Banners -->
+  <div class="mail-banner error" id="warnBanner" style="display:none;"></div>
+  <div class="mail-banner warn"  id="reauthBanner" style="display:none;"></div>
+  <div class="mail-banner info"  id="infoBanner" style="display:none;"></div>
+
+  <!-- Three panes -->
+  <div class="mail-panes">
+
+    <!-- Folders -->
+    <aside class="mail-pane folders">
+      <div class="mail-pane-header">Folders</div>
+      <div class="mail-pane-body">
+        <ul class="mail-folder-list" id="folderList"></ul>
+      </div>
+    </aside>
+
+    <!-- Message list -->
+    <section class="mail-pane messages">
+      <div class="mail-pane-header">
+        <span id="currentFolderLabel">Inbox</span>
+        <span id="listSpinner" class="mail-spinner" style="display:none;"></span>
+      </div>
+      <div class="mail-pane-body">
+        <ul class="mail-list" id="messageList"></ul>
+        <div class="mail-load-more" id="loadMoreWrap" style="display:none;">
+          <button class="mail-btn" id="btnLoadMore">Load more</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Reading pane -->
+    <section class="mail-pane reader">
+      <div class="mail-pane-header">
+        <span id="readerStatus">No message selected</span>
+        <button class="mail-btn" id="btnBackToList" style="display:none;">&larr; Back</button>
+      </div>
+      <div class="mail-pane-body">
+        <div class="mail-reader-empty" id="readerEmpty">Select a message to read.</div>
+
+        <div class="mail-reader" id="readerView" style="display:none;">
+          <div class="mail-reader-header">
+            <h2 class="mail-reader-subject" id="readerSubject"></h2>
+            <div class="mail-reader-meta" id="readerMeta"></div>
+          </div>
+
+          <div class="mail-reader-actions" id="readerActions">
+            <button class="mail-btn" id="btnReply" title="Reply">&#x21A9; Reply</button>
+            <button class="mail-btn" id="btnMarkRead" title="Toggle read/unread">Mark unread</button>
+            <button class="mail-btn" id="btnTrash" title="Send to Trash">Trash</button>
+            <button class="mail-btn mail-btn-danger" id="btnDelete" title="Permanently delete (no undo)">Delete</button>
+            <span class="mail-toolbar-spacer"></span>
+            <span class="mail-compose-status" id="readerActionStatus"></span>
+          </div>
+
+          <div class="mail-attachments" id="readerAttachments" style="display:none;"></div>
+
+          <div class="mail-reader-body" id="readerBody"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Compose modal -->
+  <div class="mail-compose-backdrop" id="composeBackdrop">
+    <div class="mail-compose" role="dialog" aria-label="Compose message">
+      <div class="mail-compose-header">
+        <span id="composeTitle">New Message</span>
+        <button class="mail-compose-close" id="composeClose" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="mail-compose-fields">
+        <label for="composeTo">To</label>
+        <input type="text" id="composeTo" placeholder="recipient@example.com, ..."/>
+        <label for="composeCc">Cc</label>
+        <input type="text" id="composeCc" placeholder="(optional)"/>
+        <label for="composeSubject">Subject</label>
+        <input type="text" id="composeSubject" placeholder="(no subject)"/>
+      </div>
+
+      <div class="mail-compose-body">
+        <textarea id="composeBody" placeholder="Write your message…"></textarea>
+      </div>
+
+      <div class="mail-compose-attach">
+        <label class="mail-btn" for="composeFile">+ Add attachment</label>
+        <input type="file" id="composeFile" multiple style="display:none;"/>
+        <span id="composeAttachHint" style="margin-left:0.5rem;">Files are sent inline (keep total under ~20 MB).</span>
+        <div class="mail-compose-attach-list" id="composeAttachList"></div>
+      </div>
+
+      <div class="mail-compose-actions">
+        <button class="mail-btn mail-btn-primary" id="btnSend">Send</button>
+        <button class="mail-btn" id="btnSaveDraft">Save draft</button>
+        <span class="mail-compose-actions-spacer"></span>
+        <span class="mail-compose-status" id="composeStatus"></span>
+      </div>
+    </div>
+  </div>
+
+</div>

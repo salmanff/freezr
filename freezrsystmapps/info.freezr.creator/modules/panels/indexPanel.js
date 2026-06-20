@@ -1,6 +1,7 @@
 /* global freezr */
 import { labelForAction } from '../historyActions.js'
 import { renderFileTree, fetchFileContent } from '../fileTree.js'
+import { openComp } from './filePanel.js'
 import { showError } from '../showError.js'
 import { formatCost, formatTokens } from '../priceService.js'
 import { escHtml } from '../utils.js'
@@ -168,9 +169,10 @@ const renderHistoryTab = (history) => {
 
       const hasExpandableContent = hasFiles || usageHtml || detailHtml
       if (hasExpandableContent) {
+        const extAttr = entry.action === 'external_change' ? ' data-external="1"' : ''
         const filesHtml = hasFiles
           ? entry.filesChanged.map((f) =>
-              `<span class="idx-file-tag" data-file-path="${escHtml(f)}" data-history-id="${escHtml(historyId)}">${escHtml(f)}</span>`
+              `<span class="idx-file-tag" data-file-path="${escHtml(f)}" data-history-id="${escHtml(historyId)}"${extAttr}>${escHtml(f)}</span>`
             ).join(' ')
           : ''
         html += `<div class="idx-history-group idx-group-collapsed-init">
@@ -354,15 +356,33 @@ export const renderIndexPanel = ({ container, state, setState }) => {
         const filePath = tag.dataset.filePath
         const historyId = tag.dataset.historyId || null
         const chatId = tag.dataset.chatId || null
+        const isExternal = tag.dataset.external === '1'
         if (!filePath || !appName) return
 
         tag.classList.add('ft-file-loading')
         try {
           const mobile = isMobile()
 
+          // External-change files: open the full compare view (live vs the
+          // creator's last-known snapshot) rather than a single-version view.
+          if (isExternal) {
+            setState((next) => {
+              if (!next.file) next.file = {}
+              if (!next.file.ui) next.file.ui = {}
+              if (mobile) {
+                if (next.index?.ui) next.index.ui.visible = false
+                if (next.chat?.ui) next.chat.ui.visible = false
+              }
+              next.file.ui.visible = true
+              return next
+            }, { sourcePanel: 'file' })
+            await openComp(appName, filePath, state, setState)
+            return
+          }
+
           if (historyId || chatId) {
             const query = historyId ? { historyId, path: filePath } : { chatId, path: filePath }
-            const updates = await freezr.query('fileUpdates', query, { sort: { timestamp: -1 }, count: 1 })
+            const updates = await freezr.query('fileUpdates', query, { sort: { _date_modified: -1 }, count: 1 })
             const historicalContent = (updates && updates.length > 0) ? (updates[0].content || '') : null
 
             if (historicalContent !== null) {

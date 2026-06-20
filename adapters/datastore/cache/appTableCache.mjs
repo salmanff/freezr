@@ -6,6 +6,7 @@
 // It cannot access other tables' or users' data even if it tries.
 
 import cacheConfig from './cacheConfig.mjs'
+import { cmLog } from '../../../common/debug/consoleFlags.mjs'
 import {
   hashQuery,
   isDefaultSort,
@@ -211,7 +212,7 @@ class AppTableCache {
     if (isWIP) {
       this.stats.dbHits++
       // console.warn('🔴 Cache WIP - cahche filling is taking too long for', { query, owner: this.owner, appTable: this.appTable } )
-      console.log('C-M ⏳⏳⏳⏳⏳ CACHE WIP - cache filling taking too long, going to DB', { table: this.appTable, query })
+      cmLog('C-M ⏳⏳⏳⏳⏳ CACHE WIP - cache filling taking too long, going to DB', { table: this.appTable, query })
       return null
     }
     
@@ -249,7 +250,7 @@ class AppTableCache {
     // Check WIP flags - if cache is being populated, query DB directly
     if (this.wipFlags.Recent || (this.cacheAll && this.wipFlags.All)) {
       // onsole.log('📦 Cache WIP - querying DB directly for empty/date sort query', { wipRecent: this.wipFlags.Recent, wipAll: this.wipFlags.All })
-      console.log('C-M ⏳⏳⏳⏳⏳ CACHE WIP - empty/date query going to DB', { table: this.appTable, wipRecent: this.wipFlags.Recent, wipAll: this.wipFlags.All, owner: this.owner })
+      cmLog('C-M ⏳⏳⏳⏳⏳ CACHE WIP - empty/date query going to DB', { table: this.appTable, wipRecent: this.wipFlags.Recent, wipAll: this.wipFlags.All, owner: this.owner })
       this.stats.dbHits++
       return null
     }
@@ -259,7 +260,7 @@ class AppTableCache {
     if (recentRecords !== null) {
       const filtered = filterRecords(recentRecords, query, options)
       this.stats.cacheHits++
-      console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Recent) - empty/date query', { table: this.appTable, resultCount: filtered?.length, owner: this.owner })
+      cmLog('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Recent) - empty/date query', { table: this.appTable, resultCount: filtered?.length, owner: this.owner })
       return filtered
     }
     
@@ -269,14 +270,14 @@ class AppTableCache {
       if (allRecords !== null) {
         const filtered = filterRecords(allRecords, query, options)
         this.stats.cacheHits++
-        console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (All) - empty/date query', { table: this.appTable, resultCount: filtered?.length })
+        cmLog('C-M 🟢🟢🟢🟢🟢 CACHE HIT (All) - empty/date query', { table: this.appTable, resultCount: filtered?.length })
         return filtered
       }
     }
     
     // 3. Cache miss - caller should hit DB
     this.stats.dbHits++
-    console.log('C-M 🔵🔵🔵🔵🔵 CACHE MISS - empty/date query going to DB', { table: this.appTable })
+    cmLog('C-M 🔵🔵🔵🔵🔵 CACHE MISS - empty/date query going to DB', { table: this.appTable })
     return null
   }
   
@@ -288,7 +289,7 @@ class AppTableCache {
     // Check WIP flags - if All cache is being populated, don't trust it yet
     if (this.cacheAll && this.wipFlags.All) {
       // onsole.log('📦 Cache WIP - querying DB directly for byKey query', { field, value, wipAll: this.wipFlags.All })
-      console.log('C-M ⏳⏳⏳⏳⏳ CACHE WIP - byKey query going to DB', { table: this.appTable, field, value })
+      cmLog('C-M ⏳⏳⏳⏳⏳ CACHE WIP - byKey query going to DB', { table: this.appTable, field, value })
       
       this.stats.dbHits++
       return null
@@ -304,10 +305,10 @@ class AppTableCache {
       const skip = options?.skip || 0
       const count = options?.count || options?.limit || 0
       if (count && (skip + count > byKeyResult.length)) {
-        console.log('C-M 🔵🔵🔵🔵🔵 CACHE INSUFFICIENT (byKey) - have', byKeyResult.length, 'need', skip + count, { table: this.appTable, field, value })
+        cmLog('C-M 🔵🔵🔵🔵🔵 CACHE INSUFFICIENT (byKey) - have', byKeyResult.length, 'need', skip + count, { table: this.appTable, field, value })
       } else {
         this.stats.cacheHits++
-        console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (byKey)', { table: this.appTable, field, value, resultCount: Array.isArray(byKeyResult) ? byKeyResult.length : 1 })
+        cmLog('C-M 🟢🟢🟢🟢🟢 CACHE HIT (byKey)', { table: this.appTable, field, value, resultCount: Array.isArray(byKeyResult) ? byKeyResult.length : 1 })
         return filterRecords(byKeyResult, {}, options)
       }
     }
@@ -319,7 +320,7 @@ class AppTableCache {
         const filtered = filterRecords(allRecords, query, options)
         // onsole.log('📦 Cache - got a simple query byKey miss - All cache', { field, value, query, allRecordsLen: allRecords?.length, filteredLen: filtered?.length } )
         this.stats.cacheHits++
-        console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (All) - byKey fallback', { table: this.appTable, field, value, resultCount: filtered?.length })
+        cmLog('C-M 🟢🟢🟢🟢🟢 CACHE HIT (All) - byKey fallback', { table: this.appTable, field, value, resultCount: filtered?.length })
         return filtered  // If All exists and no match, return empty (don't check DB)
       }
     }
@@ -335,7 +336,7 @@ class AppTableCache {
       const filtered = filterRecords(recentRecords, query, options)
       if (filtered.length >= count) {
         this.stats.cacheHits++
-        console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Recent) - byKey fallback', { table: this.appTable, field, value, resultCount: filtered.length, owner: this.owner })
+        cmLog('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Recent) - byKey fallback', { table: this.appTable, field, value, resultCount: filtered.length, owner: this.owner })
         return filtered
       }
       // If not in Recent, continue to Query cache (might be older record)
@@ -346,14 +347,14 @@ class AppTableCache {
     if (queryResult !== null) {
       this.stats.cacheHits++
       // onsole.log('📦 Cache query Query - this should have been caufght by key query key snbh ?? ', { query, options, queryResult } )
-      console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Query) - byKey fallback', { table: this.appTable, field, value, owner: this.owner })
+      cmLog('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Query) - byKey fallback', { table: this.appTable, field, value, owner: this.owner })
       
       return queryResult
     }
     
     // 5. Cache miss - caller should hit DB
     this.stats.dbHits++
-    console.log('C-M 🔵🔵🔵🔵🔵 CACHE MISS - byKey query going to DB', { table: this.appTable, field, value })
+    cmLog('C-M 🔵🔵🔵🔵🔵 CACHE MISS - byKey query going to DB', { table: this.appTable, field, value })
     return null
   }
   
@@ -365,7 +366,7 @@ class AppTableCache {
     // Check WIP flags - if cache is being populated, query DB directly
     if (this.wipFlags.Recent || (this.cacheAll && this.wipFlags.All)) {
       // onsole.log('📦 Cache WIP - querying DB directly for date query', { wipRecent: this.wipFlags.Recent, wipAll: this.wipFlags.All })
-      console.log('C-M ⏳⏳⏳⏳⏳ CACHE WIP - date query going to DB', { table: this.appTable, timestamp })
+      cmLog('C-M ⏳⏳⏳⏳⏳ CACHE WIP - date query going to DB', { table: this.appTable, timestamp })
       
       this.stats.dbHits++
       return null
@@ -379,7 +380,7 @@ class AppTableCache {
         // Recent cache is complete - can answer definitively
         const filtered = filterRecords(recentRecords, query, options)
         this.stats.cacheHits++
-        console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Recent-complete) - date query', { table: this.appTable, timestamp, resultCount: filtered?.length })
+        cmLog('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Recent-complete) - date query', { table: this.appTable, timestamp, resultCount: filtered?.length })
         return filtered
       }
       // Recent cache exists but doesn't cover this timestamp
@@ -387,7 +388,7 @@ class AppTableCache {
       const filtered = filterRecords(recentRecords, query, options)
       if (filtered.length > 0) {
         this.stats.cacheHits++
-        console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Recent-partial) - date query', { table: this.appTable, timestamp, resultCount: filtered.length })
+        cmLog('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Recent-partial) - date query', { table: this.appTable, timestamp, resultCount: filtered.length })
         return filtered
       }
     }
@@ -398,14 +399,14 @@ class AppTableCache {
       if (allRecords !== null) {
         const filtered = filterRecords(allRecords, query, options)
         this.stats.cacheHits++
-        console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (All) - date query', { table: this.appTable, timestamp, resultCount: filtered?.length })
+        cmLog('C-M 🟢🟢🟢🟢🟢 CACHE HIT (All) - date query', { table: this.appTable, timestamp, resultCount: filtered?.length })
         return filtered  // All is authoritative
       }
     }
     
     // 3. Cache miss - caller should hit DB
     this.stats.dbHits++
-    console.log('C-M 🔵🔵🔵🔵🔵 CACHE MISS - date query going to DB', { table: this.appTable, timestamp })
+    cmLog('C-M 🔵🔵🔵🔵🔵 CACHE MISS - date query going to DB', { table: this.appTable, timestamp })
     return null
   }
   
@@ -419,7 +420,7 @@ class AppTableCache {
     if (!options) options = {}
     if (this.cacheAll && this.wipFlags.All) {
       // onsole.log('📦 Cache WIP - querying DB directly for general query (All cache being populated)', { wipAll: this.wipFlags.All })
-      console.log('C-M ⏳⏳⏳⏳⏳ CACHE WIP - general query going to DB', { table: this.appTable, query })
+      cmLog('C-M ⏳⏳⏳⏳⏳ CACHE WIP - general query going to DB', { table: this.appTable, query })
       
       this.stats.dbHits++
       return null
@@ -429,7 +430,7 @@ class AppTableCache {
     const queryResult = this._getQueryCache(query, options)
     if (queryResult !== null) {
       this.stats.cacheHits++
-      console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Query) - general query', { table: this.appTable, query })
+      cmLog('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Query) - general query', { table: this.appTable, query })
       return queryResult
     }
     
@@ -439,14 +440,14 @@ class AppTableCache {
       if (allRecords !== null) {
         const filtered = filterRecords(allRecords, query, options)
         this.stats.cacheHits++
-        console.log('C-M 🟢🟢🟢🟢🟢 CACHE HIT (All) - general query', { table: this.appTable, resultCount: filtered?.length })
+        cmLog('C-M 🟢🟢🟢🟢🟢 CACHE HIT (All) - general query', { table: this.appTable, resultCount: filtered?.length })
         return filtered  // All is authoritative - don't check DB
       }
     }
     
     // 3. Cache miss - caller should hit DB
     this.stats.dbHits++
-    console.log('C-M 🔵🔵🔵🔵🔵 CACHE MISS - general query going to DB', { table: this.appTable, query })
+    cmLog('C-M 🔵🔵🔵🔵🔵 CACHE MISS - general query going to DB', { table: this.appTable, query })
     return null
   }
   
@@ -463,7 +464,7 @@ class AppTableCache {
     // The cache stores canonical record sets in default order; a sliced or
     // re-ordered result would poison future reads for this key.
     if (!isDefaultSort(options?.sort) || (options?.skip || 0) > 0) {
-      console.log('C-M ⚪⚪⚪⚪⚪ CACHE SKIP - non-default sort or skip>0', { table: this.appTable, sort: options?.sort, skip: options?.skip })
+      cmLog('C-M ⚪⚪⚪⚪⚪ CACHE SKIP - non-default sort or skip>0', { table: this.appTable, sort: options?.sort, skip: options?.skip })
       return false
     }
 
@@ -481,12 +482,12 @@ class AppTableCache {
       const fieldPattern = this.cachePatterns.find(p => p === simpleCheck.field)
       if (fieldPattern) {
         // onsole.log('📦 Cache has fieldPattern setQuery Simple (byKey)', { field: simpleCheck.field, value: simpleCheck.value })
-        console.log('C-M 📦📦📦📦📦 CACHE SET (byKey from query)', { table: this.appTable, field: simpleCheck.field, value: simpleCheck.value, resultCount: results?.length })
+        cmLog('C-M 📦📦📦📦📦 CACHE SET (byKey from query)', { table: this.appTable, field: simpleCheck.field, value: simpleCheck.value, resultCount: results?.length })
         await this.setByKey(simpleCheck.field, simpleCheck.value, results)
         return true
       } else {
         // onsole.log('📦 Cache setQuery Simple - field not in cachePatterns, skipping', { field: simpleCheck.field, cachePatterns: this.cachePatterns })
-        console.log('C-M ⚪⚪⚪⚪⚪ CACHE SKIP - field not in cachePatterns', { table: this.appTable, fieldPattern, field: simpleCheck.field, allPatterns: this.cachePatterns, owner: this.owner })
+        cmLog('C-M ⚪⚪⚪⚪⚪ CACHE SKIP - field not in cachePatterns', { table: this.appTable, fieldPattern, field: simpleCheck.field, allPatterns: this.cachePatterns, owner: this.owner })
         return false
       }
     }
@@ -495,7 +496,7 @@ class AppTableCache {
     const patternCheck = matchesCompoundPattern(query, this.cachePatterns, options)
     if (patternCheck.matches) {
       // onsole.log('📦 Cache setQuery Compound', { pattern: patternCheck.pattern, query })
-      console.log('C-M 📦📦📦📦📦 CACHE SET (Query compound)', { table: this.appTable, pattern: patternCheck.pattern, resultCount: results?.length })
+      cmLog('C-M 📦📦📦📦📦 CACHE SET (Query compound)', { table: this.appTable, pattern: patternCheck.pattern, resultCount: results?.length })
       // Key uses separate query hash + sort hash so invalidation can match by query alone
       const queryHash = hashQuery(query, {})
       const sortHash = options?.sort ? hashQuery({}, { sort: options.sort }) : 'nosort'
@@ -511,7 +512,7 @@ class AppTableCache {
     
     // Query doesn't match any pattern - don't cache
     // onsole.log('📦 Cache setQuery - no matching pattern, skipping', { query, cachePatterns: this.cachePatterns })
-    console.log('C-M ⚪⚪⚪⚪⚪ CACHE SKIP - no matching pattern (3)', { table: this.appTable, query, cachePatterns: this.cachePatterns, owner: this.owner })
+    cmLog('C-M ⚪⚪⚪⚪⚪ CACHE SKIP - no matching pattern (3)', { table: this.appTable, query, cachePatterns: this.cachePatterns, owner: this.owner })
     return false
   }
   
@@ -533,7 +534,7 @@ class AppTableCache {
     const count = options.count || options.limit || 0
     if (count && (skip + count > cached.length)) {
       // Not enough cached data to serve this request
-      console.log('C-M 🔵🔵🔵🔵🔵 CACHE INSUFFICIENT - Query cache has', cached.length, 'but need', skip + count, { table: this.appTable, owner: this.owner })
+      cmLog('C-M 🔵🔵🔵🔵🔵 CACHE INSUFFICIENT - Query cache has', cached.length, 'but need', skip + count, { table: this.appTable, owner: this.owner })
       return null
     }
 
@@ -607,7 +608,7 @@ class AppTableCache {
     this.wipFlags.All = false
     this.dirtyFlags.All = false
     // onsole.log('✅ All cache populated and WIP flag cleared for ' + this.namespace, { recordCount: records?.length })
-    console.log('C-M 📦📦📦📦📦 CACHE POPULATED (All)', { table: this.appTable, recordCount: records?.length, owner: this.owner })
+    cmLog('C-M 📦📦📦📦📦 CACHE POPULATED (All)', { table: this.appTable, recordCount: records?.length, owner: this.owner })
 
     return true
   }
@@ -649,7 +650,7 @@ class AppTableCache {
     this.wipFlags.Recent = false
     this.dirtyFlags.Recent = false
     // onsole.log('✅ Recent cache populated and WIP flag cleared', { namespace: this.namespace, recordCount: limited?.length })
-    console.log('C-M 📦📦📦📦📦 CACHE POPULATED (Recent)', { table: this.appTable, recordCount: limited?.length })
+    cmLog('C-M 📦📦📦📦📦 CACHE POPULATED (Recent)', { table: this.appTable, recordCount: limited?.length })
   
     return true
   }
@@ -826,7 +827,7 @@ class AppTableCache {
    */
   invalidateForRecord(oldRecord, newRecord) {
     // onsole.log('🔄 cache invalidateForRecord', { table: this.namespace, hasOld: !!oldRecord, hasNew: !!newRecord })
-    console.log('C-M 🗑️🗑️🗑️🗑️🗑️ CACHE INVALIDATE (record)', { table: this.appTable, hasOld: !!oldRecord, hasNew: !!newRecord })
+    cmLog('C-M 🗑️🗑️🗑️🗑️🗑️ CACHE INVALIDATE (record)', { table: this.appTable, hasOld: !!oldRecord, hasNew: !!newRecord })
 
     // Collect all values to invalidate (from both old and new records)
     const toInvalidate = {
@@ -891,7 +892,7 @@ class AppTableCache {
    * @param {Object} newRecord - The record after update (null for deletes)
    */
   markDirty(recordId = null, oldRecord = null, newRecord = null) {
-    console.log('C-M 🗑️🗑️🗑️🗑️🗑️ CACHE MARKED DIRTY', { table: this.appTable, recordId, hasPatterns: this.cachePatterns.length > 0 })
+    cmLog('C-M 🗑️🗑️🗑️🗑️🗑️ CACHE MARKED DIRTY', { table: this.appTable, recordId, hasPatterns: this.cachePatterns.length > 0 })
     
     // If we have cachePatterns and record data, use precise invalidation
     if (this.cachePatterns.length > 0 && (oldRecord || newRecord)) {
@@ -944,7 +945,7 @@ class AppTableCache {
     if (this.refreshFunction) {
       try {
         // onsole.log('🔄 cache _executeRefresh from appTableCache.mjs', { table: this.namespace, dirtyFlags: this.dirtyFlags })
-        console.log('C-M 🔄🔄🔄🔄🔄 CACHE REFRESH (debounced)', { table: this.appTable, dirtyAll: this.dirtyFlags.All, dirtyRecent: this.dirtyFlags.Recent })
+        cmLog('C-M 🔄🔄🔄🔄🔄 CACHE REFRESH (debounced)', { table: this.appTable, dirtyAll: this.dirtyFlags.All, dirtyRecent: this.dirtyFlags.Recent })
         await this.refreshFunction(this.dirtyFlags)
         this.dirtyFlags.All = false
         this.dirtyFlags.Recent = false
@@ -975,13 +976,13 @@ class AppTableCache {
         this.wipFlags.All = true
         this.dirtyFlags.All = true
         // onsole.log('🔄 Initializing All cache - WIP flag set')
-        console.log('C-M ⏳⏳⏳⏳⏳ CACHE INIT START (All)', { table: this.appTable, owner: this.owner })
+        cmLog('C-M ⏳⏳⏳⏳⏳ CACHE INIT START (All)', { table: this.appTable, owner: this.owner })
       }
       if (needsRecent) {
         this.wipFlags.Recent = true
         this.dirtyFlags.Recent = true
         // onsole.log('🔄 Initializing Recent cache - WIP flag set')
-        console.log('C-M ⏳⏳⏳⏳⏳ CACHE INIT START (Recent)', { table: this.appTable, owner: this.owner })
+        cmLog('C-M ⏳⏳⏳⏳⏳ CACHE INIT START (Recent)', { table: this.appTable, owner: this.owner })
       }
       
       // Trigger immediate refresh (no debounce)
@@ -1063,7 +1064,7 @@ class AppTableCache {
    * Invalidate entire cache for this app_table
    */
   invalidateAll() {
-    console.log('C-M 🗑️🗑️🗑️🗑️🗑️ CACHE INVALIDATE ALL', { table: this.appTable, owner: this.owner })
+    cmLog('C-M 🗑️🗑️🗑️🗑️🗑️ CACHE INVALIDATE ALL', { table: this.appTable, owner: this.owner })
     this._interface.deletePattern(`^${this.namespace}:`)
     this.dirtyFlags.All = false
     this.dirtyFlags.Recent = false

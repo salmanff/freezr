@@ -3,7 +3,7 @@ import { sendChatMessage } from '../chatService.js'
 import { showError, clearError } from '../showError.js'
 import { fetchFileContent } from '../fileTree.js'
 import { formatCost, formatTokens } from '../priceService.js'
-import { escHtml } from '../utils.js'
+import { escHtml, tsOf, saveChatDraft, clearChatDraft } from '../utils.js'
 
 const isMobile = () => {
   const root = document.querySelector('.creator-root')
@@ -206,7 +206,8 @@ const renderMessage = (msg) => {
 
 const loadChatFromHistory = async (chatId, appName, setState) => {
   try {
-    const updates = await freezr.query('appUpdates', { chatId, appName }, { sort: { timestamp: 1 }, count: 200 })
+    const updates = await freezr.query('appUpdates', { chatId, appName }, { sort: { _date_modified: 1 }, count: 200 })
+    if (updates && Array.isArray(updates)) updates.sort((a, b) => tsOf(a) - tsOf(b))
     if (!updates || !Array.isArray(updates) || updates.length === 0) {
       setState((next) => {
         if (!next.chat) next.chat = {}
@@ -369,8 +370,17 @@ export const renderChatPanel = ({ container, state, setState, renderOptions }) =
   `
 
   const msgContainer = container.querySelector('#chatMessages')
-  if (msgContainer && wasNearBottom) {
+  // forceScrollToBottom: set when a prompt was just sent, so the new prompt is visible regardless
+  // of where the user had scrolled. Otherwise only auto-scroll if they were already near the bottom.
+  const forceScrollToBottom = !!chatState.scrollToBottom
+  if (msgContainer && (wasNearBottom || forceScrollToBottom)) {
     msgContainer.scrollTop = msgContainer.scrollHeight
+  }
+  if (forceScrollToBottom) {
+    setState((next) => {
+      if (next.chat) next.chat.scrollToBottom = false
+      return next
+    }, { rerender: false })
   }
   scrollEditPreBlocksToBottom(container)
 
@@ -423,6 +433,8 @@ export const renderChatPanel = ({ container, state, setState, renderOptions }) =
   const newChatBtn = container.querySelector('[data-action="new-chat"]')
 
   const syncDraftMessage = (value) => {
+    // Mirror to localStorage as the user types so an abrupt shutdown doesn't lose the prompt.
+    saveChatDraft(state.appName, value)
     setState((next) => {
       if (!next.chat) next.chat = {}
       next.chat.draftMessage = value
@@ -470,6 +482,7 @@ export const renderChatPanel = ({ container, state, setState, renderOptions }) =
 
   if (newChatBtn) {
     newChatBtn.onclick = () => {
+      clearChatDraft(state.appName)
       setState((next) => {
         if (!next.chat) next.chat = {}
         next.chat.chatId = crypto.randomUUID()

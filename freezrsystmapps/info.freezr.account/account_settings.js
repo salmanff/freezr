@@ -34,30 +34,9 @@ freezr.initPageScripts = async function () {
 
   }
 
-  document.getElementById('removeMe').onsubmit = function (evt) {
-    evt.preventDefault()
+  // Account removal now lives on its own page: /account/remove (linked from the Danger Zone).
+  // Credential refresh lives on /account/reset. Both are plain links in the settings HTML.
 
-    const oldPassword = document.getElementById('oldPasswordConfirm').value
-
-    if (!oldPassword) {
-      showError('Please enter your current password')
-    } else if (freezrMeta.adminuser) {
-      showError('Sorry - cannot remove admin users')
-    } else {
-      const theInfo = {
-        user_id: freezrMeta.userId,
-        oldPassword
-      }
-      const currentfs = document.getElementById('fsParamsType').innerText
-      const currentdb = document.getElementById('dbParamsType').innerText
-      if (confirm('Are you sure you want to completely remove yourself?')) {
-        freezr.apiRequest('PUT', '/acctapi/removeFromFreezr', theInfo)
-          .then(data => gotRemoveStatus(null, data))
-          .catch(error => gotRemoveStatus(error, null))
-      }
-    }
-  }
-  
   try {
     const prefs = await freezr.utils.getPrefs()
     console.log('🔑 prefs', { prefs })
@@ -146,20 +125,6 @@ const gotPasswordChangeStatus = function (error, data) {
   } else {
     showError('Password Changed !! ')
     document.getElementById('changePasswordOuter').style.display = 'none'
-  }
-}
-
-const gotRemoveStatus = function (error, data) {
-  window.scrollTo({ top: 0, behavior: 'smooth' })
-  if (error) {
-    showError('there was an error removing you -  ' + error.message)
-  } else if (data?.error) {
-    showError('there was an error removing you -  ' + data.message)
-  } else if (!data) {
-    showError('Could not connect to server')
-  } else {
-    alert('You have been removed from this server')
-    window.location = '/account/logout'
   }
 }
 

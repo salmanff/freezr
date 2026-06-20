@@ -1,4 +1,5 @@
 import { loadDataHtmlAndPage } from '../../../adapters/rendering/pageLoader.mjs'
+import { sdkAddonsForApp } from '../../../common/helpers/sdkAddons.mjs'
 
 const generateCreatorPage = async (req, res) => {
   try {
@@ -20,7 +21,10 @@ const generateCreatorPage = async (req, res) => {
       user_id: req.session.logged_in_user_id,
       user_is_admin: req.session.logged_in_as_admin,
       user_is_publisher: req.session.logged_in_as_publisher,
-      other_variables: 'const thisPage = "creator";'
+      other_variables: 'const thisPage = "creator";',
+      // SDK add-ons: creator has a use_llm shortcut in systemPermissions.json,
+      // so this pulls in freezrApiV2.llm.js.
+      sdkAddons: sdkAddonsForApp('info.freezr.creator', null)
     }
 
     if (res.locals.freezr?.tokenInfo?.app_token) {

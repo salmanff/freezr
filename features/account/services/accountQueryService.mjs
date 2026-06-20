@@ -8,6 +8,8 @@
  * This modernizes the initial_query_func functionality from account_handler.js
  */
 
+import { describeFsDbParams } from '../../../adapters/datastore/environmentDefaults.mjs'
+
 /**
  * List all user apps for the account home page
  * @param {Object} userDS - User data store
@@ -111,11 +113,17 @@ export const getAccountSettings = async (userDS) => {
       return { owner: null, error: 'no user ds found' }
     }
     
+    const fsDesc = describeFsDbParams(userDS.fsParams, 'FS')
+    const dbDesc = describeFsDbParams(userDS.dbParams, 'DB')
     const settingsData = {
       owner: userDS.owner,
       fsParamsType: userDS.fsParams.type,
+      fsParamsChoice: fsDesc.choice,
+      fsParamsDisplay: fsDesc.display,
       systemFs: userDS.fsParams.systemFs,
       dbParamsType: userDS.dbParams.type,
+      dbParamsChoice: dbDesc.choice,
+      dbParamsDisplay: dbDesc.display,
       systemDb: userDS.dbParams.systemDb,
       slParamsType: userDS.slParams?.type
     }

@@ -84,32 +84,66 @@ export const allRequestorAppPermissions = async (req, res) => {
 }
 
 export const currentAppPermissions = async (req, res) => {
+  // SECURITY: this endpoint must "fail closed". On ANY problem (missing app/db,
+  // cross-host requestor, query error) it returns an empty list rather than an
+  // error, so outsiders cannot probe for the existence of permissions. All
+  // failures are logged server-side for diagnostics.
   try {
     // onsole.log('🔐 currentAppPermissions called')
-    
+
     const targetApp = res.locals?.freezr?.tokenInfo?.app_name
     // console.log('🔐 Target app:', targetApp)
 
     if (!targetApp) {
-      return sendFailure(res, 'No real target app requested', 'permissionHandlers.currentAppPermissions', 401)
+      console.warn('⚠️ currentAppPermissions: no target app - returning []')
+      return sendApiSuccess(res, [])
     }
-    
+
     // Get permissions database from middleware
     const ownerPermsDb = res.locals.freezr.ownerPermsDb
     if (!ownerPermsDb) {
-      console.error('❌ Error in currentAppPermissions:', { localsfreezr: res.locals.freezr })
-      return sendFailure(res, 'User permissions database not available for current', 'permissionHandlers.currentAppPermissions', 500)
+      console.error('❌ currentAppPermissions: no ownerPermsDb - returning []', { localsfreezr: res.locals.freezr })
+      return sendApiSuccess(res, [])
     }
-    
+
+    const requestorId = res.locals.freezr?.tokenInfo?.requestor_id
+    const dataOwnerId = res.locals.freezr?.data_owner_id
+    const isOwnPerms = !dataOwnerId || dataOwnerId === requestorId
+
+    // Cross-host grantee matching is not yet implemented. Until it is, a
+    // cross-host requestor asking for another user's perms gets [] (fail closed).
+    if (!isOwnPerms && requestorId && requestorId.includes('@')) {
+      console.warn('⚠️ currentAppPermissions: cross-host requestor not yet supported - returning []', { requestorId, dataOwnerId })
+      res.locals.freezr.permGiven = true
+      return sendApiSuccess(res, [])
+    }
+
     // Query permissions for the requestor app (excluding removed ones)
-    const returnPerms = await ownerPermsDb.query(
+    let returnPerms = await ownerPermsDb.query(
       { requestor_app: targetApp, status: { $ne: 'removed' } },
       {}
     )
+
+    // When querying another user's (the owner's) permissions DB, only return
+    // permissions where the requestor is a grantee, and hide the co-grantees.
+    // Without this the endpoint would leak the owner's full grant list (incl.
+    // other grantees) to any requestor.
+    if (!isOwnPerms) {
+      // grantees are stored dot-normalized (see shareRecords)
+      const granteeKey = (requestorId || '').replace(/\./g, '_')
+      returnPerms = (returnPerms || [])
+        .filter(p => Array.isArray(p.grantees) && p.grantees.includes(granteeKey))
+        .map(p => {
+          const { grantees, ...rest } = p
+          return rest
+        })
+    }
+
     res.locals.freezr.permGiven = true
     return sendApiSuccess(res, returnPerms)
   } catch (error) {
-    console.error('❌ Error in allRequestorAppPermissions:', error)
-    return sendFailure(res, error, 'permissionHandlers.allRequestorAppPermissions', 500)
+    // Fail closed - never surface the error to the caller.
+    console.error('❌ Error in currentAppPermissions - returning []:', error)
+    return sendApiSuccess(res, [])
   }
 }

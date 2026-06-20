@@ -23,8 +23,9 @@ export const SYSTEM_USER_IDS = ['fradmin', 'test', 'public']
 // Maximum length for user names and app names
 export const MAX_USER_NAME_LEN = 35
 
-// Reserved collection names
-export const RESERVED_COLLECTION_NAMES = ['field_permissions', 'accessible_objects']
+// Reserved collection names. 'jobs' is reserved because a job is addressed as <app>.jobs.<name>
+// (parallel to data's <app>.<collection>) — an app must not have a data collection that collides.
+export const RESERVED_COLLECTION_NAMES = ['field_permissions', 'accessible_objects', 'jobs']
 
 // System apps that are part of Freezr core
 export const SYSTEM_APPS = ['info.freezr', 'dev.ceps']
@@ -76,6 +77,14 @@ export const SYSTEM_ADMIN_APPTABLES = ALL_SYSTEM_ADMIN_COLLS.map(coll => `info_f
 // File and directory constants
 export const APP_MANIFEST_FILE_NAME = 'manifest.json'
 export const FREEZR_USER_FILES_DIR = 'users_freezr'
+
+// Default federated OAuth provider — used when this freezr has no admin-registered
+// oauth_serve_setup row for a connection-purpose provider type. Lets users on a brand-new
+// freezr instance connect Gmail without first asking their admin to register a Google
+// OAuth client; instead the auth dance is delegated to this URL.
+// Admins can override this by registering their own oauth_serve_setup row.
+// See freezr_mail_phase1.md §2.9 (federated OAuth).
+export const FREEZR_DEFAULT_AUTH_PROVIDER = 'https://www.salmanff.com'
 
 // Permission types and groups
 export const PERMITTED_TYPES = {
@@ -301,6 +310,63 @@ export const PARAMS_OAC = {
   app_name: 'info.freezr.admin',
   collection_name: 'params'
 }
+
+/**
+ * Trusted Jobs OAC - Server-wide registry of jobs an admin has approved to run
+ * in-process ("trusted jobs"), with the audience allowed to use each. The local-trust
+ * gate for freezr Jobs (see features/jobs/services/trustedJobService.mjs).
+ */
+export const TRUSTED_JOBS_OAC = {
+  owner: 'fradmin',
+  app_name: 'info.freezr.admin',
+  collection_name: 'trusted_jobs'
+}
+
+/**
+ * Scheduled Jobs OAC - ONE server-wide schedule table (fradmin-owned), one row per enabled
+ * (user, app, job). The scheduler reads this single reliable collection to find due jobs across
+ * all users — it does NOT iterate per-user datastores (a user on an unreachable remote DB must
+ * never break the heartbeat). It only opens a user's own DB for a job that is actually due+runnable.
+ * See features/jobs/services/scheduledJobsService.mjs.
+ */
+export const SCHEDULED_JOBS_OAC = {
+  owner: 'fradmin',
+  app_name: 'info.freezr.admin',
+  collection_name: 'scheduled_jobs'
+}
+
+/**
+ * FS Migrations OAC - ONE server-wide control/progress table (fradmin-owned), one row per
+ * in-flight or recent file-system migration. Holds live progress (filesCopied/bytes),
+ * the cancel flag, the worker heartbeat/claim, and the row status — driving the user's
+ * status page, the concurrency semaphore, and startup recovery. The *authoritative* lock
+ * and the retained credentials live on the user record's `fsMigration` field; this table
+ * is the runtime/coordination side. See features/account/services/fsMigrationService.mjs.
+ */
+export const FS_MIGRATIONS_OAC = {
+  owner: 'fradmin',
+  app_name: 'info.freezr.admin',
+  collection_name: 'fs_migrations'
+}
+
+/**
+ * Server-wide progress/control table for DB migrations — the DB analogue of
+ * FS_MIGRATIONS_OAC. One row per in-flight or recent database migration, holding live
+ * progress (tablesDone/recordsCopied), the cancel flag, the worker heartbeat, and the row
+ * status. The authoritative lock + retained credentials live on the user record's
+ * `dbMigration` field. See features/account/services/dbMigrationService.mjs.
+ */
+export const DB_MIGRATIONS_OAC = {
+  owner: 'fradmin',
+  app_name: 'info.freezr.admin',
+  collection_name: 'db_migrations'
+}
+
+// Migration statuses during which a user is fully offline-locked: ALL data access to
+// that user's own data store (reads AND writes, via any app/route) is refused, so the
+// copy gets a consistent snapshot. The account app is exempted at the gate so the
+// status page can still render. Shared by dsManager (the gate) and fsMigrationService.
+export const FS_MIGRATION_LOCKED_STATES = ['preparing', 'copying', 'verifying', 'rolling_back']
 
 /**
  * Get permissions OAC for a specific user

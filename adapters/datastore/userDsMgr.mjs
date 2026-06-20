@@ -2,9 +2,10 @@
 // 
 // This module contains the USER_DS class and all its methods
 
-import config from '../../common/helpers/config.mjs'
-import { removeLastPathElement } from '../../common/helpers/utils.mjs'
+import config, { FS_MIGRATION_LOCKED_STATES } from '../../common/helpers/config.mjs'
+import { removeLastPathElement, isStorageAccessError } from '../../common/helpers/utils.mjs'
 import { filterRecords } from './cache/queryMatcher.mjs'
+import { cmLog } from '../../common/debug/consoleFlags.mjs'
 import { sendFailure, sendFile, sendStream, pipeStream } from '../http/responses.mjs'
 import path from 'path'
 import fs from 'fs'
@@ -70,12 +71,29 @@ function USER_DS (owner, env) {
 }
 
   
+  // FS/DB migration lock gate. While this user is in a locked migration state, ALL access
+  // to their data store is refused (reads + writes), so the copy gets a consistent snapshot.
+  // The account app is exempted so the migration status page can still render. Internal flows
+  // pass options.bypassMigrationLock. `this.fsMigrationStatus` is set by dsManager.getOrSetUserDS.
+  USER_DS.prototype.assertNotMigrationLocked = function (appName, options) {
+    if (options && options.bypassMigrationLock) return
+    // Either an FS or a DB migration locks the user; both use the same locked-state values.
+    const status = this.fsMigrationStatus || this.dbMigrationStatus
+    if (!status || !FS_MIGRATION_LOCKED_STATES.includes(status)) return
+    if ((appName || '').startsWith('info.freezr.account')) return // the status page + its perms/tokens
+    const e = new Error('Your account is being migrated; data access is temporarily disabled. Please try again shortly.')
+    e.code = 'MIGRATION_LOCK'
+    throw e
+  }
+
   USER_DS.prototype.getorInitDb = async function (OACorTableId, options = {}) {
-    const OAC = typeof OACorTableId === 'string' 
-      ? { owner: this.owner, app_table: OACorTableId } 
+    const OAC = typeof OACorTableId === 'string'
+      ? { owner: this.owner, app_table: OACorTableId }
       : OACorTableId
-      
+
     if (this.owner !== OAC.owner) throw new Error('getorInitDb SNBH - user trying to get another users info' + this.owner + ' vs ' + OAC.owner)
+
+    this.assertNotMigrationLocked(OAC.app_name || (OAC.app_table ? OAC.app_table.split('.').slice(0, 3).join('.') : ''), options)
   
     if (this.appcoll[appTableName(OAC)] && this.appcoll[appTableName(OAC)].query) {
       if (this.appcoll[appTableName(OAC)].query && typeof this.appcoll[appTableName(OAC)].query !== 'function') {
@@ -85,10 +103,21 @@ function USER_DS (owner, env) {
       return this.appcoll[appTableName(OAC)]
     } else {
       // onsole.log('getorInitDb need to re-init db ', appTableName(OAC))
-      return await this.initOacDB(OAC, options)
+      try {
+        return await this.initOacDB(OAC, options)
+      } catch (err) {
+        if (isStorageAccessError(err)) this.recordStorageError(err)
+        throw err
+      }
     }
   }
-  
+
+  // Remember the most recent "can't access your storage" failure (bad/expired credentials) so it
+  // can be surfaced to the user as a notification instead of silently looking like "no data".
+  USER_DS.prototype.recordStorageError = function (err) {
+    this.lastStorageError = { message: (err && err.message) || String(err), at: new Date().getTime() }
+  }
+
   USER_DS.prototype.initOacDB = async function (OAC, options = {}) {
     // Ensure options is never null (handles explicit null passed as argument)
     if (!options) options = {}
@@ -110,7 +139,7 @@ function USER_DS (owner, env) {
   
     if (!this.appcoll[appTableName(OAC)]) {
       this.appcoll[appTableName(OAC)] = {
-        oac: { ...OAC },
+        oac: { ...OAC, app_table: OAC.app_table || (OAC.app_name + (OAC.collection_name ? ('.' + OAC.collection_name) : '')) },
         dbParams,
         fsParams,
         dbLastAccessed: null,
@@ -196,7 +225,9 @@ function USER_DS (owner, env) {
           console.warn('🔴 Error in cache refresh function:', err.message)
         }
       })
-    } else {
+    } else if (!options.noCache) {
+      // noCache is an intentional skip (eg checkDB / the migration's transient DS), so the
+      // "no userCache" path is expected there and shouldn't warn.
       console.warn('initOacDB - getCachePrefsForTable no userCache found', { owner: this.owner, appTable: appTableName(OAC) } )
     }
   
@@ -324,7 +355,7 @@ function USER_DS (owner, env) {
       
       // UPDATE CACHE after successful create
       if (ds.cache && results._id) {
-        console.log('C-M 📝📝📝📝📝 DB CREATE - updating cache', { table: appTableName(OAC), id: results._id })
+        cmLog('C-M 📝📝📝📝📝 DB CREATE - updating cache', { table: appTableName(OAC), id: results._id })
         const cachedEntity = { ...entity, _id: results._id }
         // ds.cache.setByKey('_id', results._id, cachedEntity)
         ds.cache.setByKey('_id', results._id, [cachedEntity])
@@ -417,7 +448,7 @@ function USER_DS (owner, env) {
           // INVALIDATE CACHE
           // onsole.log('🔄 cache update - INVALIDATE CACHE', { entityId, appTableName: appTableName(OAC)  })
           if (ds.cache) {
-            console.log('C-M 📝📝📝📝📝 DB UPDATE (replace) - invalidating cache', { table: appTableName(OAC), id: entityId })
+            cmLog('C-M 📝📝📝📝📝 DB UPDATE (replace) - invalidating cache', { table: appTableName(OAC), id: entityId })
             ds.cache.markDirty(entityId)
           }
           
@@ -459,7 +490,7 @@ function USER_DS (owner, env) {
           
             // INVALIDATE CACHE
             if (ds.cache) {
-              console.log('C-M 📝📝📝📝📝 DB UPDATE (replace by query) - invalidating cache', { table: appTableName(OAC), id: entityId })
+              cmLog('C-M 📝📝📝📝📝 DB UPDATE (replace by query) - invalidating cache', { table: appTableName(OAC), id: entityId })
               ds.cache.markDirty(entityId)
             }
             
@@ -495,7 +526,7 @@ function USER_DS (owner, env) {
           // INVALIDATE CACHE
           if (ds.cache) {
             const invalidateId = typeof idOrQuery === 'string' ? idOrQuery : idOrQuery._id
-            console.log('C-M 📝📝📝📝📝 DB UPDATE (multi) - invalidating cache', { table: appTableName(OAC), id: invalidateId || 'ALL' })
+            cmLog('C-M 📝📝📝📝📝 DB UPDATE (multi) - invalidating cache', { table: appTableName(OAC), id: invalidateId || 'ALL' })
             if (typeof idOrQuery === 'string') {
               ds.cache.markDirty(idOrQuery)
             } else if (idOrQuery._id) {
@@ -539,7 +570,7 @@ function USER_DS (owner, env) {
       
       // INVALIDATE CACHE
       if (ds.cache) {
-        console.log('C-M 📝📝📝📝📝 DB REPLACE - invalidating cache', { table: appTableName(OAC), id: entityId })
+        cmLog('C-M 📝📝📝📝📝 DB REPLACE - invalidating cache', { table: appTableName(OAC), id: entityId })
         ds.cache.markDirty(entityId)
       }
       
@@ -595,7 +626,7 @@ function USER_DS (owner, env) {
       
       // INVALIDATE CACHE
       if (ds.cache && idOrQuery._id) {
-        console.log('C-M 📝📝📝📝📝 DB DELETE (single) - invalidating cache', { table: appTableName(OAC), id: idOrQuery._id })
+        cmLog('C-M 📝📝📝📝📝 DB DELETE (single) - invalidating cache', { table: appTableName(OAC), id: idOrQuery._id })
         ds.cache.markDirty(idOrQuery._id)
       }
       
@@ -617,7 +648,7 @@ function USER_DS (owner, env) {
       // onsole.log('      🔑 usrDsMgr  delete_records result', { result })
       // INVALIDATE CACHE
       if (ds.cache) {
-        console.log('C-M 📝📝📝📝📝 DB DELETE (multi) - invalidating cache', { table: appTableName(OAC), query: idOrQuery })
+        cmLog('C-M 📝📝📝📝📝 DB DELETE (multi) - invalidating cache', { table: appTableName(OAC), query: idOrQuery })
         ds.cache.markDirty()  // Invalidate all for deletes
       }
       
@@ -643,10 +674,16 @@ function USER_DS (owner, env) {
   }
   
   USER_DS.prototype.getorInitAppFS = async function (appName, options = {}) {
+    this.assertNotMigrationLocked(appName, options)
     if (this.appfiles[appName]) {
       return this.appfiles[appName]
     } else {
-      return await this.initAppFS(appName, options)
+      try {
+        return await this.initAppFS(appName, options)
+      } catch (err) {
+        if (isStorageAccessError(err)) this.recordStorageError(err)
+        throw err
+      }
     }
   }
   
@@ -752,20 +789,28 @@ function USER_DS (owner, env) {
           
           return processedContent
         } else {
+          // BINARY reads (doNotToString) must use getFileToSend, NOT readFile: the fs connectors'
+          // readFile decodes bytes as text (local: content.toString(); aws/s3: transformToString('utf8');
+          // etc.), which corrupts any non-text file (e.g. a job's .zip bundle). getFileToSend returns raw
+          // bytes. This only bit us once the local-disk copy was gone (e.g. after a redeploy), forcing the
+          // read to the remote backend. Text reads keep using readFile (decoded string) as before.
+          const wantBinary = !!(options && options.doNotToString)
           const content = await new Promise((resolve, reject) => {
-            ds.fs.readFile(pathToRead, options, function (err, content) {
+            const fn = (wantBinary && typeof ds.fs.getFileToSend === 'function') ? ds.fs.getFileToSend : ds.fs.readFile
+            fn.call(ds.fs, pathToRead, options, function (err, content) {
               if (err) reject(err)
               else resolve(content)
             })
           })
-          const processedContent = options?.doNotToString ? content : content.toString()
-          
-          // Cache the file (if not too large and not a system app)
+          const processedContent = options?.doNotToString ? content : (content == null ? content : content.toString())
+
+          // Cache the file (if not too large and not a system app). Binary files are not cacheable
+          // (isCacheableFile only lists text extensions), so this never caches raw bytes.
           if (!isSystemApp && ds.cache && isCacheableFile(endpath)) {
             ds.cache.setAppFile(endpath, processedContent)
             // onsole.log('📦 Cache set for readAppFile', endpath)
           }
-          
+
           return processedContent
         }
       }
@@ -853,7 +898,7 @@ function USER_DS (owner, env) {
                   localCheckExistsOrCreateUserFolderSync(partialPath, true)
                   streamOrFile.pipe(fs.createWriteStream(localpath))
                   trackLocalFileCopy() // Track that we copied this file locally
-                } else if (ds.fsParams?.choice === 'aws') { // handle aws v3 non streamable file
+                } else if (ds.fsParams?.type === 'aws') { // handle aws v3 non streamable file (aws S3 / Cloudflare R2)
                   localCheckExistsOrCreateUserFolderSync(partialPath, true)
                   fs.writeFile(localpath, streamOrFile, null, function (err, name) {
                     if (err) {
@@ -1496,6 +1541,19 @@ function USER_DS (owner, env) {
   // failed cron jobs) by pushing more entries onto `notifications`.
   USER_DS.prototype.getNotifications = function () {
     const notifications = []
+
+    // Resource credentials are failing (e.g. rotated/expired keys on the file system OR database):
+    // surface it with a fix link, rather than letting pages silently look empty.
+    if (this.lastStorageError) {
+      notifications.push({
+        id: 'resourceAccessError',
+        severity: 'error',
+        title: 'Cannot access your resources',
+        message: 'freezr could not read or write your resources (your file system or database) — the credentials may be invalid or expired. Until this is fixed, your apps and data will not load.',
+        detail: { at: this.lastStorageError.at },
+        action: { url: '/account/reset', label: 'Refresh credentials' }
+      })
+    }
 
     const useage = this.getUseageWarning()
     if (useage && useage.ok === false) {

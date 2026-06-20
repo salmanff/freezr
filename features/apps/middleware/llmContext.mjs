@@ -3,6 +3,8 @@
 // Simplified version of serverlessContext.mjs
 
 import { sendFailure } from '../../../adapters/http/responses.mjs'
+import { decryptResourceSensitiveFields } from '../../account/services/resourceCrypto.mjs'
+import { getSystemPermissionsFor } from '../../../common/helpers/systemPermissions.mjs'
 
 /**
  * Middleware to check use_llm permissions and set up LLM context
@@ -42,10 +44,10 @@ export const createGetLlmPerms = (dsManager, freezrPrefs) => {
         type: 'use_llm'
       }, {})
 
-      // system app exception
-      if (requestorApp === 'info.freezr.creator') {
-        perms.push ({ type: 'use_llm', granted: true, system_perm: true})
-      }
+      // Layer in any system-app exceptions for (requestor_app, use_llm). For
+      // info.freezr.creator this surfaces the legacy auto-grant that used to
+      // live inline here — now declared in common/systemPermissions.json.
+      perms.push(...getSystemPermissionsFor(requestorApp, 'use_llm'))
 
       if (!perms || perms.length === 0) {
         console.warn('No use_llm permission found', { requestorApp, ownerUserId })
@@ -60,12 +62,17 @@ export const createGetLlmPerms = (dsManager, freezrPrefs) => {
 
       let llmResources = []
       if (resourcesDb) {
-        llmResources = await resourcesDb.query({ type: 'llm' }, {}) || []
+        const raw = await resourcesDb.query({ type: 'llm' }, {}) || []
+        // Decrypt sensitive fields (`key`) before downstream consumers see them.
+        // Handles all three storage shapes (plain string, { value }, { __enc }) — see resourceCrypto.mjs.
+        llmResources = raw.map(decryptResourceSensitiveFields)
         const withKeys = llmResources.filter(r => r.key)
         const hasDefault = withKeys.some(r => r.default)
         if (withKeys.length > 0 && !hasDefault) {
           try {
             withKeys[0].default = true
+            // updateFields-style partial update on `default` only — does NOT touch the
+            // encrypted `key` field on the stored record, so no re-encryption needed.
             await resourcesDb.update(withKeys[0]._id, { default: true }, { replaceAllFields: false })
           } catch (e) {
             console.warn('Could not auto-set default LLM resource:', e.message)

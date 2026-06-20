@@ -5,8 +5,9 @@ import { fetchAppHistory, updateHistoryEntry, addHistoryEntry } from '../history
 import { fetchFolderTree } from '../fileTree.js'
 import { renderManifestEditor, loadManifestForApp } from './manifestRenderer.js'
 import { calculateProjectCost, calculateEntryCost, formatCost, formatTokens } from '../priceService.js'
-import { escHtml } from '../utils.js'
+import { escHtml, loadChatDraft } from '../utils.js'
 import { sendChatMessage, detectLargeFiles } from '../chatService.js'
+import { syncProjectOnOpen } from '../projectSync.js'
 
 const ACCOUNT_RESOURCES_LINK = '/account/resources'
 const formatAppNameForHeader = (name) => escHtml(name || 'Project').replace(/\./g, '.<wbr>')
@@ -20,10 +21,24 @@ const checkAppName = (appName) => {
     let serverAddress = freezrMeta?.serverAddress.startsWith('http://localhost') ? 'local.host' : (freezrMeta?.serverAddress || '').replace(/^https?:\/\//, '')
     if (serverAddress.endsWith('/')) serverAddress = serverAddress.slice(0, -1)
     if (serverAddress.startsWith('www.')) serverAddress = serverAddress.slice(4)
-    const reversedParts = serverAddress.split('.').reverse()
-    const fullValue = reversedParts.join('.') + '.user.' + freezrMeta.userId + '.' + value
-    if (validAppName(fullValue)) return { ok: true, value: fullValue, suggestion: fullValue }
-    return { ok: false, suggestion: fullValue, error: 'Auto-expanded name (' + fullValue + ') is not valid.' }
+    // Strip any :port (and anything after it) — a ':' is not a valid app-name char.
+    if (serverAddress.includes(':')) serverAddress = serverAddress.replace(/:.*$/, '')
+    const domainParts = serverAddress.split('.')
+    const expand = (parts) => parts.slice().reverse().join('.') + '.user.' + freezrMeta.userId + '.' + value
+    // App names are capped (MAX_USER_NAME_LEN = 35, enforced by validAppName on client + server),
+    // so a long multipart domain overflows. Drop domain labels from the FRONT — subdomains like
+    // 'app'/'staging', the least significant for namespacing — one at a time until the expanded
+    // name validates. This keeps as much of the domain as possible (e.g. 'example.co.uk' stays
+    // intact when it fits) and only truncates as far as needed.
+    const fullValue = expand(domainParts)
+    let parts = domainParts
+    let candidate = fullValue
+    while (!validAppName(candidate) && parts.length > 1) {
+      parts = parts.slice(1)
+      candidate = expand(parts)
+    }
+    if (validAppName(candidate)) return { ok: true, value: candidate, suggestion: candidate }
+    return { ok: false, suggestion: fullValue, error: 'Auto-expanded name (' + fullValue + ') is too long or invalid even after shortening the domain — try a shorter app name.' }
   }
   if (!/^[a-zA-Z0-9._-]+$/.test(value)) {
     return { ok: false, error: 'Use only letters, numbers, dots, underscores, or dashes.' }
@@ -154,6 +169,9 @@ export const loadApp = async (appName, setState) => {
       if (!next.chat) next.chat = {}
       next.chat.largeFiles = []
       next.chat.refactorBannerDismissed = {}
+      // Restore any unsent prompt persisted for this app (survives full shutdown).
+      // Don't clobber something already typed in this session.
+      if (!next.chat.draftMessage) next.chat.draftMessage = loadChatDraft(appName)
       calculateAndStoreProjectCost(next, history)
       next.loading.active = false
       next.loading.text = ''
@@ -163,6 +181,7 @@ export const loadApp = async (appName, setState) => {
 
     loadManifestForApp(appName, setState)
     detectLargeFiles(appName, setState)
+    syncProjectOnOpen(appName, setState)
   } catch (error) {
     setState((next) => {
       if (!next.loading) next.loading = {}
@@ -1243,6 +1262,9 @@ export const renderProjectPanel = ({ container, state, getState, setState }) => 
       })
 
       loadManifestForApp(result.appName, setState)
+      // Establish the file baseline (and confirm the context doc) before any
+      // auto-chat edits files, so the first real edit isn't seen as "external".
+      await syncProjectOnOpen(result.appName, setState)
 
       if (description) {
         try {

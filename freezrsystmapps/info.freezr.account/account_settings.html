@@ -19,17 +19,14 @@ settings: {
 
     <div class="freezr-card" id="account_params">
       <h3>System Configuration</h3>
-      <p><b>File System:</b> <span id="fsParamsType" data-system-fs="{{systemFs}}">{{fsParamsType}}</span></p>
-      <p><b>Intelligence (LLMs):</b> <span id="lmParamsType"><a href="/account/resources">Manage LLM Keys</a></span></p>
-      <p><b>Database:</b> <span id="dbParamsType" data-system-db="{{systemDb}}">{{dbParamsType}}</span></p>
-      <p><b>Serverless (Compute):</b> <span id="slParamsType">{{#slParamsType}}{{slParamsType}}{{/slParamsType}}{{^slParamsType}}None{{/slParamsType}}</span>
-        <a href="/account/serverless">{{#slParamsType}}Edit parameters{{/slParamsType}}{{^slParamsType}}Create Parameters{{/slParamsType}}</a>
-      </p>
+      <p><b>File System:</b> <span id="fsParamsType" data-system-fs="{{systemFs}}" data-fs-type="{{fsParamsType}}" data-fs-choice="{{fsParamsChoice}}">{{fsParamsDisplay}}</span></p>
+      <p><b>Database:</b> <span id="dbParamsType" data-system-db="{{systemDb}}" data-db-type="{{dbParamsType}}" data-db-choice="{{dbParamsChoice}}">{{dbParamsDisplay}}</span></p>
     </div>
 
     <div class="freezr-card">
-      <h3>Resource Usage</h3>
-      <p>View the storage your apps are using <a href="/account/resourceusage">here</a>.</p>
+      <h3>Resources &amp; Usage</h3>
+      <p><b>Other Resources &rarr;</b> <a href="/account/resources">LLM Keys, Messaging Connections, and Compute Providers (Serverless)</a></p>
+      <p><b>Resource Usage &rarr;</b> View the storage your apps are using <a href="/account/resourceusage">here</a>. <span style="color:#94a3b8;">(LLM &amp; serverless cost accounting will appear here.)</span></p>
     </div>
 
     <div class="freezr-card">
@@ -104,24 +101,23 @@ settings: {
 
     <div class="freezr-card" style="border-left: 4px solid #dc2626;">
       <h3 style="color: #dc2626;">Danger Zone</h3>
-      
+
       <div style="margin-bottom: 2rem;">
-        <h4>Remove Account</h4>
-        <p>Click below to be fully removed from this server. The server will remove all your credentials and all your data. You will not be able to sign back in.</p>
-        <form name="removeMe" id="removeMe">
-          <div style="max-width: 350px;">
-            <label class="texttop">Current Password:</label>
-            <input type="password" class="input" id="oldPasswordConfirm" name="oldPasswordConfirm"/>
-            <div class="button-row">
-              <input type="submit" class="freezrButt" style="background: #dc2626;" value="Remove Me Now" id="RemoveButt"/>
-            </div>
-          </div>
-        </form>
+        <h4>Migrate your storage</h4>
+        <p>Move your data to a different file system. Your current storage is kept as a backup until you confirm the move.</p>
+        <a href="/account/migration" class="freezrButt" style="background: #2563eb; display: inline-block;">Migrate your file system or DB</a>
+      </div>
+
+      <div style="margin-bottom: 2rem;">
+        <h4>Refresh storage credentials</h4>
+        <p>Re-enter the keys/credentials for your current storage (e.g. new API keys for the same provider). This does not move any data.</p>
+        <a href="/account/reset" class="freezrButt" style="background: #2563eb; display: inline-block;">Refresh Credentials</a>
       </div>
 
       <div>
-        <h4>Advanced Settings</h4>
-        <p>You can change your account settings <a href="/account/reset">here</a> - but this is very dangerous, so please do this only if you really know what you are doing.</p>
+        <h4>Remove yourself from this server</h4>
+        <p>Remove your account, credentials and data from this server (with a few more options). This is very dangerous and cannot be undone, so only do this if you really know what you are doing.</p>
+        <a href="/account/remove" class="freezrButt" style="background: #dc2626; display: inline-block;">Remove Me from here</a>
       </div>
     </div>
 

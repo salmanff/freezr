@@ -1,0 +1,67 @@
+<!--
+freezr Remove Account
+remove: {
+  page_title: 'Remove Account (freezr)',
+  css_files: ['/app/info.freezr.public/public/freezr_style.css', 'account_home.css'],
+  page_url: 'account_remove.html',
+  script_files: ['account_remove.js']
+}
+-->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">Remove Account</span>
+    <a href="/account/settings">Back to Settings</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div id="errorBox" class="errorBox" style="display:none;"></div>
+
+    <div class="freezr-card" style="border-left: 4px solid #dc2626;">
+      <h3 style="color:#dc2626;">⚠️ Remove your account from this server</h3>
+
+      <!-- Host/system users: full delete only (their data lives on the host). -->
+      <div id="hostExplain" style="display:none;">
+        <p>Your data is stored on this server's storage (<span id="fsLabelHost">host</span>). Removing your
+        account here will <strong>permanently delete all of your data and your account</strong>. This cannot be undone.</p>
+      </div>
+
+      <!-- Users with their own data (cloud FS and/or their own mongo DB): choose
+           delete-everything OR detach (keep their own data). -->
+      <div id="cloudChoice" style="display:none;">
+        <p>You can keep <strong><span id="keptNounIntro">your data</span></strong> — it lives on your own storage. Choose what should happen:</p>
+        <label style="display:block; margin:10px 0; cursor:pointer;">
+          <input type="radio" name="removeMode" value="detach" checked>
+          <strong>Just remove me from this server</strong> — delete my account &amp; credentials here, but
+          <strong>keep <span id="keptNounChoice">my data</span></strong> (I can reconnect to another freezr later).
+        </label>
+        <label style="display:block; margin:10px 0; cursor:pointer; color:#dc2626;">
+          <input type="radio" name="removeMode" value="full">
+          <strong>Delete everything</strong> — permanently delete all my data <em>and</em> my account. This cannot be undone.
+        </label>
+      </div>
+
+      <div style="margin:14px 0;">
+        <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer;">
+          <input type="checkbox" class="freezer_largeCheckBox" id="removePublicPosts">
+          <span>Also remove my public posts from this server</span>
+        </label>
+      </div>
+
+      <hr style="margin:16px 0;"/>
+
+      <div style="max-width:420px;">
+        <label class="texttop">To confirm, type your user id (<strong id="userIdHint"></strong>):</label>
+        <input type="text" class="input" id="confirmUsername" autocomplete="off"/>
+
+        <label class="texttop">Your freezr password:</label>
+        <input type="password" class="input" id="removePassword"/>
+
+        <div class="button-row">
+          <div id="click_remove" class="freezrButt" style="background:#dc2626;">Remove my account</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>

@@ -9,6 +9,7 @@
 
 import { loadDataHtmlAndPage, fileExt } from '../../../adapters/rendering/pageLoader.mjs'
 import { endsWith } from '../../../common/helpers/utils.mjs'
+import { sdkAddonsForApp } from '../../../common/helpers/sdkAddons.mjs'
 
 
 
@@ -230,6 +231,10 @@ const generateAppPage = async (req, res) => {
     options.allow_external_scripts = cspPermFlags.external_scripts || false
     options.allow_external_fetch = cspPermFlags.external_fetch || false
     options.allow_unsafe_eval = cspPermFlags.unsafe_eval || false
+
+    // SDK add-ons: inject connections / llm scripts only if app's manifest
+    // (or systemPermissions.json shortcut) requests the matching permission type.
+    options.sdkAddons = sdkAddonsForApp(appName, manifest)
     
     // Set cookie with app token
     let appPrefix = '/apps/'

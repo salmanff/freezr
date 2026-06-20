@@ -367,9 +367,13 @@ function initDeleteSelected () {
     const toDelete = Array.from(selectedUsers)
     const skipSelf = currentUserId && toDelete.includes(currentUserId)
     const n = toDelete.length
-    const msg = skipSelf
-      ? `Delete ${n} user(s)? Your own account will be skipped. This cannot be undone.`
-      : `Delete ${n} user(s)? This cannot be undone.`
+    const note = 'What happens depends on each user\'s storage:\n' +
+      '  • Users on the HOST/system storage: ALL their data is permanently deleted.\n' +
+      '  • Users on their OWN cloud storage: they are removed from this server, but their data is LEFT on their cloud (they can reconnect it elsewhere).\n' +
+      'Their public posts are also removed.'
+    const msg = (skipSelf
+      ? `Delete ${n} user(s)? (Your own account will be skipped.)\n\n`
+      : `Delete ${n} user(s)?\n\n`) + note + '\n\nThis cannot be undone. Continue?'
     if (!confirm(msg)) return
     showActionStatus('Deleting users', toDelete)
     try {

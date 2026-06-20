@@ -3,7 +3,7 @@
 // Handles permission database initialization and access
 
 import { userPERMS_OAC, SYSTEM_PERMS } from '../../common/helpers/config.mjs'
-import { startsWith, endsWith } from '../../common/helpers/utils.mjs'
+import { startsWith, endsWith, isStorageAccessError } from '../../common/helpers/utils.mjs'
 import { sendFailure } from '../../adapters/http/responses.mjs'
 import { PERMISSION_TYPES_FOR_WHICH_RECORDS_ARE_MARKED } from './permissionDefinitions.mjs'
 
@@ -42,6 +42,9 @@ export const createAddOwnerPermsDbForLoggedInuser = (dsManager, freezrPrefs, fre
       
     } catch (error) {
       console.error('❌ Error in addOwnerPermsDb middleware:', error)
+      if (isStorageAccessError(error)) {
+        return res.status(502).json({ error: 'resource_access_error', message: 'Could not access your resources (file system or database) — your credentials may be invalid or expired. Refresh them under Account → Refresh Credentials.', fixUrl: '/account/reset' })
+      }
       res.status(500).json({ error: 'Could not access permissions database' })
     }
   }
@@ -85,6 +88,9 @@ export const createaddOwnerPermsDb = (dsManager, freezrPrefs, freezrStatus) => {
       
     } catch (error) {
       console.error('❌ Error in ownerPermsDb middleware:', error)
+      if (isStorageAccessError(error)) {
+        return res.status(502).json({ error: 'resource_access_error', message: 'Could not access the data owner\'s resources (file system or database) — their credentials may be invalid or expired.', fixUrl: '/account/reset' })
+      }
       res.status(500).json({ error: 'Could not access permissions database' })
     }
   }
@@ -105,7 +111,7 @@ export const addRightsToTable = async (req, res, next) => {
     can_read: false,
     // read_all: false,
     share_records: false,
-    can_write: false,
+    write_all: false,
     write_own: false,
     grantedPerms: []
   }
@@ -166,7 +172,7 @@ export const addRightsToTable = async (req, res, next) => {
     (requestorUserId === ownerUserId)
   ){
     res.locals.freezr.rightsToTable.can_read = true
-    res.locals.freezr.rightsToTable.can_write = true
+    res.locals.freezr.rightsToTable.write_all = true
     next()
   } else if (['dev.ceps.privatefeeds.codes'].indexOf(appTable) > -1 && 
       requestorApp === 'info.freezr.account' && 
@@ -227,7 +233,7 @@ export const addRightsToTable = async (req, res, next) => {
         res.locals.freezr.rightsToTable.grantedPerms.push(perm)
 
         if (perm.type === 'write_all') {
-          res.locals.freezr.rightsToTable.can_write = true
+          res.locals.freezr.rightsToTable.write_all = true
         } else if (perm.type === 'write_own') {
           res.locals.freezr.rightsToTable.write_own = true
         } else if (perm.type === 'read_all') {

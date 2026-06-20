@@ -86,12 +86,22 @@ const markLatestPerFamily = (models) => {
   return models
 }
 
-// Claude Opus 4.7 only supports adaptive thinking mode.
-// Sending `{ type: 'enabled', budget_tokens }` is rejected with a 400 error.
-// For all earlier thinking-capable models we keep the explicit budget form.
+// Claude Opus 4.7+ and the Fable / Mythos families only support adaptive thinking.
+// Sending `{ type: 'enabled', budget_tokens }` is rejected with a 400 error
+// ("thinking.type.enabled is not supported for this model").
+// For all earlier thinking-capable models (Opus 4.6 and below) we keep the
+// explicit budget form, which they still accept.
 const isAdaptiveOnlyThinkingModel = (modelId) => {
   if (!modelId) return false
-  return /opus-4-7/i.test(modelId)
+  const id = modelId.toLowerCase()
+  if (/fable|mythos/.test(id)) return true
+  const opusMatch = id.match(/opus-(\d+)-(\d+)/)
+  if (opusMatch) {
+    const major = parseInt(opusMatch[1], 10)
+    const minor = parseInt(opusMatch[2], 10)
+    if (major > 4 || (major === 4 && minor >= 7)) return true
+  }
+  return false
 }
 
 const buildThinkingConfig = (modelId, thinking, maxTokens) => {
@@ -184,12 +194,13 @@ export const ask = async ({ apiKey, prompt, context, model, max_tokens, role, re
   }
   if (context) params.system = context
 
-  // Extended thinking: temperature must be 1. For most models we pass an explicit
-  // budget_tokens, but Claude Opus 4.7 rejects that and only accepts `adaptive`.
+  // Extended thinking: with the explicit budget_tokens form, temperature must be 1.
+  // Opus 4.7+/Fable/Mythos use adaptive thinking instead and reject both budget_tokens
+  // and any temperature, so we only set temperature for the budget form.
   const thinkingConfig = buildThinkingConfig(modelToUse, thinking, maxTokens)
   if (thinkingConfig) {
     params.thinking = thinkingConfig
-    params.temperature = 1
+    if (thinkingConfig.type === 'enabled') params.temperature = 1
   }
 
   const { textResponse, thinkingResponse, usage } = await streamAndCollect(client, params)
@@ -417,7 +428,7 @@ export async function * askStream ({ apiKey, prompt, context, model, max_tokens,
   const thinkingConfig = buildThinkingConfig(modelToUse, thinking, maxTokens)
   if (thinkingConfig) {
     params.thinking = thinkingConfig
-    params.temperature = 1
+    if (thinkingConfig.type === 'enabled') params.temperature = 1
   }
 
   const stream = await client.messages.create(params)

@@ -74,7 +74,11 @@ export const DEFAULT_PREFS = {
   allowAccessToSysFsDb: false,
   selfRegDefaultMBStorageLimit: null,
   dbUnificationStrategy: process?.env?.DB_UNIFICATION || 'db',
-  blockMsgsFromNonContacts: false
+  blockMsgsFromNonContacts: false,
+  scheduler_disabled: false, // scheduled jobs run by default; admin can pause them on the prefs page
+  // (a DISABLE flag so existing servers — where the field is absent/null — keep scheduling ON)
+  serverless_callback_url: '' // public freezr base URL a deployed serverless job calls back to
+  // (e.g. https://my.freezr.me). Empty => cloud jobs without a request-derived URL can't run.
 }
 
 

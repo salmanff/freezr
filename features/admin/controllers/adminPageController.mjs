@@ -9,6 +9,7 @@
 
 import { loadDataHtmlAndPage } from '../../../adapters/rendering/pageLoader.mjs'
 import { sendAuthFailure } from '../../../adapters/http/responses.mjs'
+import { sdkAddonsForApp } from '../../../common/helpers/sdkAddons.mjs'
 /**
  * Generate admin page for authenticated admin users
  * 
@@ -51,7 +52,10 @@ const generateAdminPage = async (req, res) => {
       user_is_admin: req.session.logged_in_as_admin,
       user_is_publisher: req.session.logged_in_as_publisher,
       other_variables: manifest.other_variables || '',
-      sub_page: subPage
+      sub_page: subPage,
+      // SDK add-ons: admin has a use_3pFunction shortcut in systemPermissions.json,
+      // so this pulls in freezrApiV2.serverless.js for addlocalmicroservice.js.
+      sdkAddons: sdkAddonsForApp(manifest.app_name, manifest)
     }
     
     // Add initial_query if present in manifest

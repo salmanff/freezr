@@ -42,6 +42,7 @@
     "test:isolation": "mocha test/integration/ceps/dataIsolation.test.mjs",
     "test:feps": "mocha test/integration/feps/feps.test.mjs",
     "test:oauth": "mocha test/integration/oauth/oauth.test.mjs",
+    "test:jobs": "mocha test/integration/jobs/jobs.test.mjs",
     "test:coreApiV1": "mocha test/integration/coreApiV1/coreApiV1.test.mjs",
     "test:coreApiV2": "mocha test/integration/coreApiV1/coreApiV2.test.mjs",
     "test:e2e": "mocha test/e2e/**/*.test.mjs",

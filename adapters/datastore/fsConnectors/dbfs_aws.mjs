@@ -53,13 +53,22 @@ import {
 
 function AWS_FS (credentials = {}, options = {}) {
   // onsole.log("New aws fs")
-  
+
+  // S3-compatible providers (eg Cloudflare R2, Wasabi, Backblaze B2) are supported by
+  // pointing the AWS SDK at the custom endpoint url supplied by the provider. Such
+  // providers generally expect the region to be 'auto' unless one is given explicitly.
+  const customEndpoint = credentials.endpoint || null
+
   try {
-    this.s3Client = new S3Client({ region: (credentials.region || 'eu-central-1'), credentials: {
-      // region: credentials.region || 'eu-central-1',
-      accessKeyId: credentials.accessKeyId,
-      secretAccessKey: credentials.secretAccessKey
-    } })
+    const clientConfig = {
+      region: (credentials.region || (customEndpoint ? 'auto' : 'eu-central-1')),
+      credentials: {
+        accessKeyId: credentials.accessKeyId,
+        secretAccessKey: credentials.secretAccessKey
+      }
+    }
+    if (customEndpoint) clientConfig.endpoint = customEndpoint
+    this.s3Client = new S3Client(clientConfig)
   } catch (error) {
     console.error('Error creating S3Client:', error)
     this.s3Client = null
@@ -240,7 +249,11 @@ AWS_FS.prototype.stat = function (file, callback) {
     return callback(null, metadata)
   })
   .catch(err => {
-    console.warn('Error stat', err);
+    // A 404 / NotFound is normal and expected (e.g. callers checking whether an object exists,
+    // like the migration's idempotent skip-check on a not-yet-copied key). Don't log those —
+    // just hand the error back so the caller can treat it as "not present". Log real errors.
+    const notFound = err?.$metadata?.httpStatusCode === 404 || err?.name === 'NotFound' || err?.name === 'NoSuchKey'
+    if (!notFound) console.warn('Error stat', err)
     return callback(err)
   })
 }
@@ -380,29 +393,42 @@ AWS_FS.prototype.getFileToSend = function(path, options, callback) {
 }
 AWS_FS.prototype.removeFolder = function(dirPath, callback) {
   const self = this
-  const options = { includeMeta: true }
 
-  const deleteObjects = async function (keyArray) {
-    if (keyArray.length === 0) return null
-    const { Deleted } = await self.s3Client.send(
-      new DeleteObjectsCommand({
-        Bucket: self.bucket,
-        Delete: { Objects: keyArray }
-      })
-    );
-    return Deleted
+  const run = async function () {
+    const entries = await self.readall(dirPath, { includeMeta: true })
+    const keys = entries.map(e => e.Key || e.path).filter(Boolean)
+    if (keys.length === 0) return { requested: 0, deleted: 0 }
+
+    let deleted = 0
+    const errors = []
+    // S3 DeleteObjects is capped at 1000 keys per request — chunk it.
+    for (let i = 0; i < keys.length; i += 1000) {
+      const batch = keys.slice(i, i + 1000).map(Key => ({ Key }))
+      const resp = await self.s3Client.send(
+        new DeleteObjectsCommand({
+          Bucket: self.bucket,
+          Delete: { Objects: batch, Quiet: false }
+        })
+      )
+      if (resp.Deleted) deleted += resp.Deleted.length
+      // CRITICAL: DeleteObjects does NOT throw on per-object failures — they come back in Errors.
+      // (e.g. a Backblaze/B2 key lacking the deleteFiles capability.) Surface them, don't swallow.
+      if (resp.Errors && resp.Errors.length) errors.push(...resp.Errors)
+    }
+    if (errors.length) {
+      const first = errors[0] || {}
+      const err = new Error('removeFolder: ' + errors.length + ' object(s) could not be deleted (first: ' +
+        (first.Code || '?') + ' "' + (first.Message || '') + '" for ' + (first.Key || '') + ')')
+      err.deleteErrors = errors
+      throw err
+    }
+    return { requested: keys.length, deleted }
   }
 
-  self.readall(dirPath, options)
-  .then(entries => {
-    const keyArray = entries.map(e => { return { Key: e.Key } })
-    return deleteObjects(keyArray)
-  })
-  .then(results => {
-    return callback(null)
-  })
+  run()
+  .then(result => callback(null, result))
   .catch(err => {
-    console.warn('Error in deleteObjects:', err);
+    console.warn('🔴 Error in removeFolder:', err.message)
     return callback(err)
   })
 }
@@ -411,18 +437,32 @@ AWS_FS.prototype.deleteObjectList = function (nativeObjectList, callback) {
     // onsole.log('deleteObjectList in azure ', {dirPath, options })
 
     const deleteObjects = async function (keyArray) {
-      const { Deleted } = await self.s3Client.send(
-        new DeleteObjectsCommand({
-          Bucket: self.bucket,
-          Delete: { Objects: keyArray }
-        })
-      )
-      return Deleted
+      let deleted = 0
+      const errors = []
+      for (let i = 0; i < keyArray.length; i += 1000) {
+        const batch = keyArray.slice(i, i + 1000)
+        const resp = await self.s3Client.send(
+          new DeleteObjectsCommand({
+            Bucket: self.bucket,
+            Delete: { Objects: batch, Quiet: false }
+          })
+        )
+        if (resp.Deleted) deleted += resp.Deleted.length
+        if (resp.Errors && resp.Errors.length) errors.push(...resp.Errors)
+      }
+      if (errors.length) {
+        const first = errors[0] || {}
+        const err = new Error('deleteObjectList: ' + errors.length + ' object(s) could not be deleted (first: ' +
+          (first.Code || '?') + ' "' + (first.Message || '') + '" for ' + (first.Key || '') + ')')
+        err.deleteErrors = errors
+        throw err
+      }
+      return deleted
     }
 
-    const keyArray = nativeObjectList.map(e => { 
+    const keyArray = nativeObjectList.map(e => {
       if (!e.path && !e.Key)console.warn('deleteObjectList - no path in object', e)
-      return { Key: e.path || e.Key } 
+      return { Key: e.path || e.Key }
     }).filter(e => e.Key)
     if (!keyArray || keyArray.length === 0) {
       return callback(null)

@@ -4,6 +4,7 @@
 
 import { objectContentIsSame, startsWith } from '../../common/helpers/utils.mjs'
 import { isAllowedPermissionType, hasRequiredFields, PERMISSION_FIELD_TYPES, PERMISSION_FIELD_EXCEPTIONS_BY_TYPE, getPermissionFieldTypeErrors, cleanTableIds } from './permissionDefinitions.mjs'
+import { bjLog } from '../../common/debug/consoleFlags.mjs'
 
 /**
  * Validates a permission object from manifest parameters
@@ -103,19 +104,43 @@ export const cleanedPermissionObjectFromManifestParams = (appName, statedPerm) =
 }
 
 /**
- * Compares two permission objects to see if they are the same
- * Pure function - returns boolean based on comparison
- * 
- * @param {Object} p1 - First permission object
- * @param {Object} p2 - Second permission object
- * @returns {boolean} - True if permissions are the same (ignoring runtime fields)
+ * Compares a manifest permission against an existing (possibly granted) permission to decide whether
+ * an app re-install changed it (→ re-prompt) or not (→ keep the grant). Pure function.
+ *
+ * Runtime fields (granted/status/dates/etc.) are always ignored. CRUCIALLY, an optional per-type
+ * field is ALSO ignored UNLESS the manifest declares it — because many optional fields are set by the
+ * USER at accept time (run_job/schedule_job `location`; use_mail `connection_names`/`scopes`) and never
+ * appear in the manifest. Without this, a re-install would see the user's accepted `location` as a
+ * "change", mark the permission outdated, and drop the grant. If the manifest DOES declare an optional
+ * field (e.g. `job_name`, or an app shipping default scopes) and it changed, that's a real change and
+ * still re-prompts. (The enforced value lives on the granted record regardless, so ignoring an
+ * undeclared field here can never let an app silently widen access.)
+ *
+ * @param {Object} manifestPerm - The (cleaned) permission from the app manifest
+ * @param {Object} existingPerm - The existing permission record from the DB
+ * @returns {boolean} - True if they are the same (so a granted permission stays accepted)
  */
-export const permissionsAreSame = (p1, p2) => {
-  return objectContentIsSame(p1, p2, [
-    'granted', 'status', 'grantees', 'outDated', 'revokeIsWip', 
+export const permissionsAreSame = (manifestPerm, existingPerm) => {
+  const ignore = [
+    'granted', 'status', 'grantees', 'outDated', 'revokeIsWip',
     'previousGrantees', '_date_created', '_date_modified', '_id',
     '__owner', '__appTable', 'hasPublic'
-  ])
+  ]
+  const isDeclared = (v) => v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0)
+  const exceptionFields = (PERMISSION_FIELD_EXCEPTIONS_BY_TYPE[manifestPerm?.type] || []).map(e => e.field)
+  const ignoredOptional = []
+  for (const f of exceptionFields) {
+    if (!isDeclared(manifestPerm?.[f])) { ignore.push(f); ignoredOptional.push(f) } // user-set / undeclared optional field — don't treat as a change
+  }
+  const result = objectContentIsSame(manifestPerm, existingPerm, ignore)
+  // 🔎 TEMP DEBUG (review aid — remove after verifying #2): the run_job/schedule_job comparison.
+  if (manifestPerm?.type === 'run_job' || manifestPerm?.type === 'schedule_job') {
+    bjLog('🔎 [TMPJOBLOG - PERM-SAME] ' + manifestPerm.type + ' "' + manifestPerm.name + '"' +
+      ' manifest.job_name=' + manifestPerm.job_name + ' existing.job_name=' + existingPerm?.job_name +
+      ' existing.location=' + existingPerm?.location + ' ignored-optional=[' + ignoredOptional.join(',') + ']' +
+      ' → same=' + result + (result ? ' (grant kept)' : ' (→ outdated, re-consent)'))
+  }
+  return result
 }
 
 /**

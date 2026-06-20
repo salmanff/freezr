@@ -144,6 +144,24 @@ export const getUniqueWords = (anObject, theFields) => {
   }
 }
 
+// Detect errors that mean "the storage provider rejected our credentials / we can't access the
+// store" (as opposed to a genuine not-found or empty result). Used to surface a clear
+// "refresh your credentials" warning instead of silently showing no data. Covers the AWS/S3 SDK
+// error shapes, Azure/Dropbox/Google auth failures, and 401/403 responses.
+export const isStorageAccessError = (err) => {
+  if (!err) return false
+  const name = err.name || ''
+  const code = err.code || err.Code || ''
+  const status = (err.$metadata && err.$metadata.httpStatusCode) || err.statusCode
+  const msg = String(err.message || '')
+  const NAMES = ['SignatureDoesNotMatch', 'InvalidAccessKeyId', 'AccessDenied', 'AuthorizationHeaderMalformed',
+    'TokenRefreshRequired', 'InvalidToken', 'ExpiredToken', 'CredentialsError', 'UnrecognizedClientException',
+    'AuthenticationFailed', 'InvalidAuthenticationInfo']
+  if (NAMES.includes(name) || NAMES.includes(code)) return true
+  if (status === 401 || status === 403) return true
+  return /signature.*does not match|access denied|invalid access key|invalid_grant|invalid token|expired token|authentication ?failed|not authorized|unauthorized|credentials/i.test(msg)
+}
+
 // Path utilities
 export const removeLastPathElement = (statedPath, depth) => {
   if (!depth) depth = 1

@@ -181,7 +181,14 @@ const showInstallResult = function (returndata) {
     if (warnings && ((Array.isArray(warnings) && warnings.length > 0) || (typeof warnings === 'string' && warnings.length > 0))) {
       warningsDiv.style.display = 'block'
       if (Array.isArray(warnings)) {
-        const msgs = warnings.map(w => (typeof w === 'object' && w.message) ? w.message : String(w))
+        // A warning may carry an optional action link (e.g. "Review trusted jobs →" → /admin/trustedjobs);
+        // link/linkText are server-set fixed strings, so appending the anchor via innerHTML is safe.
+        const msgs = warnings.map(w => {
+          if (typeof w === 'object' && w.message) {
+            return w.link ? (w.message + ' <a href="' + w.link + '">' + (w.linkText || w.link) + '</a>') : w.message
+          }
+          return String(w)
+        })
         warningsDiv.innerHTML = '<strong>Warnings:</strong><br>' + msgs.join('<br>')
       } else {
         warningsDiv.innerHTML = '<strong>Warning:</strong> ' + ((typeof warnings === 'object' && warnings.message) ? warnings.message : warnings)

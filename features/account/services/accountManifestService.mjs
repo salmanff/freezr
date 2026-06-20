@@ -148,7 +148,7 @@ export const getAccountPageManifest = (params) => {
     },
 
     reset: {
-      page_title: 'Account Reset (freezr)',
+      page_title: 'Refresh Storage Credentials (freezr)',
       css_files: [
         '/app/info.freezr.public/public/freezr_style.css',
         'account_home.css'
@@ -156,7 +156,31 @@ export const getAccountPageManifest = (params) => {
       page_url: 'account_reset.html',
       app_name: 'info.freezr.account',
       script_files: ['account_reset.js'],
-      initial_query_func: 'getResetData'
+      initial_query_func: null
+    },
+
+    migration: {
+      page_title: 'Storage Migration (freezr)',
+      css_files: [
+        '/app/info.freezr.public/public/freezr_style.css',
+        'account_home.css'
+      ],
+      page_url: 'account_migration.html',
+      app_name: 'info.freezr.account',
+      script_files: ['account_migration.js'],
+      initial_query_func: null
+    },
+
+    remove: {
+      page_title: 'Remove Account (freezr)',
+      css_files: [
+        '/app/info.freezr.public/public/freezr_style.css',
+        'account_home.css'
+      ],
+      page_url: 'account_remove.html',
+      app_name: 'info.freezr.account',
+      script_files: ['account_remove.js'],
+      initial_query_func: null
     }
 
     // perms: {

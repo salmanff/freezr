@@ -1,5 +1,7 @@
 /* global freezr */
 
+import { tsOf } from './utils.js'
+
 const LLM_PING_TIMEOUT_MS = 15000
 
 const tryLlmPing = async () => {
@@ -16,8 +18,11 @@ const tryLlmPing = async () => {
 
 const fetchRecentApps = async () => {
   try {
-    const results = await freezr.query('appUpdates', {}, { sort: { timestamp: -1 }, count: 200 })
+    // Sort by _date_modified at the DB layer (the only Azure/Cosmos-indexed field),
+    // then re-sort locally by the creator's logical timestamp to preserve app ordering.
+    const results = await freezr.query('appUpdates', {}, { sort: { _date_modified: -1 }, count: 200 })
     if (!results || !Array.isArray(results)) return []
+    results.sort((a, b) => tsOf(b) - tsOf(a))
     const seen = new Set()
     const unique = []
     for (const entry of results) {

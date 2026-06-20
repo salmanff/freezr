@@ -1,0 +1,33 @@
+<!-- Admin Console Logs consolelogs.html -->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">Console Logs</span>
+    <a href="/account/home">Account Home</a>
+    <a href="/admin/home">Admin</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div class="freezr-card" style="max-width: 560px; margin: 0 auto;">
+      <h3 style="margin-bottom: 1rem;">Console Log Categories</h3>
+
+      <p style="color: var(--freezr-text-muted); margin-bottom: 1rem; line-height: 1.6;">
+        Turn categories of server debug logs on or off at runtime. These settings are held in
+        memory only &mdash; they reset to off whenever the server restarts.
+      </p>
+
+      <p style="color: var(--freezr-text-muted); margin-bottom: 1.5rem;">
+        <strong>Server started:</strong> <span id="serverStartedAt">&hellip;</span>
+      </p>
+
+      <div id="errorBox" class="errorBox" style="margin-bottom: 1rem; display: none;"></div>
+
+      <div id="categoryList" style="margin-bottom: 1.5rem;"></div>
+
+      <div style="display: flex; gap: 1rem; align-items: center;">
+        <button id="saveFlags" class="freezrButt">Save</button>
+        <span id="statusMsg" style="color: var(--freezr-text-muted);"></span>
+      </div>
+    </div>
+  </div>
+</div>

@@ -1,205 +1,108 @@
-// freezr  firstSetUp
+// freezr - account_reset.js
+// "Refresh storage credentials" page: re-enter the keys for the CURRENT cloud provider (FS and/or
+// DB) and save them in place. Local/system/nedb storage has no credentials — shows a generic message.
 
-/* global freezr, freezerRestricted  */
+/* global freezr */
 
-
-// NOTE THIS IS NOW JUST COPED FROM reauthorise.js -> WIP - needs to be completed
-
-let receivedParams = {}
-const AUTH_FS_TYPES = ['dropbox', 'googleDrive']
-
-const checkFsInputs = function () {
-  const type = document.getElementById('fsParamsType').value
-  if (AUTH_FS_TYPES.indexOf(type) < 0) {
-    showError('Invalid file system indicated ' + type)
-    return false
-  }
-  return true
-}
+let RESET_INFO = null
 
 freezr.initPageScripts = function () {
-  hideDivs(['passEnterDiv'])
-  checkFsInputs()
-
   document.addEventListener('click', function (evt) {
-    const args = evt.target.id.split('_')
-    if (args && args.length > 1 && args[0] === 'click') {
-      switch (args[1]) {
-        case 'recordAuthParams':
-          recordAuthParams()
-          break
-        default:
-          console.warn('undefined click ?')
-          break
+    const args = (evt.target.id || '').split('_')
+    if (args.length > 1 && args[0] === 'click') {
+      if (args[1] === 'saveFS') saveResource('FS')
+      else if (args[1] === 'saveDB') saveResource('DB')
+    }
+  })
+  loadResetInfo()
+}
+
+function loadResetInfo () {
+  freezr.apiRequest('GET', '/acctapi/account/resetInfo')
+    .then(function (data) {
+      RESET_INFO = data || {}
+      const fs = data && data.fs
+      const db = data && data.db
+      let any = false
+      if (fs && fs.refreshable) { any = true; text('fsLabel', fs.label || fs.choice); buildFields('fs_fields', fs.fields, 'fs'); show('fsSection') }
+      if (db && db.refreshable) { any = true; text('dbLabel', db.label || db.choice); buildFields('db_fields', db.fields, 'db'); show('dbSection') }
+      if (any) {
+        show('passwordRow')
+      } else {
+        text('genericMsg', 'Your storage is on this server (local/host) or uses files-as-database (nedb), which has no credentials to refresh — there is nothing to do here.')
+        show('genericMsg')
       }
+    })
+    .catch(function (err) { showError('Could not load storage info: ' + (err.message || err)) })
+}
+
+function buildFields (containerId, fields, prefix) {
+  const el = document.getElementById(containerId)
+  if (!el) return
+  el.innerHTML = ''
+  const table = document.createElement('table')
+  ;(fields || []).forEach(function (f) {
+    const row = document.createElement('tr')
+    const c1 = document.createElement('td')
+    c1.setAttribute('align', 'right'); c1.style.paddingRight = '8px'; c1.style.color = '#555'
+    c1.innerHTML = f.display || f.name
+    const c2 = document.createElement('td')
+    const input = document.createElement('input')
+    input.type = f.type || (f.secret ? 'password' : 'text')
+    input.className = 'input'
+    input.id = prefix + '_' + f.name
+    if (f.type === 'checkbox') {
+      input.checked = !!f.value
+      if (f.locked) input.disabled = true
+    } else {
+      input.style.width = '300px'
+      if (f.value) input.value = f.value
+      if (f.secret) input.placeholder = '(leave blank to keep current)'
+    }
+    c2.appendChild(input)
+    if (f.type === 'checkbox' && f.note) {
+      const note = document.createElement('div')
+      note.style.color = '#999'; note.style.fontSize = '0.85em'
+      note.textContent = f.note
+      c2.appendChild(note)
+    }
+    row.appendChild(c1); row.appendChild(c2)
+    table.appendChild(row)
+  })
+  el.appendChild(table)
+}
+
+function saveResource (resource) {
+  const info = resource === 'FS' ? (RESET_INFO && RESET_INFO.fs) : (RESET_INFO && RESET_INFO.db)
+  if (!info || !info.refreshable) return
+  const prefix = resource === 'FS' ? 'fs' : 'db'
+  const password = document.getElementById('resetPassword').value
+  if (!password) return showError('Please enter your password to save.')
+
+  const params = {}
+  ;(info.fields || []).forEach(function (f) {
+    const el = document.getElementById(prefix + '_' + f.name)
+    if (!el) return
+    if (f.type === 'checkbox') {
+      params[f.name] = el.checked
+    } else {
+      const v = el.value
+      if (v != null && v.trim() !== '') params[f.name] = v.trim()
     }
   })
 
-  hideDiv('errorBox')
-
-  setTimeout(function () { document.body.scrollTop = 0 }, 20)
-
-  const gotAuthValidation = populateFormsFromParams()
-  // see if has done oauth and if so, give error if no state
-  if (gotAuthValidation) {
-    window.localStorage.removeItem('params')
-    hideDiv('click_goAuthFS')
-    showError('You were re-authenticated successfully - now checking....')
-    checkResource({})
-  }
+  showError('Checking and saving credentials…')
+  freezr.apiRequest('PUT', '/acctapi/account/refreshCredentials', { resource: resource, params: params, password: password })
+    .then(function () { showError((resource === 'FS' ? 'File-system' : 'Database') + ' credentials saved and verified.') })
+    .catch(function (err) { showError('Could not save: ' + (err.message || err)) })
 }
 
-const populateFormsFromParams = function () {
-  let storedParams
-  try {
-    storedParams = JSON.parse(window.localStorage.getItem('params'))
-  } catch (e) {
-    storedParams = null
-  }
-
-  const urlQueries = new URLSearchParams(window.location.search)
-  const regcode = urlQueries.get('regcode')
-  const type = urlQueries.get('type')
-
-  if (regcode && storedParams && regcode === storedParams.regcode && storedParams.type === type) {
-    ['code', 'accessToken', 'clientId', 'codeChallenge', 'codeVerifier', 'redirecturi', 'refreshToken', 'expiry', 'secret'].forEach(key => {
-      const value = urlQueries.get(key)
-      if (value && value !== 'null') {
-        storedParams[key] = value
-      }
-    })
-    receivedParams = storedParams
-    // console.log(receivedParams)
-    window.localStorage.removeItem('params')
-    return true
-  } else if (regcode) {
-    window.localStorage.removeItem('params')
-    showError('Inrternal Error - url parameters are NOT matching - please retry ')
-    window.localStorage.removeItem('params')
-    return false
-  } else {
-    window.localStorage.removeItem('params')
-    return false
-  }
-}
-
-const checkResource = function (options, callback) {
-  const resource = 'FS'
-  if (!callback) callback = gotCheckStatus
-  const typesCorrect = checkFsInputs()
-  if (typesCorrect) {
-    var toSend = { resource, env: { fsParams: receivedParams }, action: 'checkresource' }
-    freezerRestricted.connect.send('/v1/admin/self_register', toSend, callback, 'POST', 'application/json')
-  }
-}
-
-function gotCheckStatus (err, data) {
-  if (err) {
-    showError(err.message)
-  } else if (data.err) {
-    showError(data.err)
-  } else if (!data.checkpassed) {
-    showError('Unsuccessful attempt to check file system. Try again later')
-  } else {
-    showError('Your file system works! Enter your password to reset parameters on the server.')
-    showDiv('passEnterDiv')
-    hideDiv('click_goAuthFS')
-  }
-}
-
-const getAllFormsData = function () {
-  const type = document.getElementById('fsParamsType').value
-  const authServer = document.getElementById('fs_auth_Server').value
-  const userId = document.getElementById('userId').innerText
-
-  return { type, authServer, userId }
-}
-
-const recordAuthParams = function () {
-  showError('recording Auth Params to re-launch freezr. . . . ')
-
-  const userId = document.getElementById('userId').innerText
-  const password = document.getElementById('password').value
-
-  if (!password) {
-    showError('Please enter your password')
-  } else if (!receivedParams.accessToken) {
-    showError('Something went wrong. Access token missing')
-  } else {
-    hideDivs(['passEnterDiv', 'click_goAuthFS'])
-    var theInfo = { action: 'updateReAuthorisedFsParams', userId, password, env: { fsParams: receivedParams } }
-    freezerRestricted.connect.send('/v1/admin/self_register', theInfo, gotRegisterStatus, 'POST', 'application/json')
-  }
-}
-
-const gotRegisterStatus = function (error, data) {
-  if (error) {
-    showDivs(['passEnterDiv', 'click_goAuthFS'])
-    showError('Error: ' + error.message)
-  } else if (!data) {
-    showDivs(['passEnterDiv', 'click_goAuthFS'])
-    showError('No data was sent ferom server - refresh to see status')
-  } else {
-    window.location = '/account/home?show=welcome&source=reAuthed'
-  }
-}
-
-// O-AUTH
-const goAuthFS = function () {
-  let oauthorUrl = document.getElementById('fs_auth_Server').value
-  if (!oauthorUrl) {
-    showError('need to enter an authenticator url')
-  } else {
-    const currentParams = getAllFormsData()
-
-    currentParams.regcode = randomText(20)
-
-    window.localStorage.setItem('params', JSON.stringify(currentParams))
-
-    oauthorUrl = oauthorUrl + '?type=' + currentParams.type + '&regcode=' + currentParams.regcode + '&sender=' + encodeURIComponent(window.location.origin + window.location.pathname)
-    // onsole.log('opening authenticator site as first step in oauth process: ' + oauthorUrl)
-    hideDiv('click_goAuthFS')
-    showError('Going to authenticate...')
-    window.open(oauthorUrl, '_self')
-  }
-}
-
-// Generics
-var showError = function (errorText) {
-  var errorBox = document.getElementById('errorBox')
-  errorBox.innerHTML = errorText
-  if (errorText) { showDiv('errorBox') } else { hideDiv('errorBox') }
-  // errorBox.scrollIntoView()
-}
-const showDiv = function (divId) {
-  const theEl = document.getElementById(divId)
-  if (theEl) theEl.style.display = 'block'
-}
-const hideDiv = function (divId) {
-  const theEl = document.getElementById(divId)
-  if (theEl) theEl.style.display = 'none'
-}
-const hideDivs = function (theDivs) {
-  if (theDivs && theDivs.length > 0) {
-    for (var i = 0; i < theDivs.length; i++) {
-      hideDiv(theDivs[i])
-    }
-  }
-}
-const showDivs = function (theDivs) {
-  if (theDivs && theDivs.length > 0) {
-    for (var i = 0; i < theDivs.length; i++) {
-      showDiv(theDivs[i])
-    }
-  }
-}
-const randomText = function (textlen) {
-  // http://stackoverflow.com/questions/1349404/generate-a-string-of-5-random-characters-in-javascript
-  let text = ''
-  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
-  if (!textlen) textlen = 20
-  for (let i = 0; i < textlen; i++) {
-    text += possible.charAt(Math.floor(Math.random() * possible.length))
-  }
-  return text
+// ---- tiny dom helpers ----
+function text (id, t) { const el = document.getElementById(id); if (el) el.textContent = t }
+function show (id) { const el = document.getElementById(id); if (el) el.style.display = 'block' }
+function showError (t) {
+  const el = document.getElementById('errorBox')
+  if (!el) return
+  el.innerHTML = t || ''
+  el.style.display = t ? 'block' : 'none'
 }

@@ -1,0 +1,18 @@
+<!--
+  /public/oauth/oauth_transfer_receiver
+  Consumer-side landing page after a federated OAuth flow. Receives tokens via URL
+  query params from the partner freezr's validate_state response (mirrors the dropbox
+  FS flow's URL-passing pattern), POSTs to /oauth/store_transferred_credentials to
+  persist server-side, then redirects to the original sender.
+
+  The URL params are cleared via history.replaceState immediately after POSTing,
+  minimizing the window in which the access/refresh tokens are visible.
+-->
+<div class="freezr-page">
+  <div class="freezr-content" style="max-width: 600px; margin: 0 auto;">
+    <div id="errorBox" class="errorBox" style="display:none;"></div>
+    <div class="freezr-card" id="statusCard">
+      <p id="status">Finalizing connection…</p>
+    </div>
+  </div>
+</div>

@@ -27,7 +27,23 @@ export async function mountAllModernRoutes(app, { dsManager, freezrPrefs, freezr
     mounted: [],
     failed: []
   }
-  
+
+  // Initialise the FS migration service with the live context, then (after routes mount)
+  // resume any migration that was interrupted by a restart.
+  try {
+    const { initFsMigrationService } = await import('../features/account/services/fsMigrationService.mjs')
+    initFsMigrationService({ dsManager, freezrPrefs })
+  } catch (error) {
+    console.warn('⚠️  Could not initialise fsMigrationService:', error.message)
+  }
+
+  try {
+    const { initDbMigrationService } = await import('../features/account/services/dbMigrationService.mjs')
+    initDbMigrationService({ dsManager, freezrPrefs })
+  } catch (error) {
+    console.warn('⚠️  Could not initialise dbMigrationService:', error.message)
+  }
+
   try {
     // Import and mount account routes directly
     try {
@@ -49,12 +65,40 @@ export async function mountAllModernRoutes(app, { dsManager, freezrPrefs, freezr
       results.failed.push({ feature: 'account', error })
     }
     
+    // Import and mount Connections FEPS routes BEFORE the generic /feps mount so
+    // the more-specific /feps/connections/* prefixes are checked first. The
+    // type-agnostic listing endpoint (/accounts) and per-service sub-routers
+    // (mail, future calendar/contacts) all mount under /feps/connections.
+    try {
+      const { createConnectionsApiRoutes } = await import('../features/connections/connectionsApiRoutes.mjs')
+      const { createMailApiRoutes } = await import('../features/connections/mail/mailRoutes.mjs')
+      const { createContactsApiRoutes } = await import('../features/connections/contacts/contactsRoutes.mjs')
+      const { createCalendarApiRoutes } = await import('../features/connections/calendar/calendarRoutes.mjs')
+      const connectionsApiRoutes = createConnectionsApiRoutes({ dsManager, freezrPrefs })
+      const mailApiRoutes = createMailApiRoutes({ dsManager, freezrPrefs, freezrStatus })
+      const contactsApiRoutes = createContactsApiRoutes({ dsManager, freezrPrefs })
+      const calendarApiRoutes = createCalendarApiRoutes({ dsManager, freezrPrefs })
+      // Mount per-service (more specific) routers first so /feps/connections/accounts
+      // hits the generic router and /feps/connections/<service>/* hits its service router.
+      app.use('/feps/connections/mail', mailApiRoutes)
+      app.use('/feps/connections/contacts', contactsApiRoutes)
+      app.use('/feps/connections/calendar', calendarApiRoutes)
+      app.use('/feps/connections', connectionsApiRoutes)
+      results.mounted.push('connections-api')
+      results.mounted.push('mail-api')
+      results.mounted.push('contacts-api')
+      results.mounted.push('calendar-api')
+    } catch (error) {
+      console.error('❌ Failed to mount connections FEPS routes:', error)
+      results.failed.push({ feature: 'connections-api', error })
+    }
+
     // Import and mount app routes directly
     try {
       const { createFepsApiRoutes } = await import('../features/apps/fepsApiRoutes.mjs')
       const { createAppPageRoutes } = await import('../features/apps/appPageRoutes.mjs')
       // const { createAppFileRoutes } = await import('../features/apps/appFileRoutes.mjs')
-      
+
       // Mount app API routes at /feps -> TEMPRARY UNTIL ROUTE FIGURED OUT
       // todo 2025-12-19 -> shoul logManager be included in older routes too eg appApiRoutes
       const appApiRoutes = createFepsApiRoutes({ dsManager, freezrPrefs, freezrStatus })
@@ -94,7 +138,24 @@ export async function mountAllModernRoutes(app, { dsManager, freezrPrefs, freezr
       results.failed.push({ feature: 'ceps', error })
     }
 
-        
+    // Import and mount Jobs routes at /jobs
+    try {
+      const { createJobsApiRoutes } = await import('../features/jobs/jobsApiRoutes.mjs')
+      const jobsApiRoutes = createJobsApiRoutes({ dsManager, freezrPrefs, freezrStatus, logManager })
+      app.use('/jobs', jobsApiRoutes)
+      results.mounted.push('jobs-api')
+      // Test-only helper endpoints (/jobs/selftest/*) — mounted ONLY in test mode, never in prod.
+      if (process.env.FREEZR_TEST_MODE === 'true') {
+        const { createJobsTestRoutes } = await import('../features/jobs/jobsTestRoutes.mjs')
+        app.use('/jobs', createJobsTestRoutes({ dsManager, freezrPrefs, freezrStatus, logManager }))
+        results.mounted.push('jobs-test')
+      }
+    } catch (error) {
+      console.error('❌ Failed to mount Jobs routes:', error)
+      results.failed.push({ feature: 'jobs', error })
+    }
+
+
     // Import and mount register routes
     try {
       const { createRegisterPageRoutes } = await import('../features/register/registerRoutes.mjs')
@@ -165,6 +226,22 @@ export async function mountAllModernRoutes(app, { dsManager, freezrPrefs, freezr
     // Other
     app.get('/.well-known/appspecific/com.chrome.devtools.json', () => { /* console.log('ignore com.chrome.devtools.json') */ } )
     app.get('/login', (req, res) => { res.redirect('/account/login') } )
+
+    // Import and mount Connections page routes (info.freezr.connections umbrella app).
+    // Mirrors the existing /account, /admin, /creator dedicated route layers — each
+    // path under /connections/<page> serves the corresponding page directly without
+    // redirecting to /apps/info.freezr.connections. A future cross-cutting cleanup
+    // (§8 route consolidation in freezr_mail_phase1.md) will replace all of these
+    // per-app routers with a single generic alias map driven by config.
+    try {
+      const { createConnectionsPageRoutes } = await import('../features/connections/connectionsRoutes.mjs')
+      const connectionsPageRoutes = createConnectionsPageRoutes({ dsManager, freezrPrefs, freezrStatus })
+      app.use('/connections', connectionsPageRoutes)
+      results.mounted.push('connections-pages')
+    } catch (error) {
+      console.error('❌ Failed to mount connections routes:', error)
+      results.failed.push({ feature: 'connections', error })
+    }
     
     // Import and mount public routes
     try {
@@ -193,6 +270,21 @@ export async function mountAllModernRoutes(app, { dsManager, freezrPrefs, freezr
     }
 
     
+    // Resume any FS migration interrupted by a restart (non-blocking).
+    try {
+      const { recoverOnStartup } = await import('../features/account/services/fsMigrationService.mjs')
+      recoverOnStartup().catch(e => console.warn('⚠️  fsMigration recoverOnStartup:', e.message))
+    } catch (error) {
+      console.warn('⚠️  Could not run fsMigration recoverOnStartup:', error.message)
+    }
+
+    try {
+      const { recoverOnStartup: recoverDbMigration } = await import('../features/account/services/dbMigrationService.mjs')
+      recoverDbMigration().catch(e => console.warn('⚠️  dbMigration recoverOnStartup:', e.message))
+    } catch (error) {
+      console.warn('⚠️  Could not run dbMigration recoverOnStartup:', error.message)
+    }
+
     // Summary
     if (results.mounted.length > 0) {
       // onsole.log(`✅ Successfully mounted ${results.mounted.length} route(s): ${results.mounted.join(', ')}`)

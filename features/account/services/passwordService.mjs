@@ -8,7 +8,7 @@
 
 import bcrypt from 'bcryptjs'
 import User from '../../../common/misc/userObj.mjs'
-import { generateOneTimeAppPassword } from '../../../common/helpers/config.mjs'
+import { generateOneTimeAppPassword, isSystemApp } from '../../../common/helpers/config.mjs'
 
 /**
  * Change user password
@@ -130,6 +130,29 @@ export const deleteAllAppTokensForUser = async (tokenDb, userId) => {
   return { deletedCount: n }
 }
 
+/**
+ * Delete all app tokens for a specific (userId, appName) pair.
+ * Called when a user revokes an app's permission so any existing offline tokens
+ * for that app stop working immediately rather than at their natural 6-month expiry.
+ * Best-effort: token deletion failure is non-fatal for the revocation flow itself.
+ *
+ * @param {Object} tokenDb - Token database instance (APP_TOKEN_OAC)
+ * @param {string} userId - User ID who owns the tokens
+ * @param {string} appName - App whose tokens to delete
+ * @returns {Promise<{ deletedCount: number }>}
+ */
+export const deleteAppTokensForUserAndApp = async (tokenDb, userId, appName) => {
+  if (!tokenDb || !userId || !appName) return { deletedCount: 0 }
+  if (!tokenDb.delete_records) throw new Error('Token database not available (need delete_records)')
+
+  const result = await tokenDb.delete_records({ owner_id: userId, app_name: appName }, { multi: true })
+  const n = result?.nRemoved ?? 0
+  if (n > 0) {
+    console.log('✅ deleteAppTokensForUserAndApp: deleted', n, 'token(s) for', { userId, appName })
+  }
+  return { deletedCount: n }
+}
+
 const EXPIRY_DEFAULT_FOR_APPS = 6 * 30 * 24 * 60 * 60 * 1000 // 6 months
 
 /**
@@ -169,6 +192,11 @@ export const generateAndSaveAppPasswordForUser = async (tokenDb, userId, appName
   }
   if (!appName) {
     throw new Error('Missing app name')
+  }
+  if (isSystemApp(appName)) {
+    // Defense in depth — the /acctapi/generateAppPassword controller already rejects this,
+    // but service-layer guard ensures any future caller can't mint a system-app token.
+    throw new Error('Cannot generate app password for a system app')
   }
   if (!deviceCode && process.env.FREEZR_TEST_MODE !== 'true') {
     throw new Error('Missing device code')

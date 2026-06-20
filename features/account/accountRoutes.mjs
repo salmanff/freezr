@@ -22,11 +22,17 @@ import { createAddPublicRecordsDB } from '../public/middleware/publicContext.mjs
 import { createAddOwnerPermsDbForLoggedInuser } from '../../middleware/permissions/permissionContext.mjs'
 import { isLoggedInAccountAppRequest, isLoggedInAccountorAdminAppRequest, noCheckNeeded } from '../../middleware/permissions/permissionCheckers.mjs'
 import { createAddUserDs } from '../../features/apps/middleware/appContext.mjs'
+import { createAddTrustedJobsDbIfAdmin } from '../jobs/middleware/jobsContext.mjs'
 import { generateLoginPage } from './controllers/loginController.mjs'
 import { createLoginApiController } from './controllers/loginApiController.mjs'
 // import { createLoginPageController } from './controllers/loginPageController.mjs' // Using existing loginController.mjs instead
 import { createAccountPageController } from './controllers/accountPageController.mjs'
-import { createAccountApiController } from './controllers/accountApiController.mjs'
+import { createAccountApiController, createConnectionDisconnectHandler } from './controllers/accountApiController.mjs'
+import { createFsMigrationController, ACTIONS_REQUIRING_USERSDB } from './controllers/fsMigrationController.mjs'
+import { createDbMigrationController } from './controllers/dbMigrationController.mjs'
+import { createAccountRemoveController } from './controllers/accountRemoveController.mjs'
+import { createAccountResetController } from './controllers/accountResetController.mjs'
+import { createMigrationLockGuard } from './middleware/migrationLockGuard.mjs'
 import { 
   getAccountPageManifest, 
   validatePageParams,
@@ -63,6 +69,9 @@ export const createAccountPageRoutes = ({ dsManager, freezrPrefs, freezrStatus }
   const logOutAction = createLogoutAction(dsManager)
   // addUserDSAndAppFS - Get appFS and set up res.locals.freezr
   const addUserDSAndAppFS = createAddUserDSAndAppFS(dsManager, freezrPrefs, freezrStatus) // previous addUserAppsAndPermDBs
+  // migrationLockGuard (page mode) - while a migration locks the account, redirect every
+  // page except the status page to /account/migration
+  const pageLockGuard = createMigrationLockGuard(dsManager, freezrPrefs, { mode: 'page' })
 
   // ===== CREATE CONTROLLERS =====
   
@@ -116,9 +125,12 @@ export const createAccountPageRoutes = ({ dsManager, freezrPrefs, freezrStatus }
 
   // ===== PAGE ROUTES =====
 
-  router.get('/login', pageTokenGuard, notLoggedInGuard, setupGuard, loginContext, noCheckNeeded, generateLoginPage)  
+  router.get('/login', pageTokenGuard, notLoggedInGuard, setupGuard, loginContext, noCheckNeeded, generateLoginPage)
   router.get('/logout', noCheckNeeded, logOutAction)
-  
+
+  // From here on, a locked (migrating) account is redirected to the status page.
+  router.use(pageLockGuard)
+
   router.get('/app/:sub_page', setupGuard, loggedInGuard, (req, res, next) => { req.params.page = 'app'; next() }, addAccountManifestToResLocals, pageTokenGuard, addUserDSAndAppFS, isLoggedInAccountAppRequest, accountPageController.generateAccountPage)
   router.get('/app/:sub_page/:target_app', setupGuard, loggedInGuard, (req, res, next) => { req.params.page = 'app'; next() }, addAccountManifestToResLocals, pageTokenGuard, addUserDSAndAppFS, isLoggedInAccountAppRequest, accountPageController.generateAccountPage)
 
@@ -160,6 +172,9 @@ export const createAcctApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
   const addPublicRecordsDB = createAddPublicRecordsDB(dsManager, freezrPrefs, freezrStatus) // for public records database operations
   const addUserDs = createAddUserDs(dsManager, freezrPrefs) // for user data store operations
   const addLogManagerIfNeedBe = createAddLogManager(logManager) // for log manager operations
+  // Admin-only, non-fatal: attaches the fradmin-owned trusted-jobs db so an admin re-install can
+  // disable the trust of a CHANGED local job (the controller copies the handle into the install context).
+  const addTrustedJobsDbIfAdmin = createAddTrustedJobsDbIfAdmin(dsManager, freezrPrefs)
   
   // Multer middleware for file uploads
   const upload = multer().single('file')
@@ -171,24 +186,66 @@ export const createAcctApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
   // API Controllers
   const loginApiController = createLoginApiController(dsManager)
   const accountApiController = createAccountApiController()
-  
+  const fsMigrationController = createFsMigrationController({ freezrPrefs })
+  const dbMigrationController = createDbMigrationController({ freezrPrefs })
+  const apiLockGuard = createMigrationLockGuard(dsManager, freezrPrefs, { mode: 'api' })
+
+  // The users db is a powerful handle; attach it only for the fsMigration actions whose
+  // handlers actually need it (the password-gated ones). Keyed off req.params.action.
+  const addAllUsersDbIfNeeded = (req, res, next) => {
+    if (ACTIONS_REQUIRING_USERSDB.includes(req.params.action)) return addAllUsersDb(req, res, next)
+    return next()
+  }
+
   // ===== API ROUTES =====
 
   router.post('/login', noCheckNeeded, loginApiController.handleLogin)
   
-  router.get('/generateAppPassword', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addTokenDb, isLoggedInAccountAppRequest, accountApiController.generateAppPassword)
   router.post('/applogout', setupGuard, addAppTokenInfo, noCheckNeeded, accountApiController.userAppLogOut)
 
-  router.post('/updateAppFromFiles', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addFreezrAccountAsReqParam, addUserDSAndAppFS, addOwnerPermsDb, addPublicManifestsDb, isLoggedInAccountAppRequest, accountApiController.updateAppFromFilesController)
+  // ===== MIGRATION ROUTES (FS + DB) =====
+  // Mounted BEFORE the api lock guard so they stay reachable while the account is locked (the
+  // status page polls these). GET = reads (status, fs/dbOptions); PUT = state-changing actions,
+  // dispatched by :action. addAllUsersDbIfNeeded loads the users db only for the password-gated
+  // actions (start, confirmDelete).
+  router.get('/fsMigration/:action', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, isLoggedInAccountAppRequest, fsMigrationController.handleGet)
+  router.put('/fsMigration/:action', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addFreezrAccountAsReqParam, addAllUsersDbIfNeeded, isLoggedInAccountAppRequest, fsMigrationController.handleAction)
+  router.get('/dbMigration/:action', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, isLoggedInAccountAppRequest, dbMigrationController.handleGet)
+  router.put('/dbMigration/:action', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addFreezrAccountAsReqParam, addAllUsersDbIfNeeded, isLoggedInAccountAppRequest, dbMigrationController.handleAction)
+
+  // From here on, a locked (migrating) account gets 503 on every other acctapi call. (Previously
+  // this guard sat at the very end of the router and so protected nothing.) The migration status
+  // routes and login/logout above stay reachable.
+  router.use(apiLockGuard)
+
+  router.get('/generateAppPassword', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addTokenDb, isLoggedInAccountAppRequest, accountApiController.generateAppPassword)
+
+  router.post('/updateAppFromFiles', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addFreezrAccountAsReqParam, addUserDSAndAppFS, addOwnerPermsDb, addPublicManifestsDb, addTrustedJobsDbIfAdmin, isLoggedInAccountAppRequest, accountApiController.updateAppFromFilesController)
   router.post('/appMgmtActions', setupGuard, loggedInGuard, getAndCheckAccountOrCreatorAppTokenInfo, addFreezrAccountAsReqParam, addUserDSAndAppFS, addPublicManifestsDb, addPublicRecordsDB, isLoggedInAccountAppRequest, accountApiController.handleAppMgmtActions)
 
-  router.put('/app_install_from_zipfile', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, upload, addFreezrAccountAsReqParam, addUserDSAndAppFS, addOwnerPermsDb, addPublicRecordsDB, isLoggedInAccountAppRequest, accountApiController.installAppFromZipFile)
+  router.put('/app_install_from_zipfile', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, upload, addFreezrAccountAsReqParam, addUserDSAndAppFS, addOwnerPermsDb, addPublicRecordsDB, addTrustedJobsDbIfAdmin, isLoggedInAccountAppRequest, accountApiController.installAppFromZipFile)
   router.post('/app_install_from_url', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addFreezrAccountAsReqParam, addUserDSAndAppFS, addOwnerPermsDb, addPublicRecordsDB, isLoggedInAccountAppRequest, accountApiController.installAppFromUrlController)
   router.post('/app_install_served', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addFreezrAccountAsReqParam, addUserDSAndAppFS, addOwnerPermsDb, addPublicRecordsDB, isLoggedInAccountAppRequest, accountApiController.installServedAppController)
 
+  // Connection disconnect — best-effort revoke at provider + delete resource record.
+  // Mounted BEFORE the generic /:action catch-all so the specific path wins.
+  const connectionDisconnectHandler = createConnectionDisconnectHandler({ dsManager, freezrPrefs })
+  router.post('/connection_disconnect', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addFreezrAccountAsReqParam, addUserDSAndAppFS, isLoggedInAccountAppRequest, connectionDisconnectHandler)
+
   router.put('/:action', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addFreezrAccountAsReqParam, addAllUsersDb, addTokenDb, addUserDSAndAppFS, addPublicRecordsDB, addPublicManifestsDb, isLoggedInAccountAppRequest, accountApiController.handleAccountActions)
   router.get('/:getAction', setupGuard, loggedInGuard, getAndCheckAccountOrAmdinAppTokenInfo, addUserDs, isLoggedInAccountorAdminAppRequest, addLogManagerIfNeedBe, accountApiController.handleGettingAccountInfo)
-  
+
+  // ===== ACCOUNT REMOVE ROUTES =====
+  // /account/remove page: removeInfo (which mode applies) + remove (password + username-confirmed).
+  const accountRemoveController = createAccountRemoveController({ dsManager, freezrPrefs })
+  router.get('/account/removeInfo', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addFreezrAccountAsReqParam, addAllUsersDb, isLoggedInAccountAppRequest, accountRemoveController.handleRemoveInfo)
+  router.put('/account/remove', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addFreezrAccountAsReqParam, addAllUsersDb, addTokenDb, addUserDSAndAppFS, addPublicRecordsDB, addPublicManifestsDb, isLoggedInAccountAppRequest, accountRemoveController.handleRemove)
+
+  // ===== ACCOUNT RESET (refresh storage credentials) ROUTES =====
+  const accountResetController = createAccountResetController({ dsManager, freezrPrefs })
+  router.get('/account/resetInfo', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addFreezrAccountAsReqParam, addAllUsersDb, isLoggedInAccountAppRequest, accountResetController.handleResetInfo)
+  router.put('/account/refreshCredentials', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addFreezrAccountAsReqParam, addAllUsersDb, isLoggedInAccountAppRequest, accountResetController.handleRefresh)
+
   return router
 }
 

@@ -8,10 +8,11 @@
 // - Uses functional approach with closures for dependency injection
 
 import { loadDataHtmlAndPage } from '../../../adapters/rendering/pageLoader.mjs'
-import { 
+import {
   getSystemDataPageManifest
 } from '../services/accountManifestService.mjs'
 import { buildLoginRedirectUrl } from '../../../common/helpers/utils.mjs'
+import { sdkAddonsForApp } from '../../../common/helpers/sdkAddons.mjs'
 
 
 /**
@@ -70,7 +71,10 @@ const generateAccountPage = async (req, res) => {
       other_variables: manifest.other_variables || '' + 'const publicLandingPage = "' +
        ((res.locals.freezr.freezrPrefs?.public_landing_page || '') + '";'),
       // Store manifest for potential use by initial_query_func in next step
-      manifest: manifest
+      manifest: manifest,
+      // SDK add-ons: pulled from systemPermissions.json since account pages have
+      // no per-app manifest permissions array.
+      sdkAddons: sdkAddonsForApp(manifest.app_name, manifest)
     }
 
     // Handle initial_query_func if present

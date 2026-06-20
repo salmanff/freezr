@@ -1,45 +1,52 @@
 <!--
-freezr Account Reset
+freezr Refresh Storage Credentials
 reset: {
-  page_title: 'Account Reset (freezr)',
+  page_title: 'Refresh Storage Credentials (freezr)',
   css_files: ['/app/info.freezr.public/public/freezr_style.css', 'account_home.css'],
   page_url: 'account_reset.html',
-  script_files: ['account_reset.js'],
-  initial_query_func: 'getResetData'
+  script_files: ['account_reset.js']
 }
 -->
 <div class="freezr-page">
   <nav class="freezr-nav" id="adminFunctions">
-    <span class="freezr-nav-title">Account Reset</span>
-    <a href="/public">Public Page</a>
+    <span class="freezr-nav-title">Refresh Storage Credentials</span>
+    <a href="/account/settings">Back to Settings</a>
     <a href="/account/logout">Log Out</a>
   </nav>
 
   <div class="freezr-content">
-    <div id="errorBox" class="errorBox"></div>
+    <div id="errorBox" class="errorBox" style="display:none;"></div>
 
-    <div class="freezr-card" style="border-left: 4px solid #dc2626;">
-      <h3 style="color: #dc2626;">⚠️ Danger Zone - Account Reset</h3>
-      <p><strong>Warning:</strong> This page is for advanced users only. Incorrect settings can break your account.</p>
+    <div class="freezr-card">
+      <h3>Refresh storage credentials</h3>
+      <p>Re-enter the keys/credentials for your current storage provider — for example after rotating
+      access keys or re-authenticating. This updates the credentials <strong>in place</strong> and does
+      not move any data. To change to a different provider or location, use
+      <a href="/account/migration">migration</a> instead.</p>
 
-      <div id="main" style="max-width: 450px;">
-        <label class="texttop">Owner (user id):</label>
-        <div class="input" id="userId" style="background: var(--freezr-bg);">{{owner}}</div>
-        
-        <label class="texttop">File System:</label>
-        <input type="text" class="input" id="fsParamsType" name="fsParamsType" value="{{fsParamsType}}"/>
-      </div>
-    </div>
+      <div id="genericMsg" style="display:none; color:#555; margin-top:10px;"></div>
 
-    <div class="freezr-card" id="passEnterDiv">
-      <h3>Confirm Changes</h3>
-      <div style="max-width: 450px;">
-        <label class="texttop">Your freezr password:</label>
-        <input type="password" class="input" id="password" name="password"/>
-        
+      <!-- File system credentials (shown only if the FS is a cloud provider) -->
+      <div id="fsSection" style="display:none; margin-top:18px;">
+        <h4>File system — <span id="fsLabel"></span></h4>
+        <div id="fs_fields"></div>
         <div class="button-row">
-          <div id="click_recordAuthParams" class="freezrButt" style="background: #dc2626;">Record new parameters</div>
+          <div id="click_saveFS" class="freezrButt" style="background:#2563eb;">Save file-system credentials</div>
         </div>
+      </div>
+
+      <!-- Database credentials (shown only if the DB is a cloud provider, e.g. MongoDB) -->
+      <div id="dbSection" style="display:none; margin-top:18px;">
+        <h4>Database — <span id="dbLabel"></span></h4>
+        <div id="db_fields"></div>
+        <div class="button-row">
+          <div id="click_saveDB" class="freezrButt" style="background:#2563eb;">Save database credentials</div>
+        </div>
+      </div>
+
+      <div id="passwordRow" style="display:none; margin-top:20px; max-width:360px;">
+        <label class="texttop">Your freezr password (required to save):</label>
+        <input type="password" class="input" id="resetPassword"/>
       </div>
     </div>
 

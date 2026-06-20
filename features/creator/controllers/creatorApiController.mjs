@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import crypto from 'crypto'
 import { zipSync } from 'fflate'
 import { sendApiSuccess, sendFailure } from '../../../adapters/http/responses.mjs'
 import { userAppListOAC, userPERMS_OAC, constructAppIdStringFrom, isSystemApp, validAppName } from '../../../common/helpers/config.mjs'
@@ -44,6 +45,63 @@ const isTextFile = (filePath) => {
 }
 
 const FREEZR_API_PATH = path.resolve(__dirname, '../../../freezrsystmapps/info.freezr.public/public/freezrApiV2.js')
+
+// freezr-context.md is shipped into every app folder so that opening the folder
+// in an external editor (VS Code / Claude Code / etc.) carries the context of how
+// freezr works, and so a published app's source is self-documenting. The copy is
+// stamped with a hash of the source on the first line so we can tell when the
+// freezr-shipped source has changed and the copy needs refreshing.
+const FREEZR_CONTEXT_PATH = path.resolve(__dirname, '../../../freezrsystmapps/info.freezr.public/public/freezr-context.md')
+const CONTEXT_DOC_NAME = 'freezr-context.md'
+
+const sha256 = (str) => crypto.createHash('sha256').update(str, 'utf-8').digest('hex')
+
+const buildContextDoc = (sourceContent, hash) => {
+  const date = new Date().toISOString().slice(0, 10)
+  const header = `<!-- freezr-context source-sha=${hash} generated=${date} — auto-managed by freezr creator, do not edit this line -->`
+  return header + '\n' + sourceContent
+}
+
+const parseContextHash = (copyContent) => {
+  if (!copyContent) return null
+  const firstLine = copyContent.slice(0, copyContent.indexOf('\n') >= 0 ? copyContent.indexOf('\n') : copyContent.length)
+  const m = firstLine.match(/source-sha=([0-9a-f]+)/)
+  return m ? m[1] : null
+}
+
+// Ensures the app folder has an up-to-date copy of freezr-context.md.
+// Returns { action: 'created'|'updated'|'uptodate'|'skipped', content?, hash? }.
+const ensureContextDoc = async (appFS) => {
+  if (!appFS || !appFS.writeToAppFiles) return { action: 'skipped', reason: 'no-appfs' }
+
+  let sourceContent
+  try {
+    sourceContent = await fs.promises.readFile(FREEZR_CONTEXT_PATH, 'utf-8')
+  } catch (err) {
+    console.warn('ensureContextDoc: could not read source context:', err.message)
+    return { action: 'skipped', reason: 'no-source' }
+  }
+  const hash = sha256(sourceContent)
+
+  let copyContent = null
+  try {
+    copyContent = await appFS.readAppFile(CONTEXT_DOC_NAME)
+  } catch (err) { /* missing copy is expected on create */ }
+
+  const doc = buildContextDoc(sourceContent, hash)
+
+  if (copyContent === null || copyContent === undefined) {
+    await appFS.writeToAppFiles(CONTEXT_DOC_NAME, doc, { doNotOverWrite: false })
+    return { action: 'created', content: doc, hash }
+  }
+
+  if (parseContextHash(copyContent) === hash) {
+    return { action: 'uptodate', hash }
+  }
+
+  await appFS.writeToAppFiles(CONTEXT_DOC_NAME, doc, { doNotOverWrite: false })
+  return { action: 'updated', content: doc, hash }
+}
 
 const BLANK_INDEX_HTML = `<div id="app">
   <h1>Hello App Creator!</h1>
@@ -120,6 +178,12 @@ export const createCreatorApiController = () => {
       await appFS.writeToAppFiles('index.html', BLANK_INDEX_HTML, { doNotOverWrite: false })
       await appFS.writeToAppFiles('index.css', BLANK_INDEX_CSS, { doNotOverWrite: false })
       await appFS.writeToAppFiles('index.js', BLANK_INDEX_JS, { doNotOverWrite: false })
+
+      try {
+        await ensureContextDoc(appFS)
+      } catch (err) {
+        console.warn('createBlankApp: could not write context doc:', err.message)
+      }
 
       return sendApiSuccess(res, {
         success: true,
@@ -331,6 +395,31 @@ export const createCreatorApiController = () => {
     } catch (error) {
       console.error('creatorApiController.writeAppFile error:', error)
       return sendFailure(res, error, 'creatorApiController.writeAppFile', 500)
+    }
+  }
+
+  const syncContext = async (req, res) => {
+    try {
+      const appName = req.query?.app_name || req.body?.app_name
+      if (!appName) {
+        return sendFailure(res, 'app_name is required.', 'creatorApiController.syncContext', 400)
+      }
+
+      const userDS = res.locals?.freezr?.userDS
+      if (!userDS) {
+        return sendFailure(res, 'User data store not available.', 'creatorApiController.syncContext', 500)
+      }
+
+      const appFS = await userDS.getorInitAppFS(appName, {})
+      if (!appFS) {
+        return sendFailure(res, 'Could not access app filesystem.', 'creatorApiController.syncContext', 500)
+      }
+
+      const result = await ensureContextDoc(appFS)
+      return sendApiSuccess(res, { success: true, ...result })
+    } catch (error) {
+      console.error('creatorApiController.syncContext error:', error)
+      return sendFailure(res, error, 'creatorApiController.syncContext', 500)
     }
   }
 
@@ -1093,6 +1182,7 @@ export const createCreatorApiController = () => {
     readAppFile,
     readAllFiles,
     writeAppFile,
+    syncContext,
     uploadAppFile,
     renameApp,
     publishApp,

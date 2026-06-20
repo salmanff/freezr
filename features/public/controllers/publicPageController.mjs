@@ -526,6 +526,25 @@ export const createPublicPageController = () => {
           app_name: 'info.freezr.public',
           script_files: ['/app/info.freezr.public/public/oauth_validate_page.js'],
           modules: []
+        },
+
+        // Federation pages — see freezr_mail_phase1.md §2.9
+        partner_confirm: {
+          page_title: 'freezr.info - confirm partner OAuth flow',
+          css_files: ['/app/info.freezr.public/public/freezr_style.css'],
+          page_url: 'partner_confirm.html',
+          app_name: 'info.freezr.public',
+          script_files: ['/app/info.freezr.public/public/partner_confirm.js'],
+          modules: []
+        },
+
+        oauth_transfer_receiver: {
+          page_title: 'freezr.info - completing connection',
+          css_files: ['/app/info.freezr.public/public/freezr_style.css'],
+          page_url: 'oauth_transfer_receiver.html',
+          app_name: 'info.freezr.public',
+          script_files: ['/app/info.freezr.public/public/oauth_transfer_receiver.js'],
+          modules: []
         }
       }
       const manifest = manifests[getWhat]

@@ -203,7 +203,21 @@ export const createAppPageRoutes = ({ dsManager, freezrPrefs, freezrStatus }) =>
       req.params.target_app = 'info.freezr.register'
       next()
     },
-    addPublicSystemAppFS, 
+    addPublicSystemAppFS,
+    serveTargetAppFile
+  )
+
+  // RECOVERY EXCEPTION (credentials reset): the /account/reset page is how a user fixes broken/
+  // expired storage credentials, so it MUST load even when their own data store is unreachable.
+  // Its data endpoints already read only the fradmin store, but the page's script is normally
+  // served by the generic /:app_name/* route below, which loads the user's perms + app_list and
+  // therefore fails on broken storage. Serve JUST this one script from the local system-app files,
+  // bypassing those user-data checks. Every other account-app file keeps the full checks.
+  router.get('/info.freezr.account/account_reset.js',
+    setupGuard,
+    loggedInGuard,
+    (req, res, next) => { req.params.target_app = 'info.freezr.account'; req.params.resource = 'account_reset.js'; next() },
+    addPublicSystemAppFS,
     serveTargetAppFile
   )
 

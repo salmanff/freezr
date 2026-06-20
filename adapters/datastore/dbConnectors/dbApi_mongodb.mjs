@@ -312,6 +312,23 @@ MONGO_FOR_FREEZR.prototype.getAllAppTableNames_async = async function (appOrTabl
   }
 }
 
+MONGO_FOR_FREEZR.prototype.count_async = async function (idOrQuery = {}) {
+  const { coll, collName, release } = await getMongoContext(this)
+  try {
+    const filter = { ...(idOrQuery || {}) }
+    if (hasUnifiedStrategy(this.env.dbParams, this.oat.owner)) {
+      filter.__owner = this.oat.owner
+      filter.__appTable = fullOACName(this.oat, false)
+    }
+    return await coll.countDocuments(filter)
+  } catch (err) {
+    console.warn('got err in count in mongo db ', { collName, err })
+    throw err
+  } finally {
+    release()
+  }
+}
+
 MONGO_FOR_FREEZR.prototype.stats_async = async function () {
   const { coll, collName, release } = await getMongoContext(this)
   try {
@@ -486,6 +503,9 @@ const getCollectionScanStats = async function (coll, idOrQuery = {}) {
 }
 
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+
+// Exposed for the DB-migration service's "same physical database" guard (mongo→mongo).
+export { dbConnectionString }
 
 // Interface
 export default MONGO_FOR_FREEZR

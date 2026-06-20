@@ -1,0 +1,15 @@
+<div style="max-width:1000px;margin:32px auto;font-family:system-ui,-apple-system,sans-serif">
+  <h1 style="font-weight:600">Scheduled Jobs</h1>
+  <p style="color:#555">Every job currently scheduled on this server (across users), when it's next
+     due, and the outcome of its last run. A job shows <b>waiting</b> until it's runnable
+     (run_job granted + admin-trusted + audience allows the user).</p>
+
+  <div id="sched-status" style="margin:12px 0;color:#666"></div>
+  <div style="margin:12px 0;display:flex;gap:10px;align-items:center">
+    <button id="run-now-btn" style="font-size:15px;padding:8px 18px;border:0;border-radius:8px;background:#2b6cb0;color:#fff;cursor:pointer">Run scheduler now</button>
+    <button id="refresh-btn" style="font-size:15px;padding:8px 18px;border:0;border-radius:8px;background:#e2e8f0;color:#222;cursor:pointer">Refresh</button>
+    <span id="run-now-result" style="color:#666"></span>
+  </div>
+
+  <div id="sched-root">Loading…</div>
+</div>

@@ -6,7 +6,7 @@ import { fetchAppHistory } from './historyActions.js'
 import { fetchFolderTree } from './fileTree.js'
 import { setManifestFromObject } from './panels/manifestRenderer.js'
 import { calculateProjectCost } from './priceService.js'
-import { saveFileToBackend, updateAppFromFiles } from './utils.js'
+import { saveFileToBackend, updateAppFromFiles, saveChatDraft, clearChatDraft } from './utils.js'
 import { flushEditorIfDirty } from './panels/filePanel.js'
 
 // --- Incremental stream display parser ---
@@ -284,7 +284,10 @@ const fetchAllFiles = async (appName) => {
   return result.files || []
 }
 
-const EXCLUDED_FROM_CONTEXT = new Set(['freezrApiV2.js'])
+// freezr-context.md is the freezr-shipped reference doc carried in the app folder.
+// It is excluded from the LLM file context (the chat already has its own freezr
+// instructions/API reference) and therefore also from the large-file refactor check.
+const EXCLUDED_FROM_CONTEXT = new Set(['freezrApiV2.js', 'freezr-context.md'])
 
 const REFACTOR_LINE_THRESHOLD = 600
 
@@ -447,6 +450,9 @@ export const sendChatMessage = async (userMessage, state, setState) => {
     next.chat.error = null
     next.chat.draftMessage = ''
     next.chat.messages = [...(next.chat.messages || []), { role: 'user', content: userMessage, timestamp }]
+    // One-shot: force the chat panel to scroll to the bottom on this render so the just-sent
+    // prompt is visible, even if the user had scrolled up in the history. Cleared after use.
+    next.chat.scrollToBottom = true
     return next
   }, { rerender: true, sourcePanel: 'chat' })
 
@@ -721,6 +727,9 @@ export const sendChatMessage = async (userMessage, state, setState) => {
       return next
     }, { sourcePanel: 'all' })
 
+    // Send succeeded — the prompt is now in history, so drop the persisted draft.
+    clearChatDraft(appName)
+
     if (newManifestObject) {
       setManifestFromObject(appName, newManifestObject, setState)
     }
@@ -731,7 +740,16 @@ export const sendChatMessage = async (userMessage, state, setState) => {
       next.chat.error = error?.message || 'Chat failed.'
       const msgs = next.chat.messages || []
       if (msgs.length > 0 && msgs[msgs.length - 1].role === 'user') {
-        next.chat.lastFailedMessage = msgs[msgs.length - 1].content
+        const failedContent = msgs[msgs.length - 1].content
+        next.chat.lastFailedMessage = failedContent
+        // Don't lose the user's prompt on error: put it back in the input so it
+        // stays visible and editable. The Retry button re-runs it as-is; the user
+        // can also tweak it and Send. Only restore if the draft is empty so we
+        // never clobber something the user typed in the meantime.
+        if (!next.chat.draftMessage) next.chat.draftMessage = failedContent
+        // Persist it too, so the prompt survives even a full shutdown (e.g. the
+        // failure was the laptop closing mid-send), not just this in-memory restore.
+        saveChatDraft(appName, next.chat.draftMessage)
         next.chat.messages = msgs.slice(0, -1)
       }
       return next

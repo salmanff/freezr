@@ -110,6 +110,10 @@ const appHeaderFor = async function (manifest, versionInfo = {}) { // Logo and n
 // Creating Permission HTML
 const DENY = 'Deny'
 const ACCEPT = 'Accept'
+// UI-only label (not a server action). On a granted job permission, the Deny button morphs to this
+// when the user edits the location dropdown away from the saved value; clicking it re-grants with the
+// new location (the action sent to the server is still ACCEPT). Reverting the dropdown restores Deny.
+const UPDATE = 'Update location'
 
 // Create warnings display area
 const createWarningsDiv = function (warnings, currentAppName) {
@@ -128,21 +132,29 @@ const createWarningsDiv = function (warnings, currentAppName) {
                          warningSeverity === 'warning' ? '#ffa726' : '#42a5f5'
     
     const warningElement = dg.div(
-      { 
-        style: { 
-          border: `2px solid ${severityColor}`, 
-          borderRadius: '5px', 
-          padding: '10px', 
+      {
+        style: {
+          border: `2px solid ${severityColor}`,
+          borderRadius: '5px',
+          padding: '10px',
           margin: '10px 0',
           backgroundColor: `${severityColor}15`
-        } 
+        }
       },
       dg.div(
         { style: { fontSize: '14px' } },
         warning.message
       )
     )
-    
+
+    // Optional action link on a warning (e.g. "Review trusted jobs →" pointing at /admin/trustedjobs).
+    // link/linkText come from the server (fixed strings), so building the anchor via innerHTML is safe.
+    if (warning.link) {
+      const linkDiv = dg.div({ style: { fontSize: '14px', marginTop: '6px', fontWeight: 'bold' } })
+      linkDiv.innerHTML = '<a href="' + warning.link + '">' + (warning.linkText || warning.link) + '</a>'
+      warningElement.appendChild(linkDiv)
+    }
+
     warningsContainer.appendChild(warningElement)
   })
 
@@ -239,7 +251,10 @@ const createPermissionsDiv = function (outerPermissions, currentAppName) {
     return dg.div('This App is not asking for any permissions.')
   }
 }
-const CAPABILITY_TYPES = ['external_scripts', 'external_fetch', 'unsafe_eval', 'use_serverless', 'use_llm', 'use_3pFunction', 'auto_update_local_3pFunction', 'allow_self_frames']
+const CAPABILITY_TYPES = ['external_scripts', 'external_fetch', 'unsafe_eval', 'use_serverless', 'use_llm', 'use_mail', 'use_3pFunction', 'auto_update_local_3pFunction', 'allow_self_frames', 'run_job', 'schedule_job']
+// Job permissions show a "where should this run?" location picker on grant (like use_mail's scopes).
+const JOB_PERM_TYPES = ['run_job', 'schedule_job']
+const RESOURCES_TABLE = 'info.freezr.account.resources'
 function groupPermissions (permList, appName) {
   const groupedPermissions = {
     thisAppToThisApp: [],
@@ -343,6 +358,32 @@ const getPermSentence = function (aPerm, currentAppName) {
     sentence += 'use your <b>AI / LLM API keys</b> to make requests to AI services.'
     risk = 'This uses your API quota and may incur costs. The app can send prompts using your credentials.'
 
+  } else if (aPerm.type === 'use_mail') {
+    // Describe scope based on whatever the manifest declared (or the user has narrowed via the picker).
+    // connection_names: missing / empty / ['*'] all mean "all the user's mail-enabled connections".
+    const connNames = aPerm.connection_names || []
+    const all = connNames.length === 0 || connNames.includes('*')
+    const scopes = aPerm.scopes || ['read']
+    const canWrite = scopes.includes('write')
+    const accessText = canWrite ? '<b>read and write</b>' : '<b>read</b>'
+    const targetText = all
+      ? '<b>all your connected mail accounts</b>'
+      : ('the following mail accounts: <b>' + connNames.join(', ') + '</b>')
+    sentence += accessText + ' messages from ' + targetText + '.'
+    if (canWrite) {
+      risk = 'The app will be able to modify and send mail using your credentials.'
+    }
+
+  } else if (aPerm.type === 'run_job') {
+    const jn = aPerm.job_name || aPerm.name
+    sentence += 'run the job <b>' + jn + '</b> <b>on demand</b> (when you or the app trigger it). This does not allow scheduled/background runs.'
+    risk = 'You choose below where it runs. Running on your own cloud uses your compute and may incur costs.'
+
+  } else if (aPerm.type === 'schedule_job') {
+    const jn = aPerm.job_name || aPerm.name
+    sentence += 'run the job <b>' + jn + '</b> <b>automatically on a recurring schedule</b>, in the background.'
+    risk = 'This runs on its own, without you present. You choose below where it runs; your own cloud may incur costs.'
+
   } else if (aPerm.type === 'use_3pFunction') {
     const funcName = aPerm.function_name || aPerm.name
     sentence += 'run the third-party function <b>' + funcName + '</b> installed on this server.'
@@ -392,6 +433,25 @@ const makePermissionElementFrom = function (permissionObject, currentAppName, me
     }
   )
 
+  // For use_mail, an inline picker lets the user narrow which mail accounts and the
+  // access level before clicking Accept. The picker reads existing values from the
+  // permission record and seeds the controls; changePermission below reads back the
+  // current control state at submit time.
+  const extraControls = permissionObject.type === 'use_mail'
+    ? buildUseMailPicker(permissionObject)
+    : (JOB_PERM_TYPES.includes(permissionObject.type) ? buildLocationPicker(permissionObject) : null)
+
+  // On a granted job permission, let the user change where it runs: when the location dropdown
+  // differs from the saved value, morph the Deny button into "Update location" (re-grants with the
+  // new location, stays granted); reverting the dropdown restores Deny. querySelector works on this
+  // still-detached subtree (the row is appended/replaced into the DOM after this function returns).
+  const isGrantedJob = JOB_PERM_TYPES.includes(permissionObject.type) && permissionObject.granted && !permissionObject.outDated
+  if (isGrantedJob && extraControls) {
+    const sel = extraControls.querySelector('select')
+    const savedLoc = permissionObject.location || 'auto'
+    if (sel) sel.addEventListener('change', function () { acceptButt.textContent = (sel.value !== savedLoc) ? UPDATE : DENY })
+  }
+
   return dg.div(
     { className: 'permissionRow' },
     dg.div( // header
@@ -402,41 +462,214 @@ const makePermissionElementFrom = function (permissionObject, currentAppName, me
       { className: 'permissionGrid', style: { display: 'grid', 'grid-template-columns': 'auto 1fr', gap: '0.75rem', 'align-items': 'start' } },
       acceptButt, detailText
     ),
+    ...(extraControls ? [extraControls] : []),
     dg.div({ style: { color: 'red', 'font-size': '16px' } }, message) // message after granting / revoking
 
   )
+}
+
+// Inline picker shown on use_mail permission rows. Renders synchronously with a
+// "Loading…" placeholder, then async-fills with the user's mail-enabled connections.
+// User selections are read back by changePermission() at submit time via stable DOM ids.
+//
+// Per the doc spec we query all the user's resources and filter in JS, rather than
+// passing a complex query to the server.
+const buildUseMailPicker = function (permissionObject) {
+  const safeName = (permissionObject.name || 'unnamed').replace(/[^A-Za-z0-9_-]/g, '_')
+  const containerId = 'pickerFor_' + safeName
+  const allId = 'pickerAll_' + safeName
+  const indClass = 'pickerConn_' + safeName
+  const scopeName = 'pickerScope_' + safeName
+
+  const container = dg.div({
+    id: containerId,
+    'data-perm-name': permissionObject.name,
+    'data-perm-type': 'use_mail',
+    style: { border: '1px solid #e2e8f0', padding: '0.75rem', margin: '0.5rem 0', 'border-radius': '4px', 'background-color': '#f8fafc' }
+  })
+  container.innerHTML = '<em style="color:#64748b;">Loading mail accounts…</em>'
+
+  ;(async () => {
+    let resources = []
+    try {
+      resources = await freezr.query(RESOURCES_TABLE) || []
+    } catch (e) {
+      console.warn('Could not load mail connections for picker:', e)
+    }
+    const mailConnections = resources.filter(r =>
+      r && r.type === 'connection' && Array.isArray(r.services) && r.services.includes('mail')
+    )
+
+    const existingNames = permissionObject.connection_names || []
+    const allByDefault = existingNames.length === 0 || existingNames.includes('*')
+    const existingScopes = permissionObject.scopes || ['read']
+    const canWriteByDefault = existingScopes.includes('write')
+
+    const escapeHtml = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+
+    let html = ''
+    html += '<div style="margin-bottom:0.5rem;">'
+    html += '<strong>Access level:</strong>'
+    html += `<label style="margin-left:0.75rem;"><input type="radio" name="${scopeName}" value="read" ${!canWriteByDefault ? 'checked' : ''}/> Read only</label>`
+    html += `<label style="margin-left:0.75rem;"><input type="radio" name="${scopeName}" value="readwrite" ${canWriteByDefault ? 'checked' : ''}/> Read + Write</label>`
+    html += '</div>'
+
+    html += '<div style="margin-bottom:0.5rem;">'
+    html += `<label><input type="checkbox" id="${allId}" ${allByDefault ? 'checked' : ''}/> <b>Include all</b> mail accounts (current and future)</label>`
+    html += '</div>'
+
+    if (mailConnections.length > 0) {
+      html += '<div style="margin-left:1.5rem;font-size:0.9em;">'
+      for (const c of mailConnections) {
+        const cn = c.connectionName || ''
+        const labelExtra = c.account_email || c.provider || ''
+        const checked = allByDefault || existingNames.includes(cn)
+        html += `<div><label><input type="checkbox" class="${indClass}" value="${escapeHtml(cn)}" ${checked ? 'checked' : ''}/> ${escapeHtml(cn)}${labelExtra ? ' <span style="color:#64748b;">(' + escapeHtml(labelExtra) + ')</span>' : ''}</label></div>`
+      }
+      html += '</div>'
+    } else {
+      html += '<div style="margin-left:1.5rem;font-size:0.85em;color:#64748b;"><em>No mail accounts connected yet. <a href="/account/resources">Connect one</a> first to grant access to specific accounts. Granting now means &quot;all future mail accounts&quot;.</em></div>'
+    }
+
+    container.innerHTML = html
+
+    // When "Include all" is checked, individual checkboxes are forced on + disabled.
+    const allCb = container.querySelector('#' + allId)
+    const indCbs = container.querySelectorAll('.' + indClass)
+    const syncIndividualState = () => {
+      const disable = !!allCb && allCb.checked
+      indCbs.forEach(cb => {
+        cb.disabled = disable
+        if (disable) cb.checked = true
+      })
+    }
+    if (allCb) allCb.addEventListener('change', syncIndividualState)
+    syncIndividualState()
+  })()
+
+  return container
+}
+
+// Read the current state of the use_mail picker for a given permission record.
+// Returns { connection_names, scopes } or null if no picker is present.
+const readUseMailPickerState = function (permissionObject) {
+  const safeName = (permissionObject.name || 'unnamed').replace(/[^A-Za-z0-9_-]/g, '_')
+  const picker = document.getElementById('pickerFor_' + safeName)
+  if (!picker) return null
+
+  const allCb = picker.querySelector('#pickerAll_' + safeName)
+  const scopeRadio = picker.querySelector('input[name="pickerScope_' + safeName + '"]:checked')
+
+  let connection_names
+  if (allCb && allCb.checked) {
+    connection_names = ['*']
+  } else {
+    const indCbs = picker.querySelectorAll('.pickerConn_' + safeName + ':checked')
+    connection_names = [...indCbs].map(cb => cb.value).filter(Boolean)
+  }
+
+  const scopes = (scopeRadio && scopeRadio.value === 'readwrite') ? ['read', 'write'] : ['read']
+  return { connection_names, scopes }
+}
+
+// Inline "where should this run?" picker for run_job / schedule_job rows. The USER chooses the
+// location (it spends their host trust / their cloud), seeded from the record (default 'auto').
+const buildLocationPicker = function (permissionObject) {
+  const safeName = (permissionObject.name || 'unnamed').replace(/[^A-Za-z0-9_-]/g, '_')
+  const selId = 'locPicker_' + safeName
+  const current = permissionObject.location || 'auto'
+  const opt = (v, label) => '<option value="' + v + '"' + (current === v ? ' selected' : '') + '>' + label + '</option>'
+  const container = dg.div({
+    id: 'locPickerFor_' + safeName,
+    'data-perm-name': permissionObject.name,
+    style: { border: '1px solid #e2e8f0', padding: '0.75rem', margin: '0.5rem 0', 'border-radius': '4px', 'background-color': '#f8fafc' }
+  })
+  container.innerHTML =
+    '<label><strong>Where should this run?</strong> ' +
+    '<select id="' + selId + '" style="margin-left:0.5rem;">' +
+    opt('auto', 'Automatic — this server if available, otherwise your cloud') +
+    opt('local', 'On this server (must be admin-approved)') +
+    opt('cloud', 'Your own cloud / serverless (may incur cost)') +
+    '</select></label>'
+  return container
+}
+
+// Read the location picker's value for a job permission. Returns { location } or null.
+const readLocationPickerState = function (permissionObject) {
+  const safeName = (permissionObject.name || 'unnamed').replace(/[^A-Za-z0-9_-]/g, '_')
+  const sel = document.getElementById('locPicker_' + safeName)
+  if (!sel) return null
+  return { location: sel.value || 'auto' }
 }
 
 // Change permsission
 const changePermission = async function (evt, permissionObject, currentAppName, callback) {
   try {
     const url = '/feps/permissions/change' // + permissionObject.requestee_app_table
+
+    // Determine the action. Normally: granted → Deny, not-granted → Accept. EXCEPTION: a granted job
+    // permission whose location dropdown now differs from the saved value is a "location update" — we
+    // re-ACCEPT (which keeps it granted) carrying the new location, rather than denying it. The server
+    // only knows Accept/Deny; "update" is purely a client-side framing of a re-Accept.
+    const isJob = JOB_PERM_TYPES.includes(permissionObject.type)
+    const pickerLoc = isJob ? (readLocationPickerState(permissionObject) || {}).location : null
+    const isLocationUpdate = isJob && permissionObject.granted && !permissionObject.outDated &&
+      pickerLoc && pickerLoc !== (permissionObject.location || 'auto')
+    const action = isLocationUpdate ? ACCEPT : (permissionObject.granted ? DENY : ACCEPT)
+
     const change = {
       requestor_app: permissionObject.requestor_app,
       table_id: permissionObject.table_id,
-      action: (permissionObject.granted ? DENY : ACCEPT),
+      action,
       name: permissionObject.name
     }
+
+    // For use_mail: include the user's picker selections only on Accept actions.
+    // On Deny we don't carry connection_names/scopes — the server flips granted=false
+    // and the existing scoping fields stay on the record (so they're still there if
+    // the user later re-accepts).
+    if (permissionObject.type === 'use_mail' && action === ACCEPT) {
+      const pickerState = readUseMailPickerState(permissionObject)
+      if (pickerState) {
+        change.connection_names = pickerState.connection_names
+        change.scopes = pickerState.scopes
+      }
+    }
+
+    // For run_job / schedule_job: include the user's chosen location on Accept (covers both the first
+    // grant and a later location update). Defaults to 'auto' when the picker is untouched.
+    if (isJob && action === ACCEPT && pickerLoc) change.location = pickerLoc
+
     const data = { change, targetApp: currentAppName }
-    
+
     const returnJson = await freezr.apiRequest('PUT', url, data)
-    callback(null, returnJson, permissionObject, currentAppName, evt)
+    callback(null, returnJson, permissionObject, currentAppName, evt, { action, location: (isJob ? pickerLoc : undefined) })
   } catch (error) {
-    callback(error, null, permissionObject, currentAppName, evt)
+    callback(error, null, permissionObject, currentAppName, evt, {})
   }
 }
 
-const changePermissionCallBack = function (error, returnJson, permissionObject, currentAppName, evt) {
+const changePermissionCallBack = function (error, returnJson, permissionObject, currentAppName, evt, info = {}) {
   // onsole.log({ returnJson, error })
   let message = ''
   if (error) {
     console.warn(error)
-    message = 'There was an error granting permissions.'
+    message = 'There was an error changing this permission.'
   } else {
-    permissionObject.granted = !permissionObject.granted
-    message = permissionObject.granted
-      ? 'You have granted this permission'
-      : 'Permission has been DENIED!'
+    // Set granted from the action that was performed (not a blind toggle), so a re-Accept that only
+    // updates the location keeps the permission granted instead of flipping it off.
+    const action = info.action || (permissionObject.granted ? DENY : ACCEPT)
+    const wasGranted = permissionObject.granted
+    if (action === DENY) {
+      permissionObject.granted = false
+      message = 'Permission has been DENIED!'
+    } else {
+      permissionObject.granted = true
+      // Persist the chosen location onto the object so the re-render seeds the picker with the value we
+      // just saved on the server — otherwise the dropdown snaps back to "Automatic" after accepting.
+      if (info.location) permissionObject.location = info.location
+      message = (wasGranted && info.location) ? 'Updated where this job runs.' : 'You have granted this permission'
+    }
   }
   const parentEl = evt.target.parentElement.parentElement
   const replacement = makePermissionElementFrom(permissionObject, currentAppName, message)

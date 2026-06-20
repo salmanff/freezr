@@ -17,7 +17,8 @@ import { createAddOwnerPermsDbForLoggedInuser, createaddOwnerPermsDb, addRightsT
 import { allRequestorAppPermissions } from '../../middleware/permissions/permissionHandlers.mjs'
 import { isLoggedInAccountAppRequest, tokenUserHasFullAppApiRights } from '../../middleware/permissions/permissionCheckers.mjs'
 import { createAddPublicRecordsDB } from '../public/middleware/publicContext.mjs'
-import { createAddPublicManifestsDb } from '../account/middleware/accountContext.mjs'
+import { createAddPublicManifestsDb, createAddTokenDb } from '../account/middleware/accountContext.mjs'
+import { createAddScheduledJobsDb } from '../jobs/middleware/jobsContext.mjs'
 import { createAccountApiController } from '../account/controllers/accountApiController.mjs'
 import { createCepsApiController } from './controllers/cepsfepsApiController.mjs'
 import { sendFailure } from '../../adapters/http/responses.mjs'
@@ -57,6 +58,8 @@ export const createFepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
   const addUserPermDBs = createAddOwnerPermsDbForLoggedInuser(dsManager, freezrPrefs, freezrStatus)
   const addPublicRecordsDB = createAddPublicRecordsDB(dsManager, freezrPrefs, freezrStatus)
   const addPublicManifestsDb = createAddPublicManifestsDb(dsManager, freezrPrefs, freezrStatus)
+  const addTokenDb = createAddTokenDb(dsManager, freezrPrefs, freezrStatus) // for cascading token deletes on permission revoke
+  const addScheduledJobsDb = createAddScheduledJobsDb(dsManager, freezrPrefs) // for enabling/disabling a job's schedule on run_job grant/revoke
   
   // Middleware for feps routes (similar to ceps but for logged-in users)
   const addOwnerPermDBs = createaddOwnerPermsDb(dsManager, freezrPrefs, freezrStatus)
@@ -174,7 +177,7 @@ export const createFepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * 
    * Modernized version of /v1/permissions/change
    */
-  router.put('/permissions/change', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addUserAppList, getTargetManifest, addUserPermDBs, addUserDs, addPublicRecordsDB, addPublicManifestsDb, isLoggedInAccountAppRequest, accountApiController.changeNamedPermissionsHandler)
+  router.put('/permissions/change', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addUserAppList, getTargetManifest, addUserPermDBs, addUserDs, addPublicRecordsDB, addPublicManifestsDb, addTokenDb, addScheduledJobsDb, isLoggedInAccountAppRequest, accountApiController.changeNamedPermissionsHandler)
   
   // ===== FEPS ROUTES (similar to CEPS ... =====
 

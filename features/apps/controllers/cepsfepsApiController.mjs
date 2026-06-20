@@ -12,6 +12,20 @@ import { convert as convertPicture } from '../../../common/helpers/pictures.mjs'
 import { removeStartAndEndSlashes } from '../../../adapters/datastore/fsConnectors/fileHandler.mjs'
 import { getOrigIdWithOatRemoved } from '../../../adapters/datastore/dbConnectors/mongo_utils.mjs'
 import { SYSTEM_PERMS } from '../../../common/helpers/config.mjs'
+import { encryptResourceSensitiveFields } from '../../account/services/resourceCrypto.mjs'
+
+// Writes to this table get their sensitive fields encrypted before persistence.
+// See features/account/services/resourceCrypto.mjs for the per-type field map.
+const RESOURCES_APP_TABLE = 'info.freezr.account.resources'
+
+/**
+ * Apply resource-record encryption when writing to info.freezr.account.resources.
+ * No-op for all other tables. Returns a possibly-new write object; never mutates.
+ */
+const maybeEncryptResourceWrite = (appTable, write) => {
+  if (appTable !== RESOURCES_APP_TABLE) return write
+  return encryptResourceSensitiveFields(write)
+}
 import path from 'path'
 import crypto from 'crypto'
 import dns from 'dns'
@@ -50,7 +64,7 @@ export const createCepsApiController = () => {
     own_record: false,
     can_read: false,
     share_records: false,
-    can_write: false,
+    write_all: false,
     write_own: false,
     grantedPerms: []
   }
@@ -90,7 +104,7 @@ export const createCepsApiController = () => {
     const write = isOldFormatOrCepsFormat ? (req.body || {} ): req.body?._entity
     const appTableDb = res.locals.freezr.appTableDb
     const canWrite = res.locals.freezr.rightsToTable.own_record
-      || res.locals.freezr.rightsToTable.can_write
+      || res.locals.freezr.rightsToTable.write_all
       || (res.locals.freezr.rightsToTable.write_own)
     if (canWrite && appTableDb && write) {
       res.locals.freezr.permGiven = true
@@ -102,7 +116,8 @@ export const createCepsApiController = () => {
         }
       }
       try {
-        const result = await appTableDb.create(dataObjectId, write)
+        const writeToPersist = maybeEncryptResourceWrite(req.params.app_table, write)
+        const result = await appTableDb.create(dataObjectId, writeToPersist)
         // onsole.log('write result', { result })
         if (!result || result.error) {
           console.error('❌ Error writing record:', result.error)
@@ -115,7 +130,7 @@ export const createCepsApiController = () => {
         return sendFailure(res, err, 'writeRecord', 500)
       }
     } else {
-      return sendFailure(res, 'Not authorized to write record', 'writeorUpsertRecord', 401)
+      return sendFailure(res, 'Not authorized to write record (1)', 'writeorUpsertRecord', 401)
     }
   }
 
@@ -148,13 +163,14 @@ export const createCepsApiController = () => {
 
     if (existingRecord) {
       const canWrite = res.locals.freezr.rightsToTable.own_record
-        || res.locals.freezr.rightsToTable.can_write
+        || res.locals.freezr.rightsToTable.write_all
         || (res.locals.freezr.rightsToTable.write_own && existingRecord._created_by_user === res.locals.freezr.tokenInfo.requestor_id && existingRecord._created_by_app === res.locals.freezr.tokenInfo.app_name)
 
         if (canWrite && appTableDb && write && dataObjectId) {
           res.locals.freezr.permGiven = true
           try {
-            const result = await appTableDb.update(dataObjectId, write)
+            const writeToPersist = maybeEncryptResourceWrite(req.params.app_table, write)
+            const result = await appTableDb.update(dataObjectId, writeToPersist)
             // onsole.log('write result', { result })
             if (!result || result.error) {
               console.error('❌ Error updating record:', result.error)
@@ -167,7 +183,7 @@ export const createCepsApiController = () => {
             return sendFailure(res, err, 'writeRecord', 500)
           }
         } else {
-          return sendFailure(res, 'Not authorized to write record', 'writeRecord', 401)
+          return sendFailure(res, 'Not authorized to write record (2)', 'writeRecord', 401)
         }
 
     } else {
@@ -176,13 +192,14 @@ export const createCepsApiController = () => {
       }
 
       const canWrite = res.locals.freezr.rightsToTable.own_record
-        || res.locals.freezr.rightsToTable.can_write
+        || res.locals.freezr.rightsToTable.write_all
         || res.locals.freezr.rightsToTable.write_own
 
         if (canWrite && appTableDb && write && dataObjectId) {
           res.locals.freezr.permGiven = true
           try {
-            const result = await appTableDb.create(dataObjectId, write)
+            const writeToPersist = maybeEncryptResourceWrite(req.params.app_table, write)
+            const result = await appTableDb.create(dataObjectId, writeToPersist)
             // onsole.log('write result', { result })
             if (!result || result.error) {
               console.error('❌ Error creating record:', result.error)
@@ -195,7 +212,7 @@ export const createCepsApiController = () => {
             return sendFailure(res, err, 'writeRecord', 500)
           }
         } else {
-          return sendFailure(res, 'Not authorized to write record', 'writeRecord', 401)
+          return sendFailure(res, 'Not authorized to write record (3)', 'writeRecord', 401)
         } 
     }
   }
@@ -226,41 +243,46 @@ export const createCepsApiController = () => {
       }
     }
 
-    // onsole.log('updateRecord', { write, options, isCeps, replaceAllFields, isQueryBasedUpdate, dataObjectId, existingRecord })
+    console.log('updateRecord', { rights:res.locals.freezr.rightsToTable, grantedPerms:res.locals.freezr.rightsToTable.grantedPerms, write, options, isCeps, replaceAllFields, isQueryBasedUpdate, dataObjectId, existingRecord })
 
     const canWrite = res.locals.freezr.rightsToTable.own_record 
-      || res.locals.freezr.rightsToTable.can_write
+      || res.locals.freezr.rightsToTable.write_all
       || (res.locals.freezr.rightsToTable.write_own && existingRecord && existingRecord._created_by_user === res.locals.freezr.tokenInfo.requestor_id && existingRecord._created_by_app === res.locals.freezr.tokenInfo.app_name)
       || (res.locals.freezr.rightsToTable.write_own && isQueryBasedUpdate)
-
-    if (!res.locals.freezr.rightsToTable.own_record) {
-      if (existingRecord) {
-        write._created_by_user = existingRecord._created_by_user
-        write._created_by_app = existingRecord._created_by_app
-        if (!write._created_by_user || !write._created_by_app) {
-          console.warn('⚠️ Existing record has undefined _created_by_user or _created_by_app — possible data corruption from prior bug', { dataObjectId })
-          return sendFailure(res, 'Record has missing creator identity — cannot update', 'updateRecord', 500)
-        }
-      } else if (isQueryBasedUpdate) {
-        write.q._created_by_user = res.locals.freezr.tokenInfo.requestor_id
-        write.q._created_by_app = res.locals.freezr.tokenInfo.app_name
-        if (!write.q._created_by_user || !write.q._created_by_app) {
-          return sendFailure(res, 'Missing creator identity for cross-app query update', 'updateRecord', 401)
-        }
-      }
-    }
 
     if (!existingRecord && !isQueryBasedUpdate) {
       console.warn('no existingRecord and not query based update', { dataObjectId, write, isQueryBasedUpdate })
       return sendFailure(res, 'Record not found', 'updateRecord', 404)
     } else if (existingRecord && isQueryBasedUpdate) {
       return sendFailure(res, 'Query based update not supported', 'updateRecord', 401)
+    } else if (!canWrite && res.locals.freezr.rightsToTable.write_own) {
+      console.warn('⚠️ Existing record has undefined _created_by_user or _created_by_app — possible data corruption from prior bug', { dataObjectId })
+      return sendFailure(res, 'Record has missing creator identity — cannot update', 'updateRecord', 500)
     } else if (canWrite && appTableDb && write) {
+
+      if (!res.locals.freezr.rightsToTable.own_record) {
+        if (!write._modified_by_users) write._modified_by_users = []
+        if (write._modified_by_users.indexOf(res.locals.freezr.tokenInfo.requestor_id) < 0) write._modified_by_users.push(res.locals.freezr.tokenInfo.requestor_id)
+        write._lastModified_by_user = res.locals.freezr.tokenInfo.requestor_id
+        // todo - refine _lastModified_by_app and modified_y_app to only write this if app is different
+        write._lastModified_by_app = res.locals.freezr.tokenInfo.app_name
+
+        if (existingRecord) {
+          write._created_by_user = existingRecord._created_by_user
+          write._created_by_app = existingRecord._created_by_app
+        } else if (isQueryBasedUpdate) {
+          write.q._created_by_user = res.locals.freezr.tokenInfo.requestor_id
+          write.q._created_by_app = res.locals.freezr.tokenInfo.app_name
+        }
+      }
+      
       res.locals.freezr.permGiven = true
+      
       try {
         let result = null
+        const writeToPersist = maybeEncryptResourceWrite(req.params.app_table, write)
         if (existingRecord) {
-          result = await appTableDb.update(dataObjectId.toString(), write, { replaceAllFields, old_entity: existingRecord })
+          result = await appTableDb.update(dataObjectId.toString(), writeToPersist, { replaceAllFields, old_entity: existingRecord })
           // console.log('update result', { dataObjectId, result })
           result._id = dataObjectId
           result._date_created = existingRecord._date_created
@@ -281,7 +303,7 @@ export const createCepsApiController = () => {
         return sendFailure(res, err, 'writeRecord', 500)
       }
     } else {
-      return sendFailure(res, 'Not authorized to write record', 'writeRecord', 401)
+      return sendFailure(res, 'Not authorized to write record (4)', 'writeRecord', 401)
     }
   }
 
@@ -298,7 +320,7 @@ export const createCepsApiController = () => {
 
     const mayBeCanRead = res.locals.freezr.rightsToTable.own_record 
       || res.locals.freezr.rightsToTable.can_read
-      || res.locals.freezr.rightsToTable.can_write
+      || res.locals.freezr.rightsToTable.write_all
       || res.locals.freezr.rightsToTable.write_own
       || res.locals.freezr.rightsToTable.write_own_inner
       || res.locals.freezr.rightsToTable.share_records
@@ -317,7 +339,7 @@ export const createCepsApiController = () => {
     }
     // onsole.log('readRecordById permGiven 1', { aoc: appTableDb.oac, dataObjectId, fetchedRecord })
 
-    if (res.locals.freezr.rightsToTable.own_record || res.locals.freezr.rightsToTable.can_read || res.locals.freezr.rightsToTable.can_write) {
+    if (res.locals.freezr.rightsToTable.own_record || res.locals.freezr.rightsToTable.can_read || res.locals.freezr.rightsToTable.write_all) {
       res.locals.freezr.permGiven = true
       if (!fetchedRecord) {
         return sendFailure(res, 'no related records exist', 'readRecordById', 401)
@@ -423,7 +445,7 @@ export const createCepsApiController = () => {
 
     const mayBeCanRead = res.locals.freezr.rightsToTable.own_record 
       || res.locals.freezr.rightsToTable.can_read
-      || res.locals.freezr.rightsToTable.can_write
+      || res.locals.freezr.rightsToTable.write_all
       || res.locals.freezr.rightsToTable.write_own
       || res.locals.freezr.rightsToTable.write_own_inner // used for public records
       || res.locals.freezr.rightsToTable.share_records
@@ -613,7 +635,7 @@ export const createCepsApiController = () => {
 
     // Ensure permission exists
     let canDelete = false
-    if (res.locals.freezr.rightsToTable.own_record || res.locals.freezr.rightsToTable.can_write) {
+    if (res.locals.freezr.rightsToTable.own_record || res.locals.freezr.rightsToTable.write_all) {
       canDelete = true
       res.locals.freezr.permGiven = true
     } else if (res.locals.freezr.rightsToTable.write_own) {
@@ -937,12 +959,13 @@ export const createCepsApiController = () => {
     } else if (PERMISSION_TYPES_FOR_WHICH_RECORDS_ARE_MARKED.includes(grantedPermission.type) // ie share_records, message_records, upload_pages
       && (!appTableId || !res.locals.freezr.appTableDb || (grantedPermission.type !== 'upload_pages' && !grantedPermission.table_id.includes(res.locals.freezr.appTableDb.oac.app_table)))) {
         // removed grantedPermission.table_id === res.locals.freezr.appTableDb.oac.app_table)
-        console.warn('The table being granted permission to does not correspond to the permission (3)', { grantedPermission, appTableId, appTableFromAppTableDb: res.locals.freezr.appTableDb.oac.app_table })
+        console.warn('The table being granted permission to does not correspond to the permission (3)', { grantedPermission, appTableId, appTableFromAppTableDb: res.locals.freezr.appTableDb })
         return sendFailure(res, 'The table being granted permission to does not correspond to the permission ', { function: 'shareRecords', requestorApp, userId })
     }
     if (permQueryResults.length > 1) {
       console.warn('two permissions found where one was expected - SNBH - System Error ' + JSON.stringify(permQueryResults))
     } 
+    // console.log('Going to give permission (3)', { grantedPermission, appTableId, appTableFromAppTableDbOac: res.locals.freezr.appTableDb.oac })
 
     // OLD CHECKS DISCARDED ON INCORPORATED INTO ABOVE
     // let permDoesntNeedTableId = false
@@ -1709,8 +1732,18 @@ export const createCepsApiController = () => {
         // onsole.log('🔑 writing file', { dataObjectId, theFile, options })
         const endPath = removeStartAndEndSlashes(fileParams.dir + '/' + fileParams.name)
         const writtenPath = await appFS.writeToUserFiles(endPath, theFile, { doNotOverWrite: !options.overwrite })
-        // Update record status to complete
-        await userFilesDb.update(dataObjectId.toString(), { _UploadStatus: 'complete' }, { replaceAllFields: false })
+        // Stamp system file metadata onto the files record (merged, so the app's own `data`
+        // fields are preserved). Computed from what was actually written so the size is correct
+        // even when convertPict re-encodes the file. These are system-managed: setting them here
+        // (after the app's data was written) means a value the app tried to put in `data` cannot
+        // spoof them. _file_extension is lower-cased and dot-less (e.g. 'pdf').
+        const fileMeta = {
+          _UploadStatus: 'complete',
+          _file_size: (theFile && theFile.length) || req.file.size || 0,
+          _mime_type: (options.convertPict && options.convertPict.type === 'jpg') ? 'image/jpeg' : (req.file.mimetype || ''),
+          _file_extension: fileParams.name.includes('.') ? fileParams.name.split('.').pop().toLowerCase() : ''
+        }
+        await userFilesDb.update(dataObjectId.toString(), fileMeta, { replaceAllFields: false })
       } catch (err) {
         return sendFailure(res, err, 'uploadUserFileAndCreateRecord', { function: 'writeFile', error: err }, 500)
       }

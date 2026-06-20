@@ -4,8 +4,14 @@
 
 import USER_DS, { appTableName } from './userDsMgr.mjs'
 import { SYSTEM_USER_IDS, FREEZR_ADMIN_DBs } from '../../common/helpers/config.mjs'
+import { removeLastPathElement } from '../../common/helpers/utils.mjs'
 import CacheManager from './cache/cacheManager.mjs'
 import UserCache from './cache/userCache.mjs'
+import path from 'path'
+import { fileURLToPath } from 'url'
+
+const __dsmDir = path.dirname(fileURLToPath(import.meta.url)) // adapters/datastore
+const ROOT_DIR = removeLastPathElement(__dsmDir, 2) + path.sep // repo root
 
 function DATA_STORE_MANAGER () {
   const self = this
@@ -45,14 +51,18 @@ function DATA_STORE_MANAGER () {
         const rawSlParams = ownerEntries[0].slParams
         const rawLmParams = ownerEntries[0].lmParams
 
+        // Shallow-clone the shared systemEnvironment params: the decoration below
+        // (systemDb / useUserIdsAsDbName / dbUnificationStrategy / systemFs) sets
+        // top-level keys, and without a copy every system user would mutate the one
+        // shared systemEnvironment object in place.
         const dbParams = rawDbParams
           ? (rawDbParams?.type === 'system'
-              ? self.systemEnvironment.dbParams
+              ? { ...self.systemEnvironment.dbParams }
               : rawDbParams)
           : null
         const fsParams = rawFsParams
           ? (rawFsParams?.type === 'system'
-              ? self.systemEnvironment.fsParams
+              ? { ...self.systemEnvironment.fsParams }
               : rawFsParams)
           : null
         if (dbParams && rawDbParams?.type === 'system') {
@@ -83,7 +93,11 @@ function DATA_STORE_MANAGER () {
             userPrefs: ownerEntries[0].userPrefs,
             userCache: self.userCaches[owner]  // Pass UserCache, not CacheManager
           })
-          
+          // Surface the migration lock status for the migrationLockGuard fast-path (both
+          // FS and DB migrations lock the user via the same chokepoint gate).
+          self.users[owner].fsMigrationStatus = ownerEntries[0].fsMigration?.status || null
+          self.users[owner].dbMigrationStatus = ownerEntries[0].dbMigration?.status || null
+
           // Storage recalc is triggered lazily on first write operation (create/update/delete)
           // rather than on USER_DS creation, to avoid initializing all tables when
           // the DS is created from a public/unauthenticated context
@@ -124,6 +138,18 @@ function DATA_STORE_MANAGER () {
     }
   }
   
+  // Build a USER_DS for `owner` from explicit, ALREADY-RESOLVED params (system markers resolved
+  // to concrete params, unification flags applied) WITHOUT caching it in self.users. Used by the
+  // DB-migration worker to open the source and target databases side by side for the SAME user.
+  // Callers must pass { noCache: true, bypassMigrationLock: true } to its getorInitDb calls, and
+  // should clearTimeout(ds.dbPersistenceManager.timer) when finished with it.
+  self.createTransientUserDS = function (owner, env) {
+    if (!owner || !env || !env.fsParams || !env.dbParams) {
+      throw new Error('createTransientUserDS needs an owner and fs + db params')
+    }
+    return new USER_DS(owner, env)
+  }
+
   self.getDB = function (OAC) {
     if (self.users && self.users[OAC.owner] && self.users[OAC.owner].appcoll) {
       return self.users[OAC.owner].appcoll[appTableName(OAC)]
@@ -153,6 +179,9 @@ function DATA_STORE_MANAGER () {
     if (!ownerDS) throw new Error('Cannot intiiate user db without a user object. (Initiate user first.)')
     return await ownerDS.initOacDB(OAC, options)
   }
+
+  // Migration lock is enforced inside USER_DS.getorInitDb / getorInitAppFS (the single
+  // chokepoint for all data access, incl. direct userDS.* callers). See userDsMgr.mjs.
   
   self.getorInitDb = async function (OAC, options) {
     if (!OAC || !OAC.owner) {
@@ -162,7 +191,7 @@ function DATA_STORE_MANAGER () {
         const userDS = await self.getOrSetUserDS(OAC.owner, options)
         return await userDS.getorInitDb(OAC, options)
       } catch (err) {
-        console.warn('🔴 getorInitDb err for ' + OAC.owner, err)
+        if (err.code !== 'MIGRATION_LOCK') console.warn('🔴 getorInitDb err for ' + OAC.owner, err)
         throw err
       }
     }
@@ -174,7 +203,7 @@ function DATA_STORE_MANAGER () {
     } else {
       try {
         const userDS = await self.getOrSetUserDS(OAC.owner, options)
-        
+
         if (OAC.app_tables && Array.isArray((OAC.app_tables))) {
           const list = []
           for (const tableName of OAC.app_tables) {
@@ -186,7 +215,7 @@ function DATA_STORE_MANAGER () {
           return await userDS.getorInitDb(OAC, options)
         }
       } catch (err) {
-        console.warn('🔴 getorInitDb err for ' + OAC.owner, err.message)
+        if (err.code !== 'MIGRATION_LOCK') console.warn('🔴 getorInitDb err for ' + OAC.owner, err.message)
         throw err
       }
     }
@@ -247,6 +276,65 @@ function DATA_STORE_MANAGER () {
       console.warn('🔴 getUserSlParams', 'err for ' + owner, { err })
       throw err
     }
+  }
+
+  // Return the cached USER_DS if already loaded, else null (no DB read). Used by the
+  // migration lock guard's fast-path.
+  self.getLoadedUserDS = function (owner) {
+    return self.users[owner] || null
+  }
+
+  /**
+   * Quiesce a user and force all live state down to their (current) source FS, then drop
+   * the cached USER_DS so the next access rebuilds from the (updated) user record.
+   * Used by the FS migration at lock-time (clean source for the copy) and at cutover
+   * (so reads after the switch hit the new FS, not a stale cache). Best-effort: it never
+   * throws — it returns a result object including any persist errors for the caller to
+   * decide on (a persist failure before copy should abort the migration).
+   *
+   * Steps: (1) persist every nedb table to the source FS, (2) stop the persistence timer,
+   * (3) clear the in-memory user cache, (4) wipe the registry-tracked local-disk file copy,
+   * (5) drop self.users[owner] + self.userCaches[owner].
+   * @param {string} owner
+   * @returns {Promise<{persisted:number, persistErrors:Array, cacheCleared:number, localWiped:object|null, evicted:boolean}>}
+   */
+  self.flushAndEvictUserDS = async function (owner) {
+    const result = { persisted: 0, persistErrors: [], cacheCleared: 0, localWiped: null, evicted: false }
+    const userDS = self.users[owner]
+
+    if (userDS) {
+      // 1. Persist every nedb table to the source FS (no-op for mongo tables).
+      for (const key of Object.keys(userDS.appcoll || {})) {
+        const ds = userDS.appcoll[key]
+        if (ds && ds.db && typeof ds.db.persistCachedDatabase === 'function') {
+          try {
+            await new Promise((resolve, reject) => {
+              ds.db.persistCachedDatabase(err => err ? reject(err) : resolve())
+            })
+            result.persisted++
+          } catch (err) {
+            console.warn('🔴 flushAndEvictUserDS', 'persist err for ' + owner + ' / ' + key, err.message)
+            result.persistErrors.push({ table: key, message: err.message })
+          }
+        }
+      }
+      // 2. Stop the background persistence timer so nothing writes after eviction.
+      try { if (userDS.dbPersistenceManager?.timer) clearTimeout(userDS.dbPersistenceManager.timer) } catch (e) {}
+    }
+
+    // 3. Clear in-memory caches for this user.
+    try { result.cacheCleared = self.cacheManager.clearUser(owner) } catch (e) {
+      console.warn('🔴 flushAndEvictUserDS', 'clearUser err for ' + owner, e.message)
+    }
+    // 4. Wipe the registry-tracked local-disk file copies (best-effort).
+    try { result.localWiped = await self.cacheManager.wipeLocalFileCacheForUser(owner, ROOT_DIR) } catch (e) {
+      console.warn('🔴 flushAndEvictUserDS', 'wipeLocalFileCacheForUser err for ' + owner, e.message)
+    }
+    // 5. Drop the cached USER_DS + UserCache.
+    delete self.users[owner]
+    delete self.userCaches[owner]
+    result.evicted = true
+    return result
   }
 }
 

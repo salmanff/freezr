@@ -11,6 +11,7 @@ import { sendContent, sendFailure } from '../http/responses.mjs'
 import { devAssert, devAssertType, devAssertNotNull, devTime } from '../../middleware/devAssertions.mjs'
 import { randomText, startsWith } from '../../common/helpers/utils.mjs'
 import { isSystemApp } from '../../common/helpers/config.mjs'
+import { clientScriptTags } from '../../common/helpers/freezrApiClientManifest.mjs'
 
 // Get current directory for ES6 modules
 // TODO-LATER: When Node.js 20+ becomes minimum requirement, replace with:
@@ -18,10 +19,15 @@ import { isSystemApp } from '../../common/helpers/config.mjs'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-// Constants from file_handler.js
 const FREEZR_CORE_CSS = '<link rel="stylesheet" href="/app/info.freezr.public/public/freezr_core.css" type="text/css" />'
-const FREEZR_CORE_JS = '<script src="/app/info.freezr.public/public/freezrApiV2.js" type="text/javascript"></script>'
-// const FREEZR_CORE_JS = '<script src="public/app/@public/info.freezr.public/public/freezrApiV2.js" type="text/javascript"></script>'
+
+// The core + add-on client scripts are declared once in common/freezrApiClient.manifest.json.
+// Injected only when the page controller flags an add-on in options.sdkAddons (computed via
+// common/helpers/sdkAddons.mjs from the app's manifest + system-permission exceptions). Order:
+// core first, then add-ons, then the app's own scripts — browsers run <script> tags in document
+// order, so add-ons can use freezr.apiRequest from core, and app code can use freezr.connections.*
+// / freezr.llm.*.
+const buildFreezrCoreJs = (sdkAddons) => clientScriptTags(sdkAddons)
 
 /**
  * Modern page loader that replicates load_data_html_and_page functionality
@@ -141,7 +147,7 @@ export const loadPageHtml = async (res, options) => {
       .replace('{{FREEZR_SERVER_VERSION}}', options.freezr_server_version ? options.freezr_server_version : 'N/A')
       .replace('{{SERVER_NAME}}', options.server_name || '')
       .replace('{{FREEZR_CORE_CSS}}', FREEZR_CORE_CSS)
-      .replace('{{FREEZR_CORE_JS}}', FREEZR_CORE_JS)
+      .replace('{{FREEZR_CORE_JS}}', buildFreezrCoreJs(options.sdkAddons))
       .replace('{{META_TAGS}}', options.meta_tags ? options.meta_tags : '')
       .replace('{{FAVICON}}', faviconHtml)
       .replace('{{NO_COMMS_CSP}}', "connect-src 'self'; object-src 'none';") //

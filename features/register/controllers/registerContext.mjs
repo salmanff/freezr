@@ -64,7 +64,7 @@ const createSelfRegOptions = (freezrPrefs) => {
     allow: freezrPrefs?.allowSelfReg || false,
     allowAccessToSysFsDb: freezrPrefs?.allowAccessToSysFsDb || false,
     defaultMBStorageLimit: freezrPrefs?.selfRegDefaultMBStorageLimit || 100,
-    dbUnificationStrategy: freezrPrefs?.dbUnificationStrategy || 'user_db',
+    dbUnificationStrategy: freezrPrefs?.dbUnificationStrategy || 'db',
     hasNotbeenSave: true
   }
 }

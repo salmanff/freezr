@@ -47,6 +47,8 @@ freezr.initPageScripts = function () {
         selfRegDefaultMBStorageLimit: (document.getElementById('selfRegDefaultMBStorageLimit').value ? parseInt(document.getElementById('selfRegDefaultMBStorageLimit').value) : null),
         allowAccessToSysFsDb: document.getElementById('allowAccessToSysFsDbId').checked,
         log_visits: document.getElementById('logVisitsId').checked,
+        scheduler_disabled: document.getElementById('schedulerDisabledId').checked,
+        serverless_callback_url: (document.getElementById('serverlessCallbackUrlId') ? document.getElementById('serverlessCallbackUrlId').value.trim() : ''),
         redirect_public: document.getElementById('redirectPublicId').checked,
         public_landing_app: document.getElementById('defaultPublicAppId').value,
         public_landing_page: document.getElementById('defaultLandingUrl').value,
@@ -67,6 +69,34 @@ freezr.initPageScripts = function () {
           }
         })()
       }
+    }
+  }
+
+  // Serverless callback URL: auto-capture the address the admin is using now (window.location.origin).
+  // First setup / never set → pre-fill it (editable). Already set but DIFFERENT from what we detect →
+  // flag it and offer a one-click "use detected URL", in case the saved value is stale/wrong.
+  const slUrlField = document.getElementById('serverlessCallbackUrlId')
+  if (slUrlField) {
+    const detected = window.location.origin
+    const saved = (slUrlField.value || '').trim()
+    const note = document.getElementById('serverlessCallbackUrlNote')
+    if (!saved) {
+      slUrlField.value = detected
+      if (note) {
+        note.style.display = 'block'
+        note.style.color = '#64748b'
+        note.textContent = 'Auto-detected from this page: ' + detected + '. Edit if your public URL differs.'
+      }
+    } else if (saved !== detected && note) {
+      note.style.display = 'block'
+      note.style.color = '#b7791f'
+      note.textContent = '⚠️ Saved URL differs from the address you are using now (' + detected + '). '
+      const useBtn = document.createElement('span')
+      useBtn.className = 'smallTextButt'
+      useBtn.style.cursor = 'pointer'
+      useBtn.textContent = 'Use detected URL'
+      useBtn.onclick = function () { slUrlField.value = detected; note.style.display = 'none' }
+      note.appendChild(useBtn)
     }
   }
 

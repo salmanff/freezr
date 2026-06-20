@@ -28,12 +28,14 @@ freezr.initPageScripts = async function () {
   }
 
   try {
-    // Build URL with query parameters
+    // Forward ALL incoming query params to /oauth/get_new_state. The original page
+    // only forwarded type/sender/regcode, which silently dropped any newer params
+    // (purpose, connectionName, services, access_<service>, etc.) added later for
+    // purpose=connection flows. Forwarding everything keeps this page passive plumbing
+    // and lets the server controller decide which params are valid.
     const queryParams = new URLSearchParams()
-    queryParams.set('type', type)
-    queryParams.set('sender', sender)
-    queryParams.set('regcode', regcode)
-    
+    urlQueries.forEach((value, key) => queryParams.set(key, value))
+
     const url = '/oauth/get_new_state?' + queryParams.toString()
     
     // Call the OAuth API to get a new state and redirect URL

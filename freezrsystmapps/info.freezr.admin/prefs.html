@@ -71,6 +71,21 @@
         </div>
       </div>
 
+      <!-- Background Jobs -->
+      <div class="freezr-card">
+        <h3 style="margin-bottom: 1rem;">Background Jobs</h3>
+        <label style="display: flex; align-items: flex-start; gap: 0.75rem; cursor: pointer;">
+          <input type="checkbox" name="scheduler_disabled" id="schedulerDisabledId" value="scheduler_disabled" {{#scheduler_disabled}}checked{{/scheduler_disabled}} style="margin-top: 0.25rem;"/>
+          <span>Pause scheduled jobs on this server. Scheduled jobs run by default; check this to stop all scheduled runs (takes effect immediately; on-demand and app-invoked jobs are unaffected).</span>
+        </label>
+        <div style="margin-top: 1rem;">
+          <label class="texttop">Serverless callback URL</label>
+          <input type="text" class="input" id="serverlessCallbackUrlId" name="serverless_callback_url" value="{{serverless_callback_url}}" placeholder="https://my.freezr.example" style="max-width: 420px;"/>
+          <p class="smallText">Public base URL a serverless (Lambda) job calls back to reach this server's API. Must be reachable from the internet (not localhost). Optional — jobs that don't call the freezr API run without it.</p>
+          <p class="smallText" id="serverlessCallbackUrlNote" style="display:none;"></p>
+        </div>
+      </div>
+
       <!-- Admin Confirmation -->
       <div class="freezr-card changeNormal">
         <h3 style="margin-bottom: 1rem;">Confirm Changes</h3>

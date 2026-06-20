@@ -4,7 +4,7 @@ import { createEditor } from '../editorLoader.js'
 import { addHistoryEntry, updateHistoryEntry } from '../historyActions.js'
 import { fetchFileContent, fetchFolderTree } from '../fileTree.js'
 import { showError } from '../showError.js'
-import { escHtml, saveFileToBackend, updateAppFromFiles } from '../utils.js'
+import { escHtml, saveFileToBackend, updateAppFromFiles, tsOf } from '../utils.js'
 
 const extensionLanguage = (filePath) => {
   const ext = (filePath || '').split('.').pop().toLowerCase()
@@ -333,8 +333,9 @@ const attachDiffNavigation = (container) => {
 const CURRENT_VERSION_ID = '__current__'
 
 const fetchFileVersions = async (appName, filePath, history) => {
-  const updates = await freezr.query('fileUpdates', { appName, path: filePath }, { sort: { timestamp: -1 }, count: 100 })
+  const updates = await freezr.query('fileUpdates', { appName, path: filePath }, { sort: { _date_modified: -1 }, count: 100 })
   if (!updates || !Array.isArray(updates)) return []
+  updates.sort((a, b) => tsOf(b) - tsOf(a))
 
   const historyMap = {}
   for (const e of (history || [])) {
@@ -365,11 +366,13 @@ const formatVersionTs = (ts) => {
   }
 }
 
-const openComp = async (appName, filePath, state, setState, preSelectHint) => {
+export const openComp = async (appName, filePath, state, setState, preSelectHint) => {
   try {
     const [versions, currentContent] = await Promise.all([
       fetchFileVersions(appName, filePath, state.index?.history || []),
-      fetchFileContent(appName, filePath)
+      // A deleted (externally removed) file has no live content — treat as empty
+      // so the diff renders as a full removal rather than failing.
+      fetchFileContent(appName, filePath).catch(() => '')
     ])
 
     let preSelectB = versions.length > 0 ? versions[0].id : null

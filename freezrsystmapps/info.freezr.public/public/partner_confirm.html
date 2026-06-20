@@ -1,0 +1,54 @@
+<!--
+  /public/oauth/partner_confirm
+  Provider-side confirmation page shown when another freezr asks this one to
+  perform an OAuth dance on its behalf. Always shown (even for whitelisted partners),
+  warning level varies. See freezr_mail_phase1.md §2.9 (federation).
+-->
+<div class="freezr-page">
+  <div class="freezr-content" style="max-width: 720px; margin: 0 auto;">
+
+    <div id="errorBox" class="errorBox" style="display:none;"></div>
+
+    <div id="loadingState" class="freezr-card">
+      <p>Loading…</p>
+    </div>
+
+    <div id="confirmPanel" class="freezr-card" style="display:none;">
+
+      <div id="warningBanner" style="display:none; padding: 1rem; margin-bottom: 1rem; border-radius: 4px;"></div>
+
+      <h2 style="margin-top: 0;">Connect via this server?</h2>
+
+      <p>
+        A freezr instance is asking to use this server to authenticate with
+        <span id="providerName" style="font-weight:600;"></span>.
+      </p>
+
+      <div style="background: #f8fafc; padding: 1rem; border-radius: 4px; margin: 1rem 0;">
+        <div style="font-size: 0.85em; color: #64748b;">Requesting freezr:</div>
+        <div id="consumerHost" style="font-weight: 600; word-break: break-all;"></div>
+        <div style="font-size: 0.85em; color: #64748b; margin-top: 0.75rem;">Connection name:</div>
+        <div id="connectionName" style="font-weight: 600;"></div>
+        <div style="font-size: 0.85em; color: #64748b; margin-top: 0.75rem;">Services and access requested:</div>
+        <div id="servicesList"></div>
+      </div>
+
+      <p>
+        After you sign in to <span id="providerName2" style="font-weight:600;"></span>,
+        your authentication tokens will be sent to the freezr listed above.
+        <span id="trustDisclaimer"></span>
+      </p>
+
+      <div style="display: flex; gap: 0.75rem; margin-top: 1.5rem;">
+        <button id="btnContinue" class="freezrButt">Continue</button>
+        <button id="btnCancel" class="freezrButt" style="background: #6b7280;">Cancel</button>
+      </div>
+
+      <p class="smallText" style="margin-top: 1rem; color: #64748b;">
+        Tokens grant access to the third-party account (e.g. your Gmail).
+        Only continue if you trust the requesting freezr to handle that access responsibly.
+      </p>
+    </div>
+
+  </div>
+</div>

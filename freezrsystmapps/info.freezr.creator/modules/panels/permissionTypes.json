@@ -6,10 +6,11 @@
     { "value": "write_own", "label": "Write Own Records" },
     { "value": "upload_pages", "label": "Upload Pages" },
     { "value": "use_llm", "label": "Use LLM" },
+    { "value": "use_mail", "label": "Use Mail (Connections)" },
     { "value": "external_scripts", "label": "External Scripts" },
     { "value": "external_fetch", "label": "External Fetch" },
     { "value": "unsafe_eval", "label": "Unsafe Eval" },
-    { "value": "use_serverless", "label": "Use Serverless" },
-    { "value": "use_3pFunction", "label": "Use 3P Function" }
+    { "value": "run_job", "label": "Run Background Job (on demand)" },
+    { "value": "schedule_job", "label": "Schedule Background Job (recurring)" }
   ]
 }

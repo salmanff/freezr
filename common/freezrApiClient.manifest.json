@@ -1,0 +1,35 @@
+{
+  "_comment": "SINGLE SOURCE OF TRUTH for the freezr browser/job API client files. Consumed by adapters/rendering/pageLoader.mjs (browser <script> injection), common/helpers/sdkAddons.mjs (permission->addon detection), and adapters/jobs/jobFreezrClient.mjs (node vm load). Add a new addon here and all three pick it up. Files live at freezrsystmapps/info.freezr.public/public/ (served at publicAppRoute).",
+  "publicAppRoute": "/app/info.freezr.public/public/",
+  "core": "freezrApiV2.js",
+  "addons": [
+    {
+      "key": "connections",
+      "file": "freezrApiV2.connections.js",
+      "attaches": "freezr.connections",
+      "permissionTypes": ["use_mail", "use_contacts", "use_calendar"],
+      "loadInJobClient": true
+    },
+    {
+      "key": "llm",
+      "file": "freezrApiV2.llm.js",
+      "attaches": "freezr.llm",
+      "permissionTypes": ["use_llm"],
+      "loadInJobClient": true
+    },
+    {
+      "key": "jobs",
+      "file": "freezrApiV2.jobs.js",
+      "attaches": "freezr.jobs",
+      "permissionTypes": ["run_job", "schedule_job"],
+      "loadInJobClient": true
+    },
+    {
+      "key": "serverless",
+      "file": "freezrApiV2.serverless.js",
+      "attaches": "freezr.serverless",
+      "permissionTypes": ["use_serverless", "use_3pFunction"],
+      "loadInJobClient": false
+    }
+  ]
+}

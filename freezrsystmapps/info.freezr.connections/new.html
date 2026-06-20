@@ -1,0 +1,105 @@
+<!--
+  info.freezr.connections / new.html
+  Dedicated page for creating a new connected account (replaces the modal that
+  used to live on /account/resources). Lets the user pick provider type, name,
+  services + access level per service, AND the auth provider freezr (default
+  vs this freezr's own credentials vs a custom URL — see Phase 1 §2.9).
+-->
+<div class="freezr-page">
+  <nav class="freezr-nav">
+    <span class="freezr-nav-title">Connect a New Account</span>
+    <a href="/connections">Connections</a>
+    <a href="/account/resources">Account Resources</a>
+    <a href="/account/home">Home</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content" style="max-width: 720px;">
+    <div id="warnings" class="errorBox" style="display:none;"></div>
+
+    <div class="freezr-card">
+      <h3 style="margin-top: 0;">Connect a new external account</h3>
+
+      <label class="texttop">Provider</label>
+      <select class="input" id="conn_provider" style="width: auto; min-width: 220px;">
+        <option value="google">Google (Gmail / Calendar / Contacts)</option>
+      </select>
+      <p class="smallText">Phase 1 supports Google. Microsoft and IMAP arrive in later releases.</p>
+
+      <label class="texttop">Connection Name</label>
+      <input type="text" class="input" id="conn_name" placeholder="e.g. gmailWork"/>
+      <p class="smallText">Letters, digits, underscore and dash only. Must be unique. Apps use this to reference the account.</p>
+
+      <label class="texttop">Services to enable</label>
+      <p class="smallText" style="margin-top: 0;">
+        The same OAuth grant covers all three. Each individual app still needs its own permission grant
+        and can be capped to read-only even on a read+write connection.
+      </p>
+      <div style="margin: 0.25rem 0 0.75rem 0;">
+        <label style="display: flex; align-items: center; gap: 0.5rem; margin: 0.25rem 0;">
+          <input type="checkbox" id="conn_service_mail" checked />
+          <span style="min-width: 90px;">Mail</span>
+          <select class="input" id="conn_access_mail" style="width: auto; min-width: 140px; margin-left: 0.5rem;">
+            <option value="read">Read only</option>
+            <option value="readwrite" selected>Read + Write</option>
+          </select>
+        </label>
+        <label style="display: flex; align-items: center; gap: 0.5rem; margin: 0.25rem 0;">
+          <input type="checkbox" id="conn_service_calendar" checked />
+          <span style="min-width: 90px;">Calendar</span>
+          <select class="input" id="conn_access_calendar" style="width: auto; min-width: 140px; margin-left: 0.5rem;">
+            <option value="read">Read only</option>
+            <option value="readwrite" selected>Read + Write</option>
+          </select>
+        </label>
+        <label style="display: flex; align-items: center; gap: 0.5rem; margin: 0.25rem 0;">
+          <input type="checkbox" id="conn_service_contacts" checked />
+          <span style="min-width: 90px;">Contacts</span>
+          <select class="input" id="conn_access_contacts" style="width: auto; min-width: 140px; margin-left: 0.5rem;">
+            <option value="read">Read only</option>
+            <option value="readwrite" selected>Read + Write</option>
+          </select>
+        </label>
+      </div>
+
+      <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 1.5rem 0;" />
+      <label class="texttop">Authenticator</label>
+      <p class="smallText" style="margin-top: 0;">
+        Which freezr server should run the OAuth dance with Google? Most users will keep the default.
+      </p>
+
+      <div style="margin: 0.5rem 0;">
+        <label style="display:flex; align-items:flex-start; gap:0.5rem; margin:0.5rem 0; cursor:pointer;">
+          <input type="radio" name="conn_auth_choice" value="default" checked style="margin-top:0.25rem;"/>
+          <div>
+            <div style="font-weight:600;">Default (www.salmanff.com)</div>
+            <div class="smallText" id="auth_choice_default_desc" style="margin:0;">Use the freezr.info–blessed provider.</div>
+          </div>
+        </label>
+        <label style="display:flex; align-items:flex-start; gap:0.5rem; margin:0.5rem 0; cursor:pointer;">
+          <input type="radio" name="conn_auth_choice" value="local" style="margin-top:0.25rem;"/>
+          <div>
+            <div style="font-weight:600;">This freezr's own credentials</div>
+            <div class="smallText" style="margin:0;">Use a Google OAuth client registered by this server's admin.</div>
+            <div class="smallText" id="local_unavailable" style="margin:0; color:#dc2626; display:none;">Not available — your admin has not registered a Google client here.</div>
+          </div>
+        </label>
+        <label style="display:flex; align-items:flex-start; gap:0.5rem; margin:0.5rem 0; cursor:pointer;">
+          <input type="radio" name="conn_auth_choice" value="custom" style="margin-top:0.25rem;"/>
+          <div style="flex:1;">
+            <div style="font-weight:600;">Custom (another freezr)</div>
+            <div class="smallText" style="margin:0;">Enter the URL of a freezr instance you trust. Tokens flow through that server.</div>
+            <input type="text" class="input" id="conn_custom_url" placeholder="https://other-freezr.example" style="margin-top:0.5rem;" disabled/>
+            <div class="smallText" style="margin:0; color:#dc2626;">⚠️ Only use a freezr you trust — they'll see the Google consent screen on your behalf.</div>
+          </div>
+        </label>
+      </div>
+
+      <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 1.5rem 0;" />
+      <div style="display: flex; gap: 0.75rem;">
+        <button class="freezrButt" id="button_connConnect">Continue to Google</button>
+        <a href="/account/resources" class="freezrButt" style="background:#6b7280; text-decoration: none; line-height: 1.6;">Cancel</a>
+      </div>
+    </div>
+  </div>
+</div>

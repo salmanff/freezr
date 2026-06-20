@@ -11,7 +11,7 @@ import { createSetupGuard, createAuthGuard, createGetAppTokenInfoFromheaderForAp
 import { createAdminAuthGuardForApi } from '../admin/middleware/adminGuards.mjs'
 import { createAddFradminDs } from '../admin/middleware/adminContext.mjs'
 import { createAddOauthDb, createAddCacheManager } from './middleware/oauthContext.mjs'
-import { createOauthApiController, createAppTokenLoginHandler } from './controllers/oauthApiController.mjs'
+import { createOauthApiController, createAppTokenLoginHandler, createStoreTransferredCredentialsHandler } from './controllers/oauthApiController.mjs'
 
 /**
  * Create OAuth API routes with dependency injection
@@ -48,7 +48,10 @@ export const createOauthApiRoutes = ({ dsManager, freezrPrefs, freezrStatus }) =
   
   // ===== CREATE CONTROLLERS =====
   
-  const oauthApiController = createOauthApiController()
+  // Pass dsManager + freezrPrefs so the controller can write to user resources DB
+  // for purpose=connection (mail/calendar/contacts) flows. The fs purpose path
+  // doesn't need these dependencies.
+  const oauthApiController = createOauthApiController({ dsManager, freezrPrefs })
   
   // ===== ADMIN ROUTES (require authentication) =====
   
@@ -115,6 +118,20 @@ export const createOauthApiRoutes = ({ dsManager, freezrPrefs, freezrStatus }) =
   router.post('/token',
     setupGuard,
     appTokenLoginHandler
+  )
+
+  /**
+   * POST /oauth/store_transferred_credentials
+   * Federation: consumer-side. Called by oauth_transfer_receiver page after the
+   * partner freezr returns with tokens in the URL. Persists the connection record
+   * using the same shared writeConnectionRecord service as the direct flow.
+   */
+  const storeTransferredCredentialsHandler = createStoreTransferredCredentialsHandler({ dsManager, freezrPrefs })
+  router.post('/store_transferred_credentials',
+    setupGuard,
+    addOauthDb,
+    addCacheManager,
+    storeTransferredCredentialsHandler
   )
   
   /**

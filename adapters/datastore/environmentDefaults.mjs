@@ -28,6 +28,13 @@ import { fullLocalPathTo } from './fsConnectors/fileHandler.mjs'
 import { decryptParams, verifyEnvChecksum } from '../../features/register/services/registerServices.mjs'
 
 
+// Optional "bring-your-own mongo" data-layout choice, shown on the mongo DB choices.
+// Checked => all of the user's app data is stored in one unified collection (tagged by
+// owner); unchecked (the default) => a separate collection per app. Stored on the user's
+// dbParams as dbUnificationStrategy 'all' | 'db' (see checkAndCleanDb). Leaving it unset
+// means "no unification" — the backward-compatible default for all existing BYO users.
+const DB_UNIFY_FIELD = { name: 'unifyData', display: 'Store all app data in one collection:', type: 'checkbox', optional: true }
+
 // DEFAULTS
 export const ENV_PARAMS = {
   FS: {
@@ -81,6 +88,19 @@ export const ENV_PARAMS = {
         { name: 'bucket', display: 'Bucket Name:', optional: true }
       ]
     },
+      s3compatible: {
+      type: 'aws',
+      label: 'S3-Compatible Server',
+      msg: 'You can use any S3-compatible storage provider (eg Cloudflare R2, Wasabi, or Backblaze B2). Enter the S3 API Endpoint URL given by your provider (Cloudflare R2, for example, shows it when you create an API token, or use https://<cloudflare-account-id>.r2.cloudflarestorage.com), together with your Access Key Id, Secret Access Key and an already-existing bucket. Note: Backblaze B2 uses different names - your "keyID" is the Access Key Id and your "applicationKey" is the Secret Access Key. Region is optional (it can usually be left blank, or is part of the endpoint url).',
+      forPages: ['unRegisteredUser', 'newParams'],
+      fields: [
+        { name: 'endpoint', display: 'Endpoint URL:' },
+        { name: 'accessKeyId', display: 'Access Key Id:' },
+        { name: 'secretAccessKey', display: 'Secret Access Key:' },
+        { name: 'region', display: 'Region (optional):', optional: true },
+        { name: 'bucket', display: 'Bucket Name:' }
+      ]
+    },
     azure: {
       type: 'azure',
       label: 'Azure (Microsoft)',
@@ -118,14 +138,14 @@ export const ENV_PARAMS = {
       type: 'mongodb',
       label: 'MongoDB - Connection String',
       msg: 'You can enter a full url of a mongo database. Mongo Atlas provides this for you, or you can set up your own.',
-      fields: [{ name: 'connectionString', display: 'Full Mongo URL:' }, { name: 'unifiedDbName', display: 'DB Name to use:' }],
+      fields: [{ name: 'connectionString', display: 'Full Mongo URL:' }, { name: 'unifiedDbName', display: 'DB Name to use:' }, DB_UNIFY_FIELD],
       forPages: ['firstSetUp', 'unRegisteredUser', 'newParams']
     },
     cosmosForMongoString: {
       type: 'mongodb',
       label: 'MS Azure Cosmos DB for MongoDB',
       msg: 'You can enter a full connection string provided by Azure.',
-      fields: [{ name: 'connectionString', display: 'Full Connection String:' }, { name: 'unifiedDbName', display: 'DB Name to use:' }],
+      fields: [{ name: 'connectionString', display: 'Full Connection String:' }, { name: 'unifiedDbName', display: 'DB Name to use:' }, DB_UNIFY_FIELD],
       forPages: ['firstSetUp', 'unRegisteredUser', 'newParams']
     },
     mongoDetails: {
@@ -138,93 +158,86 @@ export const ENV_PARAMS = {
         { name: 'host', display: 'Database Host:' },
         { name: 'port', display: 'Database Port:' },
         { name: 'user', display: 'Database User:' },
-        { name: 'unifiedDbName', display: 'DB Name to use:' }
+        { name: 'unifiedDbName', display: 'DB Name to use:' },
+        DB_UNIFY_FIELD
       ],
       forPages: ['firstSetUp', 'unRegisteredUser', 'newParams']
     }
   }
 }
 
-export const FS_AUTH_URL = {
-  dropbox: function (options) {
-    // need options => codeChallenge, state and clientId
-    if (!options.codeChallenge || !options.state || !options.clientId) {
-      return null
-    } else {
-      return 'https://www.dropbox.com/oauth2/authorize?client_id=' + options.clientId + '&redirect_uri=' + encodeURIComponent(options.redirecturi) + '&response_type=code&token_access_type=offline&state=' + options.state + '&code_challenge_method=S256&code_challenge=' + options.codeChallenge
-    }
-  },
-  googleDrive: async function (options) {
-    const { google } = await import('googleapis')
-
-    const oauth2Client = new google.auth.OAuth2(
-      options.clientId,
-      options.secret,
-      options.redirecturi
-    )
-
-    const scopes = [
-      'https://www.googleapis.com/auth/drive'
-    ]
-
-    const url = oauth2Client.generateAuthUrl({
-      access_type: 'offline',
-      scope: scopes,
-      code_challenge_method: 'S256',
-      prompt: 'consent', // asks for auth again and thus generates refresh_token https://github.com/googleapis/google-api-nodejs-client/issues/750
-      code_challenge: options.codeChallenge,
-      // next params are redundant - added here for clarity
-      response_type: 'code',
-      client_id: options.clientId,
-      redirect_uri: options.redirecturi
-    })
-
-    return url + '&state=' + options.state
+// Human-readable description of a set of fs or db params, combining the friendly provider
+// label (from ENV_PARAMS, keyed by `choice`) with the underlying `type` — so the UI can show
+// BOTH the choice and the type, eg an S3-compatible store reads "S3-Compatible Server (aws)".
+// resource is 'FS' or 'DB'. Returns { type, choice, label, display, isSystem }.
+export const describeFsDbParams = (params, resource = 'FS') => {
+  if (!params || !params.type) return { type: null, choice: null, label: 'Unknown', display: 'Unknown', isSystem: false }
+  const choice = params.choice || params.type
+  const isSystem = Boolean(params.systemFs || params.systemDb || params.type === 'system' || choice === 'sysDefault' || choice === 'system')
+  const humanize = (s) => (s || '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, c => c.toUpperCase())
+  const def = ENV_PARAMS[resource] && ENV_PARAMS[resource][choice]
+  let label = (def && def.label) || null
+  if (!label) {
+    if (params.type === 'local') label = 'Local file system'
+    else if (params.type === 'system') label = 'Host system'
+    else label = humanize(choice)
   }
+  // Append the underlying type only when it adds information (ie the label doesn't already name it).
+  const showType = params.type && !label.toLowerCase().includes(params.type.toLowerCase())
+  let display = showType ? (label + ' (' + params.type + ')') : label
+  if (isSystem && !/host|system/i.test(display)) display = 'Host system — ' + display
+  return { type: params.type, choice, label, display, isSystem }
 }
 
+// FS OAuth provider hooks — preserved as thin aliases over OAUTH_PROVIDERS for backwards
+// compatibility with existing call sites (features/oauth/controllers/oauthApiController.mjs).
+// The provider modules now live in features/oauth/services/providers/.
+//
+// The aliases below preserve the historical return shape used by the controller:
+//   { access_token, refresh_token, expiry_date }   (snake_case, from provider SDKs)
+// while the provider modules themselves return a normalized camelCase shape
+//   { accessToken, refreshToken, expiry }
+// New connection-purpose code (Phase 1 mail work) should use OAUTH_PROVIDERS directly.
+import { OAUTH_PROVIDERS } from '../../features/oauth/services/providers/index.mjs'
+
+export const FS_AUTH_URL = {
+  dropbox: OAUTH_PROVIDERS.dropbox.buildAuthUrl,
+  googleDrive: OAUTH_PROVIDERS.googleDrive.buildAuthUrl
+}
+
+const toSnakeCaseTokens = (t) => ({
+  access_token: t.accessToken,
+  refresh_token: t.refreshToken,
+  expiry_date: t.expiry
+})
+
 export const FS_getRefreshToken = {
-  googleDrive: async function (options) {
-    const { google } = await import('googleapis')
-
-    const oauth2Client = new google.auth.OAuth2(
-      options.clientId,
-      options.secret,
-      options.redirecturi
-    )
-
-    const googOptions = {
-      code: options.code,
-      codeVerifier: options.codeVerifier,
-      // next params are redundant - added here for clarity
-      client_id: options.clientId,
-      redirect_uri: options.redirecturi
-    }
-
-    const { tokens } = await oauth2Client.getToken(googOptions)
-    return tokens
-  },
-  dropbox: async function (options) {
-    const { Dropbox } = await import('dropbox')
-    const fetch = (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args))
-    const dbx = new Dropbox({ fetch, clientId: options.clientId })
-
-    dbx.auth.codeChallenge = options.codeChallenge
-    dbx.auth.codeVerifier = options.codeVerifier
-
-    const token = await dbx.auth.getAccessTokenFromCode(options.redirecturi, options.code)
-    if (token && token.result) {
-      return token.result
-    } else {
-      throw new Error('could not get token for dropbox')
-    }
-  }
+  dropbox: async (options) => toSnakeCaseTokens(await OAUTH_PROVIDERS.dropbox.exchangeCodeForTokens(options)),
+  googleDrive: async (options) => toSnakeCaseTokens(await OAUTH_PROVIDERS.googleDrive.exchangeCodeForTokens(options))
 }
 
 export function checkAndCleanDb (dbParams, freezrInitialEnvCopy) {
-  // console.log('todo - TO IMPLEMENT checkAndCleanDb ', dbParams)
   if (!dbParams) return null
-  if (fsParams.choice === 'sysDefault') return { type: 'system', choice: 'sysDefault' }
+  if (dbParams.choice === 'sysDefault') return { type: 'system', choice: 'sysDefault' }
+
+  // Bring-your-own mongo data-layout choice. The registration/reset form sends the
+  // DB_UNIFY_FIELD checkbox as `unifyData` (boolean); translate it to a validated
+  // dbUnificationStrategy and drop the transient flag. Absent/false => 'db' (no
+  // unification) — the backward-compatible default, so existing BYO users (which have
+  // no strategy stored) keep their per-app collections. Only meaningful for BYO mongodb;
+  // system users inherit the server strategy at runtime and nedb has no unification.
+  if (dbParams.type === 'mongodb') {
+    let strategy = dbParams.dbUnificationStrategy
+    if (strategy === undefined) strategy = dbParams.unifyData ? 'all' : 'db'
+    if (strategy !== 'db' && strategy !== 'all') return null // reject unknown values (hasUnifiedStrategy would throw)
+    dbParams.dbUnificationStrategy = strategy
+    // The mongoDetails form field is named `password`, but the connector reads `pass`.
+    if (dbParams.password !== undefined && dbParams.pass === undefined) {
+      dbParams.pass = dbParams.password
+      delete dbParams.password
+    }
+  }
+  delete dbParams.unifyData
   return dbParams
 }
 
@@ -234,7 +247,7 @@ export function checkAndCleanFs (fsParams, freezrInitialEnvCopy) {
   if (!fsParams) return null
   if (!fsParams.choice) fsParams.choice = fsParams.type
   if (fsParams.choice === 'sysDefault') return { type: 'system', choice: 'sysDefault' }
-  const VALID_FS_CHOICES = ['system', 'sysDefault', 'local', 'dropbox', 'googleDrive', 'aws', 'azure']
+  const VALID_FS_CHOICES = ['system', 'sysDefault', 'local', 'dropbox', 'googleDrive', 'aws', 's3compatible', 'azure']
   // console.log('checking fs type choice ', { fsParams })
   if (!VALID_FS_CHOICES.includes(fsParams.choice)) console.warn('checkAndCleanFs', 'error - invalid fs choice ', fsParams)
   if (!fsParams.choice || !VALID_FS_CHOICES.includes(fsParams.choice)) return null
@@ -284,6 +297,33 @@ const fsParseCreds = {
     } else {
       newCreds = null
     }
+    return newCreds
+  },
+  aws: function (credentials) {
+    const newCreds = {
+      choice: 'aws',
+      type: 'aws',
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      region: credentials.region
+    }
+    if (credentials.bucket) newCreds.bucket = credentials.bucket
+    if (!newCreds.accessKeyId || !newCreds.secretAccessKey) return null
+    return newCreds
+  },
+  s3compatible: function (credentials) {
+    // Any S3-compatible provider (eg Cloudflare R2, Wasabi, Backblaze B2) reuses the
+    // aws connector (type 'aws') with a custom endpoint url supplied by the provider.
+    const newCreds = {
+      choice: 's3compatible',
+      type: 'aws',
+      endpoint: credentials.endpoint,
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      region: credentials.region || 'auto'
+    }
+    if (credentials.bucket) newCreds.bucket = credentials.bucket
+    if (!newCreds.endpoint || !newCreds.accessKeyId || !newCreds.secretAccessKey || !newCreds.bucket) return null
     return newCreds
   },
   googleDrive: function (credentials) {
@@ -928,6 +968,16 @@ const fsParams = function () {
       type: process.env.FREEZR_FS,
       accessKeyId: process.env.FS_ACCESS_KEY_ID,
       secretAccessKey: process.env.FS_SECRET_ACCESS_KEY,
+      bucket: process.env.FS_BUCKET
+    }
+  } else if (process?.env?.FREEZR_FS === 's3compatible') {
+    return {
+      type: 'aws',
+      choice: 's3compatible',
+      endpoint: process.env.FS_S3_ENDPOINT,
+      accessKeyId: process.env.FS_ACCESS_KEY_ID,
+      secretAccessKey: process.env.FS_SECRET_ACCESS_KEY,
+      region: process.env.FS_REGION || 'auto',
       bucket: process.env.FS_BUCKET
     }
   } else if (process?.env?.FREEZR_FS === 'azure') {

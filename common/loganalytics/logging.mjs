@@ -17,6 +17,8 @@ import fsSync from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 
+const CONSOLE_FLUSH_DIAG_ON = false
+
 const defaultLogDir = process.env.NODE_ENV === 'production' 
   ? '/tmp/freezr-logs'  // Production: ephemeral, fast
   : './users_temp_logs';           // Development: easy to see/debug
@@ -49,36 +51,46 @@ export class IdleTimer {
     if (!this.checkInterval) {
       this.checkInterval = setInterval(() => {
         const idleTime = Date.now() - this.lastActivity;
-        
+
         if (idleTime >= this.idleThreshold) {
+          // [FLUSH-DIAG] temporary: see xplanations/log_buffering.md footguns A-G
+          if (CONSOLE_FLUSH_DIAG_ON) console.log(`[FLUSH-DIAG] idle-tick triggering flush, idleTime=${idleTime}ms, hasFlushedWhileIdle=${this.hasFlushedWhileIdle}`);
           this.flush();
         }
       }, 1000);
     }
   }
-  
+
   async flush() {
     if (this.flushCallbacks.length === 0) return;
     if (this.hasFlushedWhileIdle) return; // Already flushed during this idle period
-    
+
     const idleTime = Date.now() - this.lastActivity;
-    
+
     // Only flush if we've been idle for the threshold duration
     if (idleTime < this.idleThreshold) {
       return;
     }
-    
+
     this.hasFlushedWhileIdle = true; // Mark as flushed before running callbacks
     const timeStr = new Date().toLocaleTimeString();
+    // [FLUSH-DIAG] temporary diagnostic: print directly via console.log to avoid going through the same buffered logger we're flushing
+    if (CONSOLE_FLUSH_DIAG_ON) console.log(`[FLUSH-DIAG] flush() entered at ${timeStr}, ${this.flushCallbacks.length} callback(s) registered`);
     this.logInfo('[LOG MANAGER] Server idle, flushing buffers...', { callbackCount: this.flushCallbacks.length });
-    
+
+    let cbIndex = 0;
     for (const callback of this.flushCallbacks) {
+      const cbNum = ++cbIndex;
+      if (CONSOLE_FLUSH_DIAG_ON) console.log(`[FLUSH-DIAG] starting callback ${cbNum}/${this.flushCallbacks.length}`);
       try {
         await callback();
+        if (CONSOLE_FLUSH_DIAG_ON) console.log(`[FLUSH-DIAG] finished callback ${cbNum}/${this.flushCallbacks.length}`);
       } catch (err) {
+        if (CONSOLE_FLUSH_DIAG_ON) console.log(`[FLUSH-DIAG] callback ${cbNum} threw: ${err && err.message}`);
         this.logError('[LOG MANAGER] Flush error:', err);
       }
     }
+    if (CONSOLE_FLUSH_DIAG_ON) console.log(`[FLUSH-DIAG] flush() complete`);
   }
   
   middleware() {
@@ -665,10 +677,13 @@ export class LogManager {
     return async (content) => {
       const today = new Date().toISOString().split('T')[0];
       const localPath = path.join(this.localLogsDir, `${today}-${this.serverKey}.jsonl`);
-      
+
+      // [FLUSH-DIAG] temporary: see xplanations/log_buffering.md hypothesis F (Dropbox file lock)
+      if (CONSOLE_FLUSH_DIAG_ON) console.log(`[FLUSH-DIAG] write-local: appending ${content.length} bytes to ${localPath}`);
       // Append to local file (async)
       await fs.appendFile(localPath, content);
-      
+      if (CONSOLE_FLUSH_DIAG_ON) console.log(`[FLUSH-DIAG] write-local: append done for ${localPath}`);
+
       return today;
     };
   }
@@ -682,12 +697,18 @@ export class LogManager {
   }
   
   async flushBuffer(level) {
+    // [FLUSH-DIAG] temporary
+    if (CONSOLE_FLUSH_DIAG_ON) console.log(`[FLUSH-DIAG] flushBuffer(${level}) start`);
     await this.logger.flushBuffer(level);
+    if (CONSOLE_FLUSH_DIAG_ON) console.log(`[FLUSH-DIAG] flushBuffer(${level}) done`);
   }
-  
+
   async flushAllBuffers() {
+    // [FLUSH-DIAG] temporary
+    if (CONSOLE_FLUSH_DIAG_ON) console.log(`[FLUSH-DIAG] flushAllBuffers: enter`);
     const levels = ['error', 'warn', 'info', 'auth', 'track', 'debug'];
     await Promise.all(levels.map(level => this.flushBuffer(level)));
+    if (CONSOLE_FLUSH_DIAG_ON) console.log(`[FLUSH-DIAG] flushAllBuffers: all six levels done`);
   }
   
   async flushAll() {
@@ -696,24 +717,34 @@ export class LogManager {
   }
   
   async flushToCloud() {
-    if (this.pendingCloudSync.size === 0) return;
-    
+    // [FLUSH-DIAG] temporary
+    if (CONSOLE_FLUSH_DIAG_ON) console.log(`[FLUSH-DIAG] flushToCloud: enter, pendingCloudSync size=${this.pendingCloudSync.size}`);
+    if (this.pendingCloudSync.size === 0) {
+      if (CONSOLE_FLUSH_DIAG_ON) console.log(`[FLUSH-DIAG] flushToCloud: nothing pending, returning`);
+      return;
+    }
+
     const syncedFiles = [];
-    
+
     for (const dateStr of this.pendingCloudSync) {
       try {
         const localPath = path.join(this.localLogsDir, `${dateStr}-${this.serverKey}.jsonl`);
+        // [FLUSH-DIAG] temporary
+        if (CONSOLE_FLUSH_DIAG_ON) console.log(`[FLUSH-DIAG] flushToCloud: reading ${localPath}`);
         const content = await fs.readFile(localPath, 'utf8');
-        
+        if (CONSOLE_FLUSH_DIAG_ON) console.log(`[FLUSH-DIAG] flushToCloud: read ${content.length} bytes, starting cloud write`);
+
         // Upload to cloud in server-specific path
         await this.fsDatastore.writeToUserFiles(
           `logs/detailed/${dateStr}-${this.serverKey}.jsonl`,
           content,
           {}
         );
-        
+        if (CONSOLE_FLUSH_DIAG_ON) console.log(`[FLUSH-DIAG] flushToCloud: cloud write done for ${dateStr}`);
+
         syncedFiles.push(dateStr);
       } catch (err) {
+       if (CONSOLE_FLUSH_DIAG_ON) console.log(`[FLUSH-DIAG] flushToCloud: error for ${dateStr}: ${err && err.message}`);
         console.error(`[LogManager] Failed to sync ${dateStr}.jsonl to cloud:`, err);
       }
     }

@@ -1,4 +1,4 @@
-// freezr.info - Permission Definitions
+// freezr.info - Permission Definitions - permissionDefinitions.mjs
 // Centralized definition of all permission types with their categories and required fields
 
 /**
@@ -49,7 +49,46 @@ export const PERMISSION_FIELD_EXCEPTIONS_BY_TYPE = {
     field: 'function_name',
     type: 'string',
     required: false
-  }]
+  }],
+  // Job permissions carry job_name (which job, app-declared in the manifest) and location
+  // (where it runs — USER-set at grant time, default 'auto' | 'local' | 'cloud'; narrows within the
+  // consent gates, never overrides them). The perm's own `name` is its unique key (NOT the job).
+  // See freezr-jobs-plan.md §4 and features/jobs/services/jobLocationResolver.mjs.
+  run_job: [
+    // job_name MUST stay here: this list is what PERSISTS app-declared fields onto the saved permission
+    // (cleanedPermissionObjectFromManifestParams), and run-now authorizes by job_name. It also drives
+    // re-grant-on-change — permissionsAreSame compares declared exception fields, so changing job_name
+    // already invalidates the grant. (It is NOT an "ignorable" field; see permissionsAreSame.)
+    { field: 'job_name', type: 'string', required: false },
+    { field: 'location', type: 'string', required: false }
+  ],
+  schedule_job: [
+    { field: 'job_name', type: 'string', required: false },
+    { field: 'location', type: 'string', required: false }
+  ],
+  use_mail: [
+    // Optional scoping fields on a use_mail permission record.
+    // connection_names: array of connectionName values (matches records of type 'connection' in
+    //   info.freezr.account.resources). Missing / empty denies (fail-closed); ['*'] grants
+    //   all the user's mail-enabled connections, current and future.
+    // scopes: ['read'] (default if missing) or ['read', 'write'].
+    // The runtime middleware (mailContext.mjs) reads these fields off the permission record
+    // and enforces both app-side scopes AND the per-connection access cap.
+    { field: 'connection_names', type: 'array', required: false },
+    { field: 'scopes', type: 'array', required: false }
+  ],
+  use_contacts: [
+    // Same shape as use_mail. connection_names matches connection records that have
+    // 'contacts' in their services[] array. Missing/empty denies; ['*'] grants all.
+    { field: 'connection_names', type: 'array', required: false },
+    { field: 'scopes', type: 'array', required: false }
+  ],
+  use_calendar: [
+    // Same shape as use_mail. connection_names matches connection records that have
+    // 'calendar' in their services[] array. Missing/empty denies; ['*'] grants all.
+    { field: 'connection_names', type: 'array', required: false },
+    { field: 'scopes', type: 'array', required: false }
+  ]
 }
 /**
  * Permission definitions array
@@ -133,12 +172,6 @@ export const PERMISSION_DEFINITIONS = [
     requiredFields: []
   },
   {
-    type: 'use_serverless',
-    category: 'App Capabilities',
-    description: 'Allow access to user serverlesss params to run 3rd party functions on the cloud.',
-    requiredFields: []
-  },
-  {
     type: 'use_llm',
     category: 'App Capabilities',
     description: 'Allow app to use the user\'s LLM API keys to make AI requests.',
@@ -151,16 +184,56 @@ export const PERMISSION_DEFINITIONS = [
     requiredFields: []
   },
   {
+    type: 'use_mail',
+    category: 'App Capabilities',
+    description: "Allow app to read (and optionally write) the user's connected mail accounts.",
+    // connection_names and scopes are optional and declared in PERMISSION_FIELD_EXCEPTIONS_BY_TYPE.
+    // Missing/empty connection_names denies (fail-closed); use ['*'] to grant all.
+    requiredFields: []
+  },
+  {
+    type: 'use_contacts',
+    category: 'App Capabilities',
+    description: "Allow app to read (and optionally write) the user's connected contacts.",
+    // connection_names and scopes mirror use_mail; see PERMISSION_FIELD_EXCEPTIONS_BY_TYPE.
+    requiredFields: []
+  },
+  {
+    type: 'use_calendar',
+    category: 'App Capabilities',
+    description: "Allow app to read (and optionally write) the user's connected calendars.",
+    // connection_names and scopes mirror use_mail; see PERMISSION_FIELD_EXCEPTIONS_BY_TYPE.
+    requiredFields: []
+  },
+  {
+    type: 'run_job',
+    category: 'App Capabilities',
+    description: "Allow the app to run this job ON DEMAND (when the app or you trigger it). Does NOT allow scheduled/background runs — that is the separate 'schedule_job' permission. The job runs with the app's own data permissions; you choose where it runs (auto / on this server / your own cloud) when you grant it.",
+    requiredFields: [] // job_name (which job) + location declared in PERMISSION_FIELD_EXCEPTIONS_BY_TYPE; the perm's own `name` is its unique key
+  },
+  {
+    type: 'schedule_job',
+    category: 'App Capabilities',
+    description: "Allow the app to run this job AUTOMATICALLY on a recurring schedule (e.g. hourly / daily / weekly) in the background. You choose where it runs (auto / on this server / your own cloud) when you grant it. Independent of 'run_job'.",
+    requiredFields: []
+  },
+    {
+    type: 'auto_update_local_3pFunction',
+    category: 'App Capabilities',
+    description: 'Allow app to auto-update a local 3rd party function for all users (admin only)',
+    requiredFields: [] // functionName is required but perm name is assumed to be the function otherwise
+  },
+    {
     type: 'use_3pFunction',
     category: 'App Capabilities',
     description: 'Allow app to use a 3P Function already installed on the server',
     requiredFields: [] // functionName is required but perm name is assumed to be the function otherwise
   },
-  {
-    type: 'auto_update_local_3pFunction',
+    {
+    type: 'use_serverless',
     category: 'App Capabilities',
-    description: 'Allow app to auto-update a local 3rd party function for all users (admin only)',
-    requiredFields: [] // functionName is required but perm name is assumed to be the function otherwise
+    description: 'Allow access to user serverlesss params to run 3rd party functions on the cloud.',
+    requiredFields: []
   }
 ]
 
@@ -294,9 +367,15 @@ export const getPermissionFieldTypeErrors = (statedPerm) => {
   const exceptionList = PERMISSION_FIELD_EXCEPTIONS_BY_TYPE[statedPerm.type]
   if (exceptionList && exceptionList.length > 0) {
     for (const exception of exceptionList) {
-      if (statedPerm[exception.field] && typeof statedPerm[exception.field] !== exception.type) {
-        errKeys += statedPerm.type + ' '
-      } else if (!statedPerm[exception.field] && exception.required) {
+      const val = statedPerm[exception.field]
+      if (val !== undefined && val !== null) {
+        // typeof returns 'object' for arrays — use Array.isArray when the declared
+        // type is 'array'. Fall back to plain typeof for other declared types.
+        const mismatched = exception.type === 'array'
+          ? !Array.isArray(val)
+          : typeof val !== exception.type
+        if (mismatched) errKeys += statedPerm.type + ' '
+      } else if (exception.required) {
         errKeys += statedPerm.type + ' '
       }
     }

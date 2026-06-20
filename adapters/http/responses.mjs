@@ -129,6 +129,10 @@ export function sendFailure(res, err, context = 'unknown', statusCode = 500) {
   const errorObj = err instanceof Error ? err : new Error(err);
   const message = errorObj.message || 'unknown_error';
 
+  // A migration lock anywhere in the stack should surface as 503 (temporarily unavailable),
+  // regardless of the caller's default status code.
+  if (errorObj.code === 'MIGRATION_LOCK') statusCode = 503;
+
   if (typeof context === 'string') {
     context = { function: context }
   }

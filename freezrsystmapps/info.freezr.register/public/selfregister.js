@@ -158,7 +158,22 @@ const changeSelector = function (resource) {
           input.className = 'inputbox'
           input.setAttribute('name', (choice + '_' + item.name))
           input.id = choice + '_' + item.name
-          if (item.default) input.value = item.default
+          if (item.type === 'checkbox') {
+            input.checked = !!item.default
+          } else if (item.default) {
+            input.value = item.default
+          }
+          if (resource === 'FS' && item.name === 'endpoint') {
+            input.addEventListener('input', function () {
+              const warnEl = document.getElementById('warning_FS')
+              if (!warnEl) return
+              if (input.value && input.value.trim() && !input.value.trim().startsWith('https://')) {
+                warnEl.innerText = 'Warning: the endpoint URL does not start with "https://". Unless you are connecting to a local server, your storage endpoint should use https.'
+              } else {
+                warnEl.innerText = ''
+              }
+            })
+          }
           col2.appendChild(input)
           if (item.hide) row.style.display = 'none'
           row.appendChild(col2)
@@ -196,7 +211,9 @@ const getFormData = function (resource) {
       if (fields && fields.length > 0) {
         fields.forEach((item) => {
           const input = document.getElementById(choice + '_' + item.name)
-          if (input && input.value && input.value.trim() !== '') {
+          if (item.type === 'checkbox') {
+            if (input) params[item.name] = input.checked
+          } else if (input && input.value && input.value.trim() !== '') {
             params[item.name] = input.value
           } else if (!item.optional) {
             err += (err ? ',' : 'Missing parameter: ') + item.name

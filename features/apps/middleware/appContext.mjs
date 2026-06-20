@@ -426,7 +426,8 @@ export const createAddStorageLimits = (dsManager, freezrPrefs) => {
  * 
  */
 export const addDataOwnerToContext = function (req, res, next) {
-  const owner = req.body.owner_id || req.query.owner_id || res.locals.freezr?.tokenInfo?.owner_id
+  const owner = req.body.owner_id || req.query.owner_id || req.body.owner || req.query.owner || res.locals.freezr?.tokenInfo?.owner_id
+  // req.query.owner used in appPermissions
   // onsole.log('addDataOwnerToContext', { owner, tokenInfo: res.locals.freezr?.tokenInfo, req: req.body, query: req.query, freezr: res.locals.freezr })
   if (!owner || !res.locals.freezr?.tokenInfo) {
     return sendFailure(res, 'owner_id or tokenInfo not set')

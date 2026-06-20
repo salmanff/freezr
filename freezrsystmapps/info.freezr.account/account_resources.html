@@ -1,6 +1,6 @@
-<!-- 
+<!--
 account/resources
-freezr Account Resources (LLM Keys etc)
+freezr Account Resources (LLM Keys + Connected Accounts)
 resources: {
   page_title: 'Account Resources (freezr)',
   page_url: 'account_resources.html',
@@ -11,7 +11,7 @@ resources: {
 
 <div class="freezr-page">
   <nav class="freezr-nav" id="adminFunctions">
-    <span class="freezr-nav-title">Account Resources</span>
+    <span class="freezr-nav-title">Account Resources &amp; Connections</span>
     <a href="/account/home">Home</a>
     <a href="/account/settings">Account Settings</a>
     <a href="/account/logout">Log Out</a>
@@ -19,7 +19,9 @@ resources: {
 
   <div class="freezr-content">
     <div id="warnings" class="errorBox"></div>
+    <div id="success_banner" class="successBox" style="display:none;"></div>
 
+    <!-- ========================= LLM API KEYS ========================= -->
     <div class="freezr-card">
       <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
         <h3 style="margin: 0;">LLM API Keys</h3>
@@ -28,7 +30,7 @@ resources: {
       <p class="smallText" style="margin-top: 0.5rem;">Manage your LLM API keys. One key can be marked as the default.</p>
     </div>
 
-    <!-- Overlay for add/edit form -->
+    <!-- LLM add/edit overlay -->
     <div id="overlay" class="overlay" style="display: none;">
       <div class="overlay-content">
         <button class="overlay-close" id="overlay_close">&times;</button>
@@ -71,6 +73,81 @@ resources: {
 
     <div id="llm_table" class="freezr-card">
       <div id="llmGridDetails" style="margin-top: 0.5rem;"></div>
+    </div>
+
+    <!-- ========================= COMPUTE PROVIDERS (SERVERLESS) ========================= -->
+    <div class="freezr-card" style="margin-top: 1rem;">
+      <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
+        <h3 style="margin: 0;">Compute Providers (Serverless)</h3>
+        <button class="freezrButt" id="button_addnew_compute">Add AWS Credentials</button>
+      </div>
+      <p class="smallText" style="margin-top: 0.5rem;">
+        Your own cloud account for running serverless jobs (you pay for the compute). Keys are
+        encrypted at rest. One credential can be marked default.
+      </p>
+    </div>
+
+    <!-- Compute add/edit overlay -->
+    <div id="compute_overlay" class="overlay" style="display: none;">
+      <div class="overlay-content">
+        <button class="overlay-close" id="compute_overlay_close">&times;</button>
+        <h3 id="computeFormTitle">Add AWS Credentials</h3>
+        <div style="max-width: 420px;">
+          <label class="texttop">Name</label>
+          <input type="text" class="input" id="compute_name" placeholder="e.g. My AWS"/>
+          <p class="smallText">A friendly name to identify this credential</p>
+
+          <label class="texttop">Region</label>
+          <input type="text" class="input" id="compute_region" placeholder="eu-central-1" value="eu-central-1"/>
+
+          <label class="texttop">Access Key ID</label>
+          <input type="text" class="input" id="compute_accessKeyId" placeholder="AKIA..."/>
+
+          <label class="texttop">Secret Access Key</label>
+          <input type="password" class="input" id="compute_secretAccessKey" placeholder="Leave blank to keep existing"/>
+
+          <label class="texttop">Lambda Role ARN</label>
+          <input type="text" class="input" id="compute_arnRole" placeholder="arn:aws:iam::...:role/freezrLambdaRole"/>
+          <p class="smallText">
+            The IAM role Lambda runs as. <span class="smallTextButt" id="button_compute_createRole">Create it automatically</span>
+            (uses the keys above), or paste an existing role ARN.
+          </p>
+
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin: 1rem 0;">
+            <input type="checkbox" class="freezer_largeCheckBox" id="compute_default"/>
+            <span>Set as default</span>
+          </label>
+
+          <input type="hidden" id="compute__id" value=""/>
+
+          <div class="button-row" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <button class="freezrButt" id="button_computeSave">Save</button>
+            <button class="freezrButt" id="button_computeDelete" style="background: #dc2626; display: none;">Delete</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="compute_table" class="freezr-card">
+      <div id="computeGridDetails" style="margin-top: 0.5rem;"></div>
+    </div>
+
+    <!-- ========================= CONNECTED ACCOUNTS ========================= -->
+    <div class="freezr-card" style="margin-top: 1rem;">
+      <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
+        <h3 style="margin: 0;">Connected Accounts</h3>
+        <a class="freezrButt" href="/connections/new" style="text-decoration: none; line-height: 1.6;">Connect Account</a>
+      </div>
+      <p class="smallText" style="margin-top: 0.5rem;">
+        Authorize freezr to access external services on your behalf. One OAuth grant
+        per account; the underlying token can be used by multiple system apps
+        (mail today; calendar and contacts in a future release).
+      </p>
+    </div>
+
+    <!-- Connection list (full create/edit moved to dedicated pages /connections/new and /connections/edit) -->
+    <div id="connection_table" class="freezr-card">
+      <div id="connectionGridDetails" style="margin-top: 0.5rem;"></div>
     </div>
 
   </div>

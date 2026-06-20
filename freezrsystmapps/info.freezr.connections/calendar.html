@@ -1,0 +1,51 @@
+<!--
+  info.freezr.connections / calendar.html
+  Phase-1 read-only calendar viewer. Wires up via calendar.js (CSP blocks inline scripts).
+  Minimal: account + calendar pickers, time-window controls, agenda list + detail.
+-->
+<div class="freezr-page">
+  <nav class="freezr-nav">
+    <span class="freezr-nav-title">Calendar</span>
+    <a href="/connections">Connections</a>
+    <a href="/account/home">Home</a>
+    <a href="/account/resources">Manage Accounts</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div id="warnings" class="errorBox" style="display:none;"></div>
+    <div id="reauthBanner" class="errorBox" style="display:none;"></div>
+
+    <div class="freezr-card" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+      <label for="accountPicker" style="font-weight:600;">Account:</label>
+      <select id="accountPicker" aria-label="Account"></select>
+      <label for="calendarPicker" style="font-weight:600; margin-left: 0.75rem;">Calendar:</label>
+      <select id="calendarPicker" aria-label="Calendar"></select>
+      <span class="mail-toolbar-spacer" style="flex: 1;"></span>
+      <label>Range:</label>
+      <select id="rangePicker" aria-label="Range">
+        <option value="7">Next 7 days</option>
+        <option value="30" selected>Next 30 days</option>
+        <option value="90">Next 90 days</option>
+        <option value="365">Next 12 months</option>
+      </select>
+      <button class="smallTextButt" id="btnReload">Reload</button>
+    </div>
+
+    <div style="text-align: center;">
+      <div id="loader" class="freezr-spinner" style="display: none;"></div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 2fr); gap: 1rem;">
+      <div id="eventsList" class="freezr-card" style="max-height: 70vh; overflow: auto;">
+        <p style="color:#64748b;">Pick an account.</p>
+      </div>
+      <div id="eventDetail" class="freezr-card" style="max-height: 70vh; overflow: auto;">
+        <p style="color:#64748b;">Select an event to see details.</p>
+      </div>
+    </div>
+
+    <div class="freezr-card" id="loadMoreCard" style="display:none; text-align:center;">
+      <button class="smallTextButt" id="btnLoadMore">Load more</button>
+    </div>
+  </div>
+</div>

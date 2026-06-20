@@ -9,6 +9,7 @@ import { sendFailure } from '../../adapters/http/responses.mjs'
 import { createCreatorPageController } from './controllers/creatorPageController.mjs'
 import { createCreatorApiController } from './controllers/creatorApiController.mjs'
 import { createAccountApiController } from '../account/controllers/accountApiController.mjs'
+import { createAddTrustedJobsDbIfAdmin } from '../jobs/middleware/jobsContext.mjs'
 
 export const createCreatorPageRoutes = ({ dsManager, freezrPrefs, freezrStatus }) => {
   const router = Router()
@@ -37,7 +38,7 @@ const addCreatorAppAsReqParam = (req, res, next) => {
 }
 
 const VALID_GET_ACTIONS = { user_apps: 'getUserApps', read_folder: 'readFolder', read_app_file: 'readAppFile', read_all_files: 'readAllFiles' }
-const VALID_POST_ACTIONS = { create_new_app: 'createBlankApp', write_app_file: 'writeAppFile' }
+const VALID_POST_ACTIONS = { create_new_app: 'createBlankApp', write_app_file: 'writeAppFile', sync_context: 'syncContext' }
 
 const createRouteDispatcher = (actionMap, controller) => (req, res) => {
   const action = req.params.action
@@ -71,8 +72,10 @@ export const createCreatorApiRoutes = ({ dsManager, freezrPrefs, freezrStatus })
   ]
 
   const addPublicRecordsDb = createAddPublicRecordsDB(dsManager, freezrPrefs, freezrStatus)
+  // Admin-only, non-fatal: fradmin trusted-jobs db so an admin re-install can disable a CHANGED job's trust.
+  const addTrustedJobsDbIfAdmin = createAddTrustedJobsDbIfAdmin(dsManager, freezrPrefs)
 
-  router.post('/update_app_from_files', ...sharedMiddleware, addOwnerPermsDb, addPublicManifestsDb, accountApiController.updateAppFromFilesController)
+  router.post('/update_app_from_files', ...sharedMiddleware, addOwnerPermsDb, addPublicManifestsDb, addTrustedJobsDbIfAdmin, accountApiController.updateAppFromFilesController)
 
   router.post('/rename_app', ...sharedMiddleware, addOwnerPermsDb, creatorApiController.renameApp)
 

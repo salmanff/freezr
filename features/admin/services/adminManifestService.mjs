@@ -103,6 +103,30 @@ export const getAdminPageManifest = (params, freezrStatus, freezrPrefs) => {
       modules: []
     },
 
+    trustedjobs: {
+      page_title: 'Trusted Jobs (freezr Admin)',
+      css_files: [
+        '/app/info.freezr.public/public/freezr_style.css',
+        '/app/info.freezr.account/account_home.css'
+      ],
+      page_url: 'trustedjobs.html',
+      app_name: 'info.freezr.admin',
+      script_files: ['trustedjobs.js'],
+      modules: []
+    },
+
+    scheduledjobs: {
+      page_title: 'Scheduled Jobs (freezr Admin)',
+      css_files: [
+        '/app/info.freezr.public/public/freezr_style.css',
+        '/app/info.freezr.account/account_home.css'
+      ],
+      page_url: 'scheduledjobs.html',
+      app_name: 'info.freezr.admin',
+      script_files: ['scheduledjobs.js'],
+      modules: []
+    },
+
     register: {
       page_title: 'Register User (freezr Admin)',
       css_files: [
@@ -139,11 +163,23 @@ export const getAdminPageManifest = (params, freezrStatus, freezrPrefs) => {
       app_name: 'info.freezr.admin',
       script_files: ['oauth_serve_setup.js'],
       modules: [],
-      initial_query: { 
-        app_table: 'info.freezr.admin.oauthors', 
-        owner: 'fradmin', 
-        q: {} 
+      initial_query: {
+        app_table: 'info.freezr.admin.oauthors',
+        owner: 'fradmin',
+        q: {}
       }
+    },
+
+    consolelogs: {
+      page_title: 'Console Logs (freezr Admin)',
+      css_files: [
+        '/app/info.freezr.public/public/freezr_style.css',
+        '/app/info.freezr.account/account_home.css'
+      ],
+      page_url: 'consolelogs.html',
+      app_name: 'info.freezr.admin',
+      script_files: ['consolelogs.js'],
+      modules: []
     },
 
     resourceusage: {

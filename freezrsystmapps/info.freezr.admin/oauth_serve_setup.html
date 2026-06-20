@@ -48,12 +48,23 @@
 
     <!-- Create New OAuth -->
     <div class="freezr-card" style="max-width: 600px;">
-      <h3 style="margin-bottom: 1.5rem;">Create New OAuth Configuration</h3>
+      <h3 style="margin-bottom: 0.5rem;">Create New OAuth Configuration</h3>
+      <p class="smallText" style="color: var(--freezr-text-muted); margin-top: 0; margin-bottom: 1.5rem;">
+        Use this page to register OAuth credentials so users on this freezr can connect external
+        accounts (Gmail, Dropbox, etc.). Register your own credentials with each provider
+        (recommended if you want full self-reliance — see
+        <code>freezr_own_google_oauth_setup.md</code>), or skip this entirely and users will
+        authenticate through the default partner freezr (<code>www.salmanff.com</code>) or any
+        other freezr they choose at <code>/connections/new</code>.
+      </p>
 
       <div style="margin-bottom: 1rem;">
         <label class="texttop">Type</label>
         <input type="text" class="input" id="oa_type" name="oa_type" value="dropbox" style="max-width: 300px;"/>
-        <div style="font-size: 12px; color: var(--freezr-text-muted); margin-top: 0.25rem;">dropbox or googleDrive</div>
+        <div style="font-size: 12px; color: var(--freezr-text-muted); margin-top: 0.25rem;">
+          File-system providers: <code>dropbox</code>, <code>googleDrive</code>.
+          Connection providers (Gmail / Calendar / Contacts): <code>google</code>.
+        </div>
       </div>
 
       <div style="margin-bottom: 1rem;">
@@ -74,6 +85,38 @@
       <div style="margin-bottom: 1.5rem;">
         <label class="texttop">App Secret (optional)</label>
         <input type="text" class="input" id="oa_secret" name="oa_secret"/>
+      </div>
+
+      <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 1.5rem 0;" />
+      <h4 style="margin: 0 0 0.5rem 0;">Federation — Acting as a Provider for Others (optional)</h4>
+      <p class="smallText" style="margin-top: 0; color: #64748b;">
+        By default, the credentials you register above are used <b>only by users of this freezr</b>.
+        If you also want to let users on <i>other</i> freezr instances authenticate through your
+        credentials (acting as their auth provider — like <code>www.salmanff.com</code> does by default),
+        opt in below. Most operators won't need this.
+      </p>
+
+      <div style="margin-bottom: 1rem;">
+        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+          <input type="checkbox" id="oa_federation_enabled" name="oa_federation_enabled"/>
+          <span>Allow other freezrs to use this row as an auth provider</span>
+        </label>
+        <div style="font-size: 12px; color: var(--freezr-text-muted); margin-top: 0.25rem; margin-left: 1.5rem;">
+          When unchecked (default), requests from other freezrs are refused — these credentials only
+          serve users of this freezr.
+        </div>
+      </div>
+
+      <div style="margin-bottom: 1.5rem;">
+        <label class="texttop">Pre-approved Partner Consumer URIs (optional)</label>
+        <textarea class="input" id="oa_partner_redirect_uris" name="oa_partner_redirect_uris" rows="3"
+          placeholder="https://freezr-a.example/public/oauth/oauth_transfer_receiver&#10;https://freezr-c.example/public/oauth/oauth_transfer_receiver"></textarea>
+        <div style="font-size: 12px; color: var(--freezr-text-muted); margin-top: 0.25rem;">
+          One URL per line. Only relevant if the federation checkbox above is ticked. Users authenticating
+          through a partner freezr listed here see a <b>green pre-approved</b> banner on the confirmation
+          page; users authenticating through unlisted partners still complete the flow but see a
+          <b>red warning</b> that the consumer freezr isn't vetted.
+        </div>
       </div>
 
       <div style="text-align: center;">

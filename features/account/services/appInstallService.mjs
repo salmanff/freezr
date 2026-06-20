@@ -9,6 +9,8 @@
 import fs from 'fs'
 import path from 'path'
 import fetch from 'node-fetch'
+import { unzipSync, zipSync } from 'fflate'
+import { bjLog } from '../../../common/debug/consoleFlags.mjs'
 import { 
   FREEZR_USER_FILES_DIR, 
   isSystemApp, 
@@ -62,7 +64,14 @@ export const oneUserInstallationProcess = async (context) => {
     
     // Step 6: Process manifest and permissions
     await processManifestAndPermissions(context, true)
-    
+
+    // Step 6.5: Pre-zip each declared job's folder for serverless (the user's OWN app code, so a
+    // serverless run needs no admin trust; supports Tier-2 deps). Non-fatal.
+    await storeJobBundles(context)
+    // Step 6.6: if an admin re-installed and a trusted local job's code changed, disable its trust
+    // (re-trust required). Only the trusting admin's own re-install acts.
+    await untrustChangedJobsOnReinstall(context)
+
     // Step 7: Update app list
     await updateAppList(context)
     
@@ -250,6 +259,120 @@ const extractFilesToDestination = async (context) => {
   // Clean up temp folder
   const tempFolderPath = getTempFolderPath(context)
   await deleteLocalFolderAndContents(tempFolderPath)
+}
+
+// Step 6.5: For each job the manifest declares, build a small self-contained zip of its folder
+// (jobs/<name>/index.mjs + package.json + node_modules) and store it as an app file
+// (jobs/<name>.zip) in the user's own appFS. A serverless deploy then fetches this ONE artifact —
+// no admin trust, no per-file tree walk across storage backends, and dependency (Tier-2) jobs work
+// the first time. Built from the install zip, normalized exactly like extractZipToLocalFolder.
+// Non-fatal: a failure just means serverless falls back to the single-file / admin-trusted source.
+// Recursively read a local folder into a flat { 'rel/path': Uint8Array } map (forward-slash keys).
+const readLocalFolderToFileMap = async (absDir, baseDir, out = {}) => {
+  const entries = await fs.promises.readdir(absDir, { withFileTypes: true })
+  for (const ent of entries) {
+    const abs = path.join(absDir, ent.name)
+    if (ent.isDirectory()) await readLocalFolderToFileMap(abs, baseDir, out)
+    else if (ent.isFile()) out[path.relative(baseDir, abs).split(path.sep).join('/')] = await fs.promises.readFile(abs)
+  }
+  return out
+}
+
+const storeJobBundles = async (context) => {
+  try {
+    const jobs = (context.manifest && Array.isArray(context.manifest.jobs)) ? context.manifest.jobs : []
+    if (!jobs.length || !context.appFS) return
+
+    // Two sources for a job's folder, depending on the flow:
+    //  - install-from-zip: slice it out of the install zip (normalized like the extractor); or
+    //  - update-from-files (dev iteration): read it from the extracted app folder on local disk.
+    let getJobFiles
+    if (context.file && context.file.buffer) {
+      const unzipped = unzipSync(context.file.buffer)
+      const appPrefix = context.tempAppName
+      const norm = {}
+      for (const [raw, content] of Object.entries(unzipped)) {
+        if (raw.endsWith('/') || raw.startsWith('__MACOSX')) continue
+        let name = raw
+        if (name.startsWith('/')) name = name.slice(1)
+        if (name.startsWith(appPrefix)) name = name.slice(name.indexOf('/') + 1)
+        norm[name] = content
+      }
+      getJobFiles = (jobName) => {
+        const prefix = 'jobs/' + jobName + '/'
+        const f = {}
+        for (const [name, content] of Object.entries(norm)) {
+          if (name.startsWith(prefix)) f[name.slice(prefix.length)] = content
+        }
+        return f
+      }
+    } else {
+      const realAppPath = getRealAppPath(context)
+      getJobFiles = async (jobName) => {
+        const jobDir = path.join(realAppPath, 'jobs', jobName)
+        try { await fs.promises.access(jobDir) } catch (e) { return {} } // not on local disk (e.g. cloud FS)
+        return await readLocalFolderToFileMap(jobDir, jobDir)
+      }
+    }
+
+    for (const job of jobs) {
+      if (!job || !job.name || !/^[a-zA-Z0-9_-]+$/.test(job.name)) continue
+      const jobFiles = await getJobFiles(job.name)
+      if (!jobFiles || !jobFiles['index.mjs']) {
+        context.warnings.push({ code: 'job_no_code', message: 'Declared job "' + job.name + '" has no jobs/' + job.name + '/index.mjs', appName: context.realAppName })
+        continue
+      }
+      const jobZip = zipSync(jobFiles, { level: 6 })
+      // Stored in the user's appFS (permanent backend); the local-disk copy is just a fast cache. The
+      // bundle is BINARY — readers must use a binary-safe read (appFS.readAppFile doNotToString, which
+      // now routes to the connector's getFileToSend) so it isn't text-decoded/corrupted on read-back.
+      await context.appFS.writeToAppFiles('jobs/' + job.name + '.zip', Buffer.from(jobZip), {})
+      bjLog('🔎 TMPJOBLOG 📦 stored serverless job bundle: ' + context.realAppName + '/jobs/' + job.name + '.zip (' + jobZip.length + ' bytes, ' + Object.keys(jobFiles).length + ' file(s))')
+    }
+  } catch (e) {
+    console.warn('⚠️  storeJobBundles failed (serverless jobs fall back to single-file/admin-trusted source):', e && e.message)
+  }
+}
+
+// After an admin re-installs their app: if an already-trusted local job's CODE has CHANGED, DISABLE its
+// trust (it stops running locally) and warn that a re-trust is needed — the admin must re-review the new
+// code rather than have it silently applied in-process. Only the TRUSTING admin's own re-install acts
+// (installed_by === installer), so this only fires when an admin is uploading. Unchanged jobs keep their
+// trust. The replacement for the old auto_update_local_3pFunction permission. Non-fatal.
+const untrustChangedJobsOnReinstall = async (context) => {
+  try {
+    const jobs = (context.manifest && Array.isArray(context.manifest.jobs)) ? context.manifest.jobs : []
+    // trustedJobsDb is the fradmin-owned handle the controller attached ONLY for an admin installer
+    // (the middleware gates it). Absent → not an admin re-install → nothing to do.
+    const trustedJobsDb = context.trustedJobsDb
+    bjLog('🔎 TMPJOBLOG [REINSTALL-TRUST] ENTER app=' + context.realAppName + ' installer=' + context.userId + ' jobs=' + jobs.length + ' adminTrustedJobsDb=' + !!trustedJobsDb)
+    if (!jobs.length || !trustedJobsDb) return
+    const { jobCodeIdentity } = await import('../../jobs/services/cloudJobSource.mjs')
+    const { disableTrustedJob } = await import('../../jobs/services/trustedJobService.mjs')
+    for (const job of jobs) {
+      if (!job || !job.name) continue
+      const recs = await trustedJobsDb.query({ app_name: context.realAppName, job_name: job.name }, {})
+      const rec = recs && recs[0]
+      if (!rec || !rec.trusted) continue // not (currently) trusted → nothing to disable
+      if (rec.installed_by !== context.userId) { bjLog('🔎 TMPJOBLOG [REINSTALL-TRUST] ' + context.realAppName + '/' + job.name + ' trusted by ' + rec.installed_by + ' (not installer ' + context.userId + ') — leave as-is'); continue }
+      const newId = await jobCodeIdentity(context.appFS, job.name) // identity of the just-(re)built code
+      if (rec.code_id && newId && rec.code_id !== newId) {
+        await disableTrustedJob(trustedJobsDb, context.realAppName, job.name, 'code_changed')
+        context.warnings.push({
+          code: 'trusted_job_code_changed',
+          message: 'Job "' + job.name + '" changed and its local trust was disabled. Re-trust it to review and apply the new code:',
+          link: '/admin/trustedjobs',
+          linkText: 'Review trusted jobs →',
+          appName: context.realAppName
+        })
+        bjLog('🔎 TMPJOBLOG [REINSTALL-TRUST] ' + context.realAppName + '/' + job.name + ' code CHANGED (' + (rec.code_id || '').slice(0, 8) + '→' + (newId || '').slice(0, 8) + ') → trust DISABLED, re-trust needed')
+      } else {
+        bjLog('🔎 TMPJOBLOG [REINSTALL-TRUST] ' + context.realAppName + '/' + job.name + ' code unchanged (id=' + (newId || '').slice(0, 8) + ') → trust kept')
+      }
+    }
+  } catch (e) {
+    console.warn('⚠️  untrustChangedJobsOnReinstall failed (non-fatal): ' + (e && e.message))
+  }
 }
 
 // Step 6: Process manifest and permissions
@@ -838,12 +961,19 @@ export const updateAppFromFiles = async (context) => {
     
     // Step 5: Process manifest and permissions
     await processManifestAndPermissions(context, true)
-    
+
+    // Step 5.5: Rebuild each job's serverless zip from the updated files (important dev workflow —
+    // edit job code locally, update-from-files, redeploy picks it up). Non-fatal.
+    await storeJobBundles(context)
+    // Step 5.6: if an admin re-installed and a trusted local job's code changed, disable its trust
+    // (re-trust required). Only the trusting admin's own re-install acts.
+    await untrustChangedJobsOnReinstall(context)
+
     // Step 6: Update app list
     await updateAppList(context)
-    
-    return { 
-      error: null, 
+
+    return {
+      error: null,
       success: true,
       appName: context.realAppName,
       isUpdate: true,

@@ -1,0 +1,113 @@
+<!--
+freezr Storage Migration
+migration: {
+  page_title: 'Storage Migration (freezr)',
+  css_files: ['/app/info.freezr.public/public/freezr_style.css', 'account_home.css'],
+  page_url: 'account_migration.html',
+  script_files: ['account_migration.js'],
+  initial_query_func: null
+}
+-->
+<div class="freezr-page">
+  <nav class="freezr-nav" id="adminFunctions">
+    <span class="freezr-nav-title">Migration</span>
+    <a href="/account/home">Account Home</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="freezr-content">
+    <div id="errorBox" class="errorBox" style="display:none;"></div>
+
+    <!-- TABS (Files / Database). Shown whenever no migration is mid-copy; each tab's panel
+         below reflects that resource's own state (start form, or awaiting / failed actions). -->
+    <div id="chooseArea" style="display:none;">
+      <div class="freezr-card">
+        <h3>Migrate your data</h3>
+        <p>Move your data to a new provider. Your old provider is kept as a backup until you confirm, and your account is <strong>offline</strong> while the copy runs.</p>
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin-top:10px;">
+          <div id="tab_fs" class="freezrButt" style="flex:1; min-width:200px; text-align:center; cursor:pointer; padding:14px; background:#2563eb;">
+            <div style="font-size:1.05em; font-weight:bold; pointer-events:none;">Migrate Files</div>
+            <div id="tabFsCurrent" style="font-size:0.82em; opacity:0.85; margin-top:4px; pointer-events:none;">…</div>
+          </div>
+          <div id="tab_db" class="freezrButt" style="flex:1; min-width:200px; text-align:center; cursor:pointer; padding:14px; background:#2563eb;">
+            <div style="font-size:1.05em; font-weight:bold; pointer-events:none;">Migrate Database</div>
+            <div id="tabDbCurrent" style="font-size:0.82em; opacity:0.85; margin-top:4px; pointer-events:none;">…</div>
+          </div>
+        </div>
+        <p id="nedbNote" style="color:#555; font-size:0.9em; margin-top:12px;"></p>
+      </div>
+    </div>
+
+    <!-- START PANEL — provider form for the selected tab (shown when that resource is idle) -->
+    <div class="freezr-card" id="startCard" style="display:none;">
+      <h3 id="startTitle">…</h3>
+      <p id="startBlurb" style="color:#555;"></p>
+      <div style="max-width:520px;">
+        <label class="texttop">New provider:</label>
+        <select class="input" id="selector_provider" style="width:100%;"></select>
+        <p id="msg_provider" style="color:#555; font-size:0.9em;"></p>
+        <p id="warning_provider" style="color:#b45309; font-size:0.9em;"></p>
+
+        <!-- provider-specific fields are rendered here (same data as /register) -->
+        <div id="table_elements" style="margin:8px 0;"></div>
+
+        <label class="texttop">Your freezr password:</label>
+        <input type="password" class="input" id="startPassword"/>
+
+        <div class="button-row">
+          <div id="click_start" class="freezrButt" style="background:#2563eb;">Start migration</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LIVE STATUS (full-screen takeover while a migration is mid-copy — account is offline) -->
+    <div class="freezr-card" id="statusCard" style="display:none;">
+      <h3 id="phaseLabel">Checking status…</h3>
+      <div style="background:var(--freezr-bg,#eee); border-radius:6px; height:22px; width:100%; overflow:hidden; margin:12px 0;">
+        <div id="progressBar" style="background:#2563eb; height:100%; width:0%; transition:width .4s;"></div>
+      </div>
+      <p id="progressText" style="color:#555;"></p>
+      <p id="currentPath" style="color:#999; font-size:0.85em; word-break:break-all;"></p>
+      <div class="button-row" id="abortRow" style="display:none;">
+        <div id="click_abort" class="freezrButt" style="background:#999;">Cancel migration</div>
+      </div>
+    </div>
+
+    <!-- AWAITING CONFIRMATION (post-cutover) — shown as the selected tab's panel -->
+    <div class="freezr-card" id="awaitingCard" style="display:none; border-left:4px solid #16a34a;">
+      <h3 style="color:#16a34a;" id="awaitTitle">✓ Done</h3>
+      <p id="awaitBody"></p>
+      <p id="awaitNedbNote" style="display:none; color:#555;"></p>
+      <div style="margin-top:16px;">
+        <h4 id="awaitConfirmHead"></h4>
+        <label class="texttop">Your freezr password:</label>
+        <input type="password" class="input" id="confirmPassword" style="max-width:320px;"/>
+        <div class="button-row">
+          <div id="click_confirmDelete" class="freezrButt" style="background:#dc2626;">Delete old data (permanent)</div>
+        </div>
+      </div>
+      <hr style="margin:18px 0;"/>
+      <div>
+        <h4>Or, if something is wrong:</h4>
+        <p style="color:#b45309;" id="rollbackNote"></p>
+        <div class="button-row">
+          <div id="click_rollback" class="freezrButt" style="background:#b45309;">Roll back</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FAILED — shown as the selected tab's panel -->
+    <div class="freezr-card" id="failedCard" style="display:none; border-left:4px solid #dc2626;">
+      <h3 style="color:#dc2626;">Migration did not complete</h3>
+      <p id="failError"></p>
+      <p id="failFiles" style="color:#555;"></p>
+      <p id="failReassure"></p>
+      <div class="button-row">
+        <div id="click_retry" class="freezrButt" style="background:#2563eb;">Try again</div>
+        <div id="click_reenter" class="freezrButt" style="background:#999;">Re-enter details</div>
+      </div>
+      <p style="color:#999; font-size:0.85em; margin-top:8px;">"Try again" resumes with the provider you entered (already-copied data is skipped). "Re-enter" discards the partial copy and lets you enter new details.</p>
+    </div>
+
+  </div>
+</div>

@@ -133,6 +133,10 @@ NEDB_FOR_FREEZR.prototype.createIndex = function (indexParams, indexOptions, cal
   // FOR TESTIG ONLY
   callback(null)
 }
+NEDB_FOR_FREEZR.prototype.count = function (query, callback) {
+  // Whole-table count (the .db file is per-table). Used by the DB-migration verify step.
+  this.db.count(query || {}, callback)
+}
 NEDB_FOR_FREEZR.prototype.getAllAppTableNames = function (appOrTableNameOrNames, callback) {
   // console.log('getAllAppTableNames nedb ', appOrTableNameOrNames)
   const userId = this.oat.owner

@@ -1,0 +1,67 @@
+{
+  "identifier": "info.freezr.connections",
+  "display_name": "Connections",
+  "version": "0.1.0",
+  "description": "Built-in viewer app for external account connections (mail/calendar/contacts/etc.). Each page corresponds to one service; underlying OAuth grants are managed at /account/resources. Phase 1: read-only Gmail INBOX at /connections/mail.",
+  "pages": {
+    "index": {
+      "html_file": "index.html",
+      "css_files": ["/app/info.freezr.public/public/freezr_style.css"],
+      "script_files": ["index.js"],
+      "page_title": "Connections"
+    },
+    "mail": {
+      "html_file": "mail.html",
+      "css_files": ["/app/info.freezr.public/public/freezr_style.css"],
+      "script_files": ["mail.js"],
+      "page_title": "Mail (Connections)"
+    },
+    "contacts": {
+      "html_file": "contacts.html",
+      "css_files": ["/app/info.freezr.public/public/freezr_style.css"],
+      "script_files": ["contacts.js"],
+      "page_title": "Contacts (Connections)"
+    },
+    "calendar": {
+      "html_file": "calendar.html",
+      "css_files": ["/app/info.freezr.public/public/freezr_style.css"],
+      "script_files": ["calendar.js"],
+      "page_title": "Calendar (Connections)"
+    },
+    "new": {
+      "html_file": "new.html",
+      "css_files": ["/app/info.freezr.public/public/freezr_style.css"],
+      "script_files": ["new.js"],
+      "page_title": "Connect a New Account"
+    },
+    "edit": {
+      "html_file": "edit.html",
+      "css_files": ["/app/info.freezr.public/public/freezr_style.css"],
+      "script_files": ["edit.js"],
+      "page_title": "Edit Connection"
+    }
+  },
+  "permissions": [
+    {
+      "name": "mail_readwrite",
+      "type": "use_mail",
+      "description": "Read and send mail via your connected accounts (mark-read, trash, delete, compose).",
+      "connection_names": ["*"],
+      "scopes": ["read", "write"]
+    },
+    {
+      "name": "contacts_readwrite",
+      "type": "use_contacts",
+      "description": "Read and write contacts on your connected accounts.",
+      "connection_names": ["*"],
+      "scopes": ["read", "write"]
+    },
+    {
+      "name": "calendar_readwrite",
+      "type": "use_calendar",
+      "description": "Read and write events on your connected calendars.",
+      "connection_names": ["*"],
+      "scopes": ["read", "write"]
+    }
+  ]
+}

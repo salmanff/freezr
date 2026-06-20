@@ -124,12 +124,16 @@ export async function startupSequence (app, VERSION) {
     }
 
     // Step 7: Get IP address
+    // Skipped in development (npm run dev): the value is unused locally and the
+    // DNS lookup of the local hostname can hang on dev machines.
     lastStartupStep = 'getip'
-    try {
-      const { address } = await dnsLookup(os.hostname())
-      dsManager.initialEnvironment.ipaddress = dsManager.initialEnvironment.ipaddress || address
-    } catch (err) {
-      flogger.warn('DNS lookup error')
+    if (process.env.NODE_ENV !== 'development') {
+      try {
+        const { address } = await dnsLookup(os.hostname())
+        dsManager.initialEnvironment.ipaddress = dsManager.initialEnvironment.ipaddress || address
+      } catch (err) {
+        flogger.warn('DNS lookup error')
+      }
     }
 
     // Step 8: Set up system users and admin DBs
@@ -259,6 +263,33 @@ export async function startupSequence (app, VERSION) {
     lastStartupStep = 'mount_routes'
     const result = await mountAllModernRoutes(app, { dsManager, freezrPrefs, freezrStatus, logManager })
     if (!result.success) flogger.error('Some routes failed to mount!')
+
+    // Step 12.5: Rebuild the local users_jobs cache for admin-trusted jobs (a "job install on
+    // restart"). users_jobs is a fast LOCAL cache the in-process runner imports; it's wiped on a
+    // restart/redeploy. We re-materialize each trusted job from the INSTALLING ADMIN's appFS (the
+    // approved copy — never the end user's), so admin-trusted LOCAL jobs survive a redeploy. Non-fatal.
+    lastStartupStep = 'rebuild_trusted_jobs_cache'
+    try {
+      const { rematerializeTrustedJobs } = await import('../../features/jobs/services/localJobCache.mjs')
+      await rematerializeTrustedJobs({ dsManager, freezrPrefs, flogger })
+    } catch (e) {
+      flogger.warn('Could not rebuild trusted-job local cache: ' + (e && e.message))
+    }
+
+    // Step 13: Start the jobs scheduler heartbeat. On by default in every mode (dev/test/prod) —
+    // the admin pauses it live via the main pref scheduler_disabled=true (checked each tick).
+    // Only the dedicated env FREEZR_SCHEDULER_HEARTBEAT_OFF suppresses the timer; the automated
+    // test runner sets it so integration tests can drive the scheduler deterministically via tick().
+    lastStartupStep = 'start_scheduler'
+    if (process.env.FREEZR_SCHEDULER_HEARTBEAT_OFF !== 'true') {
+      try {
+        const { createScheduler } = await import('../../features/jobs/scheduler.mjs')
+        createScheduler({ dsManager, freezrPrefs, freezrStatus, logManager }).start()
+        flogger.info('🗓️  Jobs scheduler started')
+      } catch (e) {
+        flogger.warn('Could not start jobs scheduler: ' + (e && e.message))
+      }
+    }
 
     // Mark complete
     freezrStatus.fundamentals_okay = freezrStatus.can_write_to_user_folder && freezrStatus.can_read_write_to_db

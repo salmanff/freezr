@@ -12,6 +12,8 @@ import { createAwsRole } from '../../../adapters/datastore/slConnectors/serverle
 import { userPERMS_OAC, userAppListOAC, constructAppIdStringFrom, isSystemApp, validAppName, FREEZR_USER_FILES_DIR } from '../../../common/helpers/config.mjs'
 import { startsWithOneOf } from '../../../common/helpers/utils.mjs'
 import { deleteLocalFolderAndContents } from '../../../adapters/datastore/fsConnectors/fileHandler.mjs'
+import { OAUTH_PROVIDERS } from '../../oauth/services/providers/index.mjs'
+import { decryptResourceSensitiveFields } from '../services/resourceCrypto.mjs'
 
 /**
  * Generate a one-time app password and corresponding app token
@@ -35,6 +37,9 @@ const generateAppPassword = async (req, res) => {
     }
     if (!appName) {
       return sendFailure(res, 'Missing app name', 'accountApiController.generateAppPassword', 400)
+    }
+    if (isSystemApp(appName)) {
+      return sendFailure(res, 'Cannot generate app password for a system app', 'accountApiController.generateAppPassword', 403)
     }
 
     // Get token database from middleware
@@ -78,8 +83,6 @@ const handleAccountActions = async (req, res) => {
       return await handleSetServicesParams(req, res)
     } else if (action === 'changePassword') {
       return await handleChangePassword(req, res)
-    } else if (action === 'removeFromFreezr') {
-      return await handleRemoveFromFreezr(req, res)
     } else {
       return sendFailure(res, 'Invalid account action', 'accountApiController.handleAccountActions', 400)
     }
@@ -618,175 +621,9 @@ const handleDeleteApp = async (req, res, userId, appName) => {
   }
 }
 
-/**
- * Remove a user's data and record (apps, system tables, app tokens, sessions, user row).
- * Callable by account API (self-remove) or admin API (delete selected). No auth/password checks.
- *
- * @param {Object} options
- * @param {string} options.userId - User ID to remove
- * @param {Object} options.allUsersDb - All users database
- * @param {Object} options.userDS - User data store for the user being removed
- * @param {Object} options.freezrPrefs - Freezr preferences
- * @param {Object} options.publicRecordsDb - Public records database
- * @param {Object} options.publicManifestsDb - Public manifests database
- * @param {Object} [options.tokenDb] - App token database (optional); if provided, deletes user's app tokens
- * @param {Object} [options.sessionStore] - Session store with destroyAllForUserId (optional); if provided, destroys user's sessions
- * @returns {Promise<{ tokensDeleted?: number, sessionsDestroyed?: number }>}
- */
-export const removeUserDataAndRecord = async (options) => {
-  const {
-    userId,
-    allUsersDb,
-    userDS,
-    freezrPrefs,
-    publicRecordsDb,
-    publicManifestsDb,
-    tokenDb,
-    sessionStore
-  } = options
-
-  const failures = []
-  const oac = {
-    owner: userId,
-    app_name: 'info.freezr.account',
-    collection_name: 'app_list'
-  }
-  const appList = await userDS.getorInitDb(oac)
-  const allApps = await appList.query({}, {})
-
-  for (const appItem of allApps) {
-    const appName = appItem.app_name
-    try {
-      await deleteApp({ userDS, userId, appName, freezrPrefs, publicManifestsDb, publicRecordsDb })
-    } catch (error) {
-      console.error('❌ Error in removeUserDataAndRecord (deleteApp):', error)
-      failures.push({ error, appName })
-    }
-  }
-  if (failures.length > 0) {
-    throw new Error(JSON.stringify({ error: 'Errors deleting some apps', failures }))
-  }
-
-  const systemAppTables = [
-    'info.freezr.account.user_devices',
-    'info.freezr.account.permissions',
-    'dev.ceps.privatefeeds',
-    'dev.ceps.privatefeeds.codes',
-    'dev.ceps.messages.got',
-    'dev.ceps.messages.sent',
-    'dev.ceps.groups',
-    'dev.ceps.contacts'
-  ]
-  for (const appTable of systemAppTables) {
-    try {
-      const sysApp = await userDS.getorInitDb({ owner: userId, app_table: appTable }, { freezrPrefs })
-      sysApp.delete_records({}, null)
-    } catch (error) {
-      console.error('❌ Error in removeUserDataAndRecord (system app):', error)
-      failures.push({ error, appTable })
-    }
-  }
-  if (failures.length > 0) {
-    throw new Error(JSON.stringify({ error: 'Errors deleting some system apps', failures }))
-  }
-
-  let tokensDeleted = 0
-  let sessionsDestroyed = 0
-  if (tokenDb && typeof tokenDb.delete_records === 'function') {
-    const result = await deleteAllAppTokensForUser(tokenDb, userId)
-    tokensDeleted = result?.deletedCount ?? 0
-  }
-  if (sessionStore && typeof sessionStore.destroyAllForUserId === 'function') {
-    sessionsDestroyed = await sessionStore.destroyAllForUserId(userId)
-  }
-
-  await allUsersDb.delete_record(userId, null)
-  return { tokensDeleted, sessionsDestroyed }
-}
-
-/**
- * Handle remove from freezr action (self-remove with password check).
- * Grabs vars from req/res, validates, checks password, then calls removeUserDataAndRecord.
- *
- * Dependencies expected from middleware chain:
- * - res.locals.freezr.allUsersDb, userDS, publicRecordsDb, publicManifestsDb, freezrPrefs
- * - res.locals.freezr.appTokenDb (optional; add addTokenDb to route for token/session cleanup)
- * - req.sessionStore (optional; for destroying user sessions)
- */
-const handleRemoveFromFreezr = async (req, res) => {
-  try {
-    const userId = req.body?.user_id
-    const oldPassword = req.body?.oldPassword
-    const allUsersDb = res.locals?.freezr?.allUsersDb
-    const userDS = res.locals?.freezr?.userDS
-    const publicRecordsDb = res.locals?.freezr?.publicRecordsDb
-    const publicManifestsDb = res.locals?.freezr?.publicManifestsDb
-    const freezrPrefs = res.locals?.freezr?.freezrPrefs
-    const tokenDb = res.locals?.freezr?.appTokenDb
-    const sessionStore = req.sessionStore
-
-    if (!userId) {
-      return sendFailure(res, 'Missing user id', 'accountApiController.handleRemoveFromFreezr', 400)
-    }
-    if (!req.session?.logged_in_user_id || userId !== req.session.logged_in_user_id) {
-      return sendFailure(res, 'User cannot remove other users ;)', 'accountApiController.handleRemoveFromFreezr', 401)
-    }
-    if (!oldPassword) {
-      return sendFailure(res, 'Missing old password', 'accountApiController.handleRemoveFromFreezr', 400)
-    }
-    if (req.session?.logged_in_as_admin) {
-      return sendFailure(res, 'Cannot remove admins', 'accountApiController.handleRemoveFromFreezr', 403)
-    }
-    if (!allUsersDb) {
-      return sendFailure(res, 'Users database not available', 'accountApiController.handleRemoveFromFreezr', 500)
-    }
-    if (!freezrPrefs) {
-      return sendFailure(res, 'Freezr preferences not available', 'accountApiController.handleRemoveFromFreezr', 500)
-    }
-    if (!publicRecordsDb) {
-      return sendFailure(res, 'Public records database not available', 'accountApiController.handleRemoveFromFreezr', 500)
-    }
-    if (!publicManifestsDb) {
-      return sendFailure(res, 'Public manifests database not available', 'accountApiController.handleRemoveFromFreezr', 500)
-    }
-    if (!userDS) {
-      return sendFailure(res, 'User data store not available', 'accountApiController.handleRemoveFromFreezr', 500)
-    }
-
-    const results = await allUsersDb.query({ user_id: userId }, null)
-    if (!results || results.length === 0) {
-      return sendFailure(res, 'User not found', 'accountApiController.handleRemoveFromFreezr', 404)
-    }
-    if (results.length > 1) {
-      return sendFailure(res, 'Getting too many users - contact the administrator!', 'accountApiController.handleRemoveFromFreezr', 500)
-    }
-
-    const u = new User(results[0])
-    if (!u.check_passwordSync(oldPassword)) {
-      console.warn('removeFromFreezr: wrong password – consider limiting attempts (e.g. datastore flag)')
-      return sendFailure(res, 'Wrong password', 'accountApiController.handleRemoveFromFreezr', 401)
-    }
-
-    const result = await removeUserDataAndRecord({
-      userId,
-      allUsersDb,
-      userDS,
-      freezrPrefs,
-      publicRecordsDb,
-      publicManifestsDb,
-      tokenDb,
-      sessionStore
-    })
-
-    res.locals.freezr.userDS = null
-    return sendApiSuccess(res, { success: true, ...result })
-  } catch (error) {
-    console.error('❌ Error in handleRemoveFromFreezr:', error)
-    return sendFailure(res, error, 'accountApiController.handleRemoveFromFreezr', 500)
-  }
-}
-
-
+// NOTE: user/account removal now lives in features/account/services/accountRemoveService.mjs
+// (removeUserFromServer / removeUserDataAndRecord / detachUserFromServer), shared by the
+// /account/remove page and the admin delete-users flow. The old self-remove handler was removed.
 
 /**
  * Handle update app from files (refresh manifest, update permissions)
@@ -854,6 +691,9 @@ const updateAppFromFilesController = async (req, res) => {
       ownerPermsDb,
       publicManifestsDb,
       userAppListDb,
+      // fradmin-owned trusted-jobs handle — present ONLY for an admin installer (the middleware gates it);
+      // lets a re-install disable the trust of a CHANGED local job. Absent → change-detection no-ops.
+      trustedJobsDb: res.locals?.freezr?.trustedJobsDb || null,
       freezrPrefs,
       errorLogger, // todo-modernization - not clear this is still needed as 
       
@@ -950,6 +790,9 @@ const installAppFromZipFile = async (req, res) => {
       freezrUserAppListDB: userAppListDb, // Alias for serverless (& 3PFunctions)  compatibility
       publicManifestsDb,
       freezrPublicManifestsDb: publicManifestsDb, // Alias for serverless (& 3PFunctions)  compatibility
+      // fradmin-owned trusted-jobs handle — present ONLY for an admin installer (middleware-gated);
+      // lets a re-install disable the trust of a CHANGED local job. Absent → change-detection no-ops.
+      trustedJobsDb: res.locals?.freezr?.trustedJobsDb || null,
       freezrPrefs,
       errorLogger,
       file: req.file,
@@ -1256,11 +1099,48 @@ export const changeNamedPermissionsHandler = async (req, res) => {
       return sendFailure(res, new Error('User not logged in'), 'accountApiController.changeNamedPermissionsHandler', 401)
     }
 
-    const result = (change.action === 'Accept') 
-      ? await acceptNamedPermissions(change.name, change.requestor_app, res.locals.freezr)
-      : await denyNamedPermissions(change.name, change.requestor_app, res.locals.freezr)
+    // Collect any extra scoping fields the client included on `change` (e.g. the
+    // use_mail picker sends connection_names + scopes). acceptNamedPermissions
+    // filters these against PERMISSION_FIELD_EXCEPTIONS_BY_TYPE for the perm's
+    // actual type — so passing arbitrary fields here is safe; unknown ones are
+    // dropped on the server side.
+    const KNOWN_NON_EXTRA_FIELDS = new Set(['name', 'action', 'requestor_app', 'table_id'])
+    const extraFields = {}
+    for (const k of Object.keys(change)) {
+      if (!KNOWN_NON_EXTRA_FIELDS.has(k)) extraFields[k] = change[k]
+    }
+
+    // For Deny we also need userId so the service can cascade-delete the app's
+    // offline tokens (so a revoked permission doesn't leave a usable token
+    // sitting around until its natural 6-month expiry). Pass through locals.
+    const denyLocals = { ...res.locals.freezr, userId }
+    const result = (change.action === 'Accept')
+      ? await acceptNamedPermissions(change.name, change.requestor_app, res.locals.freezr, extraFields)
+      : await denyNamedPermissions(change.name, change.requestor_app, denyLocals)
 
     if (result?.success) {
+      // Jobs: REVOKING a SCHEDULE_JOB permission stops any active schedule for that job. Granting it
+      // is consent only — it does NOT start the schedule (the app starts it via freezr.jobs.schedule).
+      // run_job is on-demand only and never touches scheduling. We read the changed perm by its unique
+      // `name` to get its type + job_name (the sync keys on job_name, not the perm name). Non-fatal.
+      if (res.locals.freezr.scheduledJobsDb && res.locals.freezr.ownerPermsDb) {
+        try {
+          const permRows = await res.locals.freezr.ownerPermsDb.query({ name: change.name, requestor_app: change.requestor_app }, {})
+          const perm = permRows && permRows[0]
+          if (perm && perm.type === 'schedule_job') {
+            const { syncScheduleForPermissionChange } = await import('../../jobs/services/scheduledJobsService.mjs')
+            await syncScheduleForPermissionChange(res.locals.freezr.scheduledJobsDb, {
+              userId,
+              appName: change.requestor_app,
+              permType: perm.type,
+              jobName: perm.job_name,
+              granted: (change.action === 'Accept')
+            })
+          }
+        } catch (e) {
+          console.warn('⚠️  scheduled-job sync on permission change failed:', e && e.message)
+        }
+      }
       return sendApiSuccess(res, result)
     } else {
       return sendFailure(res, result?.error, 'accountApiController.changeNamedPermissionsHandler', 500)
@@ -1426,6 +1306,72 @@ export const createAccountApiController = () => {
     installAppFromUrlController,
     installServedAppController,
     changeNamedPermissionsHandler
+  }
+}
+
+/**
+ * Factory: POST /acctapi/connection_disconnect
+ *
+ * Body: { resource_id }
+ *
+ * Best-effort revoke at the provider, then deletes the resource record from
+ * info.freezr.account.resources. Revoke failures are logged but do not block
+ * the local delete — the user's intent is "I'm done with this connection",
+ * not "fail unless every external system confirms".
+ *
+ * Only the logged-in user can disconnect their own connections — enforced via
+ * the route's loggedInGuard + isLoggedInAccountAppRequest middleware chain.
+ */
+export const createConnectionDisconnectHandler = ({ dsManager, freezrPrefs }) => {
+  return async (req, res) => {
+    try {
+      const userId = req.session?.logged_in_user_id
+      if (!userId) {
+        return sendFailure(res, 'User not logged in', 'connectionDisconnect', 401)
+      }
+      const resourceId = req.body?.resource_id
+      if (!resourceId) {
+        return sendFailure(res, 'resource_id is required', 'connectionDisconnect', 400)
+      }
+
+      const resourcesDb = await dsManager.getorInitDb(
+        { app_table: 'info.freezr.account.resources', owner: userId },
+        { freezrPrefs }
+      )
+      if (!resourcesDb) {
+        return sendFailure(res, 'Could not open user resources DB', 'connectionDisconnect', 500)
+      }
+
+      const record = await resourcesDb.read_by_id(resourceId).catch(() => null)
+      if (!record) {
+        return sendFailure(res, 'Connection not found', 'connectionDisconnect', 404)
+      }
+      if (record.type !== 'connection') {
+        return sendFailure(res, 'Record is not a connection', 'connectionDisconnect', 400)
+      }
+
+      // Best-effort revoke at the provider. Decrypt the oauth sub-object first.
+      let revoked = false
+      try {
+        const decrypted = decryptResourceSensitiveFields(record)
+        const provider = OAUTH_PROVIDERS[record.provider]
+        const tokenToRevoke = decrypted?.oauth?.refreshToken || decrypted?.oauth?.accessToken
+        if (provider && typeof provider.revokeRefreshToken === 'function' && tokenToRevoke) {
+          revoked = await provider.revokeRefreshToken({ token: tokenToRevoke })
+        }
+      } catch (e) {
+        console.warn('connectionDisconnect: revoke step failed (continuing with local delete):', e?.message || e)
+      }
+
+      // Always delete the local record, even if revoke didn't succeed.
+      await resourcesDb.delete_record(resourceId)
+
+      res.locals.freezr.permGiven = true
+      return sendApiSuccess(res, { success: true, revoked, connectionName: record.connectionName })
+    } catch (error) {
+      console.error('❌ Error in connectionDisconnect:', error)
+      return sendFailure(res, error, 'connectionDisconnect', 500)
+    }
   }
 }
 

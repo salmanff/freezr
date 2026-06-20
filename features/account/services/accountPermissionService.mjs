@@ -15,6 +15,8 @@ import {
   extractPublicManifestFilesToRead,
   createPublicManifestObjectFromManifest
 } from '../../../middleware/permissions/permissionCore.mjs'
+import { PERMISSION_FIELD_EXCEPTIONS_BY_TYPE } from '../../../middleware/permissions/permissionDefinitions.mjs'
+import { deleteAppTokensForUserAndApp } from './passwordService.mjs'
 
 const tableIdsFromPermission = function(permission) {
   return typeof permission.table_id === 'string' ? [permission.table_id] : permission.table_ids || []
@@ -174,16 +176,21 @@ export const updatePublicManifestFromManifest = async (userId, appName, manifest
 /**
  * Accepts a named permission for a user
  * Updates the permission record to granted status and updates public manifest
- * 
+ *
  * @param {string} permName - The permission name
  * @param {string} requestorApp - The requesting app name
  * @param {Object} locals - The locals object containing databases and manifest
  * @param {Object} locals.ownerPermsDb - The user permissions database
  * @param {Object} locals.publicManifestsDb - The public manifests database
  * @param {Object} locals.manifest - The app manifest
+ * @param {Object} [extraFields] - Optional scoping fields supplied by the grant UI
+ *   (e.g. use_mail picker returns { connection_names, scopes }). Only fields listed
+ *   in PERMISSION_FIELD_EXCEPTIONS_BY_TYPE for the permission's actual type are
+ *   accepted; everything else is dropped silently. This is the security boundary
+ *   that stops a malicious client from setting arbitrary fields on the perm record.
  * @returns {Promise<Object>} - Returns { success: true } or { success: false, error: Error }
  */
-export const acceptNamedPermissions = async (permName, requestorApp, locals) => {
+export const acceptNamedPermissions = async (permName, requestorApp, locals, extraFields = null) => {
   try {
     const { ownerPermsDb, publicManifestsDb, manifest } = locals
 
@@ -223,6 +230,35 @@ export const acceptNamedPermissions = async (permName, requestorApp, locals) => 
       status: 'granted'
     }
 
+    // Merge any extra fields supplied by the grant UI, filtered against the per-type
+    // exception schema. Unknown fields are silently dropped (logged at warn level).
+    if (extraFields && typeof extraFields === 'object') {
+      const allowed = PERMISSION_FIELD_EXCEPTIONS_BY_TYPE[permission.type] || []
+      const allowedNames = new Set(allowed.map(e => e.field))
+      for (const key of Object.keys(extraFields)) {
+        if (allowedNames.has(key)) {
+          updateData[key] = extraFields[key]
+        } else {
+          console.warn(`acceptNamedPermissions: dropping unrecognized extra field "${key}" for permission type "${permission.type}"`)
+        }
+      }
+    }
+
+    // For connection-scoped permission types (use_mail / use_contacts / use_calendar)
+    // connection_names must be explicit — fail the grant rather than silently writing
+    // a record that the per-service context middleware would later read as "covers
+    // nothing" (or worse, in pre-fix codepaths, as "covers everything"). Wildcard
+    // is ['*']. Same fail-closed contract for all three.
+    const CONNECTION_SCOPED_TYPES = ['use_mail', 'use_contacts', 'use_calendar']
+    if (CONNECTION_SCOPED_TYPES.includes(permission.type)) {
+      const merged = (updateData.connection_names !== undefined)
+        ? updateData.connection_names
+        : permission.connection_names
+      if (!Array.isArray(merged) || merged.length === 0) {
+        return { success: false, error: new Error(permission.type + ' grant requires a non-empty connection_names list (use ["*"] to grant all)') }
+      }
+    }
+
     await ownerPermsDb.update(permId, updateData, { replaceAllFields: false })
 
     return { success: true, name: permName, action: 'Accept', flags: null }
@@ -245,7 +281,7 @@ export const acceptNamedPermissions = async (permName, requestorApp, locals) => 
  * @returns {Promise<Object>} - Returns { success: true } or { success: false, error: Error }
  */
 export const denyNamedPermissions = async (permName, requestorApp, locals) => {
-  const { ownerPermsDb, userDS, publicRecordsDb } = locals
+  const { ownerPermsDb, userDS, publicRecordsDb, appTokenDb, userId } = locals
 
   if (!ownerPermsDb || !userDS) {
     return { success: false, error: new Error('User permissions database or user data store not available') }
@@ -293,6 +329,23 @@ export const denyNamedPermissions = async (permName, requestorApp, locals) => {
     await ownerPermsDb.update(permId, updateData, { replaceAllFields: false })
     permUpdated = true
 
+    // Cascade-delete any offline app tokens issued for this (user, app). Without
+    // this step a revoked permission still leaves a usable token in app_tokens
+    // until its natural 6-month expiry — if the user later re-grants, the same
+    // token works again. Best-effort: failures here don't unwind the revoke
+    // (next API call will see granted:false and 403 in mailContext etc.).
+    if (appTokenDb && userId) {
+      try {
+        const tokenResult = await deleteAppTokensForUserAndApp(appTokenDb, userId, requestorApp)
+        console.log('🔐 denyNamedPermissions cascade-deleted tokens:', tokenResult)
+      } catch (err) {
+        console.error('🔐 denyNamedPermissions: cascade token-delete failed (perm denial still applied):', err)
+        flags.push('Permission revoked but offline app tokens could not be deleted automatically — they will expire naturally.')
+      }
+    } else {
+      console.warn('🔐 denyNamedPermissions: missing appTokenDb or userId in locals — skipping token cascade. Caller should pass both.')
+    }
+
     // Revoke access from all records
     const tableIds = tableIdsFromPermission(permission)
     console.log('🔐 denyNamedPermissions 3 ')
@@ -336,7 +389,7 @@ export const denyNamedPermissions = async (permName, requestorApp, locals) => {
       console.log('🔐 denyNamedPermissions permUpdated', { permQuery, results, permUpdated })
 
     }
-    return { success: true, name: permQuery.name, action: 'Deny', flags: null }
+    return { success: true, name: permQuery.name, action: 'Deny', flags: flags.length ? flags : null }
 
   } catch (error) {
     console.error('Error in denyNamedPermissions:', error)

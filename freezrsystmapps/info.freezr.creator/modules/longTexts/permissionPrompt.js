@@ -375,6 +375,262 @@ try {
 
 ---
 
+### run_job & schedule_job — Background jobs (server-side code)
+
+Use these when the app needs server-side code — a **job** at \`jobs/<name>/index.mjs\` exporting
+\`async function handler (freezr, params)\`. A job runs either on this server (in-process, if an admin has
+"trusted" it) or on the user's own serverless cloud; freezr resolves which, and the user picks the
+location when granting. Two INDEPENDENT permissions:
+- **run_job** — run the job ON DEMAND (button / app-invoked / test).
+- **schedule_job** — run it AUTOMATICALLY on the recurring schedule declared in the manifest's jobs[].
+
+Each permission's **name** is its own unique key (no spaces — alphanumeric / . _ - only); **job_name**
+ties it to the job. **Manifest entry:**
+\`\`\`json
+{
+  "jobs": [ { "name": "process_inbox", "schedule": "daily", "maxRuntime": "30s" } ],
+  "permissions": [
+    { "name": "run_inbox",      "type": "run_job",      "job_name": "process_inbox", "description": "Run the inbox job when you press the button" },
+    { "name": "schedule_inbox", "type": "schedule_job", "job_name": "process_inbox", "description": "Run the inbox job automatically every day" }
+  ]
+}
+\`\`\`
+
+**Run on demand:**
+\`\`\`javascript
+const res = await freezr.jobs.run('process_inbox', { since: lastRun })
+if (res.ok) console.log(res.result)
+\`\`\`
+
+**Scheduling is app-driven** — granting schedule_job is consent only; START it when it makes sense:
+\`\`\`javascript
+await freezr.jobs.schedule('process_inbox')    // begin recurring runs
+await freezr.jobs.unschedule('process_inbox')  // stop them
+\`\`\`
+
+**Check availability before offering job features:**
+\`\`\`javascript
+const info = await freezr.jobs.ping()
+// info.has_compute — true if the user has a serverless (cloud) credential
+// info.jobs.process_inbox — { run_job_granted, schedule_job_granted, trusted, scheduled, location }
+\`\`\`
+
+Notes:
+- Inside the handler, \`freezr\` is the full client API (create / query / llm / …) — a job IS an API client.
+- Dependencies: ship a pre-built \`node_modules\` in the job folder; freezr never runs npm install.
+- The legacy \`use_serverless\` / \`use_3pFunction\` permissions and \`freezr.serverless.*\` are deprecated.
+
+---
+
+### use_mail — Reading and sending mail via connected accounts
+
+Use this when the app needs to read messages, search mail, sync incrementally, send / draft, or modify mail (mark-read, move, trash, delete) on the user's connected accounts. The full API surface lives at \`freezr.connections.mail.*\` and is documented in apiReference.md under "Mail (Connections)".
+
+Tokens are never visible client-side — the freezr server holds the OAuth grant and refreshes it. Today only the Gmail connector is wired up; Microsoft Graph and IMAP/SMTP are planned and the API won't change when they land.
+
+**Manifest entry — read-only:**
+\`\`\`json
+{
+  "permissions": [
+    {
+      "name": "mail_read",
+      "type": "use_mail",
+      "description": "Read messages from your connected mail accounts.",
+      "connection_names": ["*"],
+      "scopes": ["read"]
+    }
+  ]
+}
+\`\`\`
+
+**Manifest entry — read + send / modify:**
+\`\`\`json
+{
+  "permissions": [
+    {
+      "name": "mail_full",
+      "type": "use_mail",
+      "description": "Read and send mail (mark-read, trash, delete, compose).",
+      "connection_names": ["*"],
+      "scopes": ["read", "write"]
+    }
+  ]
+}
+\`\`\`
+
+Key fields:
+- **name**: A unique identifier for this permission.
+- **type**: Must be "use_mail".
+- **description**: Plain-English reason shown to the user in the grant dialog.
+- **connection_names**: Array of specific connection names (e.g. \`["gmailWork", "gmailPersonal"]\`) OR \`["*"]\` for any current or future mail-enabled connection. The user can narrow the list further at grant time.
+- **scopes**: \`["read"]\` for read-only consumers, \`["read", "write"]\` to send / mark-read / move / trash / delete. Request only what you need — users will accept read-only grants faster than full grants.
+- No table_id is required for this permission type.
+
+**Two-level permission model — important.** Mail access is gated on two independent levels and BOTH must allow the operation:
+
+1. **App-side** (this permission). Declares the maximum the app may ask for. The user accepts or denies at install time.
+2. **Connection-side** (\`connection.access.mail\`). Set per-connection by the user at \`/account/resources\`. Values: \`'read'\` or \`'readwrite'\`. A connection set to \`'read'\` rejects every write call even when the granting app holds \`'write'\` scope.
+
+The practical consequence: if your app sends mail, check \`access.mail\` from \`listAccounts()\` BEFORE opening compose. Grey out the Compose UI with a clear message ("This connection is set to read-only at /account/resources") rather than letting the user type a long message that fails on send.
+
+**Listing the connections an app may use:**
+\`\`\`javascript
+const { accounts } = await freezr.connections.mail.listAccounts()
+// accounts[i]: { connectionName, provider, account_email, services, access, status }
+// access.mail: 'read' | 'readwrite' — gates writes user-side
+\`\`\`
+
+**Reading the inbox:**
+\`\`\`javascript
+try {
+  const { messages, nextPageToken } = await freezr.connections.mail.listMessages({
+    connectionName: 'gmailWork',
+    labelIds: ['INBOX'],
+    limit: 25
+  })
+  // messages[i]: { id, threadId, from, to, subject, receivedAt, snippet,
+  //               isRead, hasAttachments, labels }
+} catch (err) {
+  if (freezr.connections.mail.handleTokenExpired(err)) return  // redirected
+  // ... other error handling
+}
+\`\`\`
+
+**Fetching one message with body:**
+\`\`\`javascript
+const { message } = await freezr.connections.mail.getMessage({
+  connectionName, messageId
+})
+// message.bodyHtml / message.bodyText / message.attachments[]
+\`\`\`
+
+**Incremental sync (cheap re-checks):**
+\`\`\`javascript
+// First call seeds — returns changes: [] + a fresh nextToken
+const seed = await freezr.connections.mail.getNewer({ connectionName })
+saveTokenSomewhere(seed.nextToken)
+
+// Later, fetch deltas
+const res = await freezr.connections.mail.getNewer({
+  connectionName,
+  lastToken: loadSavedToken()
+})
+if (res.expired) {
+  // Provider's delta window elapsed (Gmail ~7 days). Fall back:
+  await freezr.connections.mail.listMessages({ connectionName })  // full reload
+  // Re-seed by calling getNewer with no lastToken again.
+}
+saveTokenSomewhere(res.nextToken)
+res.changes.forEach(applyChangeToLocalView)
+// changes[i]: { type: 'messageAdded', message }
+//           | { type: 'messageDeleted', messageId }
+//           | { type: 'labelAdded'|'labelRemoved', messageId, labels }
+\`\`\`
+
+**Sending (needs scopes: ["read", "write"] AND access.mail === 'readwrite'):**
+\`\`\`javascript
+await freezr.connections.mail.sendMessage({
+  connectionName,
+  to: ['recipient@example.com'],
+  subject: 'Hello',
+  bodyText: 'Plain-text body.',
+  // For replies: pass parent.threadId from getMessage()
+  threadId: parent?.threadId
+})
+\`\`\`
+
+**Attachments inline (base64):**
+\`\`\`javascript
+function fileToBase64 (file) {
+  return new Promise(resolve => {
+    const r = new FileReader()
+    r.onload = () => resolve(r.result.split('base64,')[1])
+    r.readAsDataURL(file)
+  })
+}
+const contentBase64 = await fileToBase64(fileInput.files[0])
+await freezr.connections.mail.sendMessage({
+  connectionName, to, subject, bodyText,
+  attachments: [{
+    filename: fileInput.files[0].name,
+    mimeType: fileInput.files[0].type,
+    contentBase64
+  }]
+})
+// Keep total payload under ~20 MB.
+\`\`\`
+
+**Opening an attachment in a new tab (PDF / image / any binary):**
+\`\`\`javascript
+const blob = await freezr.connections.mail.getAttachment({
+  connectionName, messageId, attachmentId: att.id,
+  filename: att.filename, mimeType: att.mimeType
+})
+const url = URL.createObjectURL(blob)
+window.open(url, '_blank', 'noopener')
+// PDFs render in the browser's native viewer. Images render inline.
+// Other types trigger a download.
+// NOTE: freezr CSP blocks <iframe>, <embed>, <object> — opening in a new tab
+// via blob URL is the supported pattern.
+\`\`\`
+
+**Rendering email body HTML safely — MUST follow this pattern.**
+
+An email's HTML body is untrusted external content. NEVER pass \`message.bodyHtml\` directly to \`.innerHTML\` on the page. The safe pattern is sanitize + Shadow DOM:
+
+\`\`\`javascript
+function renderBody (host, m) {
+  if (m.bodyHtml) {
+    const shadow = host.attachShadow({ mode: 'open' })
+    shadow.innerHTML =
+      '<style>a{color:#2563eb} img{max-width:100%}</style>' +
+      sanitize(m.bodyHtml)
+    // Make all links open in a new tab so the email can't navigate the app away
+    shadow.querySelectorAll('a[href]').forEach(a => {
+      a.setAttribute('target', '_blank')
+      a.setAttribute('rel', 'noopener noreferrer')
+    })
+  } else if (m.bodyText) {
+    const pre = document.createElement('pre')
+    pre.style.whiteSpace = 'pre-wrap'
+    pre.textContent = m.bodyText   // never .innerHTML for plain text
+    host.appendChild(pre)
+  }
+}
+
+function sanitize (html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  const kill = ['script','iframe','object','embed','link','meta','base','frame','frameset']
+  kill.forEach(t => doc.querySelectorAll(t).forEach(n => n.remove()))
+  doc.querySelectorAll('*').forEach(el => {
+    [...el.attributes].forEach(a => {
+      const n = a.name.toLowerCase()
+      const v = String(a.value).toLowerCase().trim()
+      if (n.startsWith('on')) el.removeAttribute(a.name)
+      if ((n === 'href' || n === 'src' || n === 'poster' ||
+           n === 'formaction' || n === 'xlink:href') &&
+          (v.startsWith('javascript:') || v.startsWith('vbscript:') ||
+           v.startsWith('data:text/html'))) {
+        el.removeAttribute(a.name)
+      }
+    })
+  })
+  return doc.body ? doc.body.innerHTML : ''
+}
+\`\`\`
+
+Shadow DOM scopes the email's \`<style>\` so it can't override the app's CSS. The sanitizer strips \`<script>\` / \`<iframe>\` / \`<object>\` / \`<embed>\` / \`<link>\` / \`<meta>\` / \`<base>\`, every \`on*\` event-handler attribute, and \`javascript:\` / \`vbscript:\` / \`data:text/html\` URLs. For production-grade sanitization, swap the inline function for DOMPurify.
+
+**Common pitfalls — please respect:**
+- Always wrap mail calls in try/catch and check \`handleTokenExpired(err)\` FIRST in the catch.
+- Gmail labels are NOT folders. A message can carry multiple labels. \`moveMessage\` on Gmail is an approximation (adds target label, removes INBOX). Don't assume "I moved it" means "it left every other folder."
+- The provider's \`q\` syntax is Gmail-specific. Use \`searchMessages\` with structured params for code that will keep working when Graph/IMAP land.
+- Treat \`attachment.mimeType\` as untrusted (sender-controlled). If you care about correctness, sniff the first few bytes of the buffer.
+- Don't store messages in your app's db just to "speed things up." The provider is the source of truth — sync errors and missed deletes are correctness liabilities. Cache for UI snappiness only.
+- The Gmail history stream is mailbox-wide. If you show one folder, filter \`messageAdded\` events by checking \`message.labels.includes(currentFolderId)\`.
+
+---
+
 ### read_all / write_all — Accessing Another App's Data
 
 Use read_all when the app needs to read records from a collection belonging to another app. Use write_all when it needs to write to another app's collection. These are powerful permissions — the user must explicitly grant them.
@@ -513,11 +769,12 @@ if (readPerm && readPerm.granted) {
 | write_own | Database Access | Yes | Write only your own records in another app's collection |
 | upload_pages | Sharing | No | Upload and serve public HTML pages |
 | use_llm | App Capabilities | No | Use the user's LLM API keys for AI requests |
+| use_mail | App Capabilities | No | Read / send mail via the user's connected mail accounts. Requires connection_names + scopes fields; gated by both app-side scope AND connection-side access.mail. |
 | external_scripts | App Capabilities | No | Load JavaScript from external domains (relaxes script-src CSP) |
 | external_fetch | App Capabilities | No | Send/receive data to/from external domains (relaxes connect-src CSP) |
 | unsafe_eval | App Capabilities | No | Allow eval() and dynamic code execution (adds unsafe-eval to script-src CSP) |
-| use_serverless | App Capabilities | No | Use cloud compute credentials to run 3rd party functions |
-| use_3pFunction | App Capabilities | No | Run a 3rd party function installed on the server |
+| run_job | App Capabilities | No | Run a background job ON DEMAND (carries job_name + user-set location auto/local/cloud) |
+| schedule_job | App Capabilities | No | Run a background job AUTOMATICALLY on a recurring schedule (independent of run_job; app starts it via freezr.jobs.schedule) |
 
 ### Important Notes
 - The table_id must be the full "app_name.collection_name" format (e.g. "cards.hiper.freezr.marks"). You can use either "table_id" (string) or "table_ids" (array) — the server normalizes both.

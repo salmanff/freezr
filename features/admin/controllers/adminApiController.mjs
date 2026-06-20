@@ -11,11 +11,18 @@ import { sendApiSuccess, sendFailure, sendAuthFailure } from '../../../adapters/
 import { escapeRegex } from '../../../common/helpers/utils.mjs'
 import { oneUserInstallationProcess } from '../../account/services/appInstallService.mjs'
 import { setUserPasswordAsAdmin, deleteAllAppTokensForUser } from '../../account/services/passwordService.mjs'
-import { removeUserDataAndRecord } from '../../account/controllers/accountApiController.mjs'
-import { userPERMS_OAC, userAppListOAC, PUBLIC_MANIFESTS_OAC, PUBLIC_RECORDS_OAC, USER_DB_OAC, APP_TOKEN_OAC, PARAMS_OAC } from '../../../common/helpers/config.mjs'
+import { removeUserFromServer } from '../../account/services/accountRemoveService.mjs'
+import { userPERMS_OAC, userAppListOAC, PUBLIC_MANIFESTS_OAC, PUBLIC_RECORDS_OAC, USER_DB_OAC, APP_TOKEN_OAC, PARAMS_OAC, TRUSTED_JOBS_OAC, SCHEDULED_JOBS_OAC } from '../../../common/helpers/config.mjs'
 import User from '../../../common/misc/userObj.mjs'
 import { getOrSetPrefs, DEFAULT_PREFS } from '../services/adminConfigService.mjs'
 import { getConnectionStats } from '../../../adapters/datastore/dbConnectors/dbApi_mongodb.mjs'
+import { listTrustedJobs, trustJob, untrustJob } from '../../jobs/services/trustedJobService.mjs'
+import { jobCodePath } from '../../../adapters/jobs/localJobRunner.mjs'
+import { rm } from 'node:fs/promises'
+import { dirname } from 'node:path'
+import { materializeJobToCache } from '../../jobs/services/localJobCache.mjs'
+import { jobCodeIdentity } from '../../jobs/services/cloudJobSource.mjs'
+import { freezrConsole, CONSOLE_CATEGORIES, bjLog } from '../../../common/debug/consoleFlags.mjs'
 
 /**
  * Handle get user app resources action
@@ -314,6 +321,9 @@ const handleDeleteUsers = async (req, res) => {
     const publicRecordsDb = await dsManager.getorInitDb(PUBLIC_RECORDS_OAC, { freezrPrefs })
     const sessionStore = req.sessionStore
 
+    // Admin can choose whether to also wipe each user's public posts (default: yes).
+    const removePublicPosts = req.body?.removePublicPosts !== false
+
     const deleted = []
     const failed = []
     const skipped = []
@@ -325,7 +335,11 @@ const handleDeleteUsers = async (req, res) => {
       }
       try {
         const userDS = await dsManager.getOrSetUserDS(userId, { freezrPrefs })
-        await removeUserDataAndRecord({
+        // Shared removal logic: classifies by the user's fs — a system/host user is fully
+        // deleted (data + record); a cloud user is detached (record/credentials removed, their
+        // cloud data left intact). Same behaviour as the user-facing /account/remove flow.
+        const result = await removeUserFromServer({
+          dsManager,
           userId,
           allUsersDb,
           userDS,
@@ -333,8 +347,10 @@ const handleDeleteUsers = async (req, res) => {
           publicRecordsDb,
           publicManifestsDb,
           tokenDb,
-          sessionStore
+          sessionStore,
+          removePublicPosts
         })
+        console.log('🗑️  admin delete_users: removed ' + userId + ' (mode: ' + result.mode + ')')
         deleted.push(userId)
       } catch (error) {
         console.error('❌ handleDeleteUsers failed for', userId, error)
@@ -810,12 +826,226 @@ const handleClearAllCaches = async (req, res) => {
 }
 
 /**
+ * Handle get console-log flags action
+ * GET /adminapi/get_console_flags
+ * Returns the in-memory console-log category toggles (reset to off on restart).
+ */
+const handleGetConsoleFlags = async (req, res) => {
+  try {
+    return sendApiSuccess(res, {
+      flags: freezrConsole.flags,
+      serverStartedAt: freezrConsole.serverStartedAt,
+      categories: CONSOLE_CATEGORIES
+    })
+  } catch (error) {
+    console.error('Error in handleGetConsoleFlags:', error)
+    return sendFailure(res, error, 'handleGetConsoleFlags', 500)
+  }
+}
+
+/**
+ * Handle set console-log flags action
+ * POST /adminapi/set_console_flags body: { flags: { cachemgmt: true } }
+ * Only known categories are applied; values are coerced to boolean. Not persisted.
+ */
+const handleSetConsoleFlags = async (req, res) => {
+  try {
+    const incoming = req.body?.flags
+    if (!incoming || typeof incoming !== 'object') {
+      return sendFailure(res, 'Missing or invalid flags object', 'handleSetConsoleFlags', 400)
+    }
+    CONSOLE_CATEGORIES.forEach(({ key }) => {
+      if (Object.prototype.hasOwnProperty.call(incoming, key)) {
+        freezrConsole.flags[key] = !!incoming[key]
+      }
+    })
+    return sendApiSuccess(res, {
+      flags: freezrConsole.flags,
+      serverStartedAt: freezrConsole.serverStartedAt
+    })
+  } catch (error) {
+    console.error('Error in handleSetConsoleFlags:', error)
+    return sendFailure(res, error, 'handleSetConsoleFlags', 500)
+  }
+}
+
+/**
  * Handle admin API action
  * Routes to specific action handlers based on action parameter
  * 
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
+// ===== TRUSTED JOBS (local job install) =====
+
+/**
+ * GET /adminapi/list_app_jobs
+ * Traverse the admin's installed apps and list the jobs they declare, with trust status.
+ */
+const handleListAppJobs = async (req, res) => {
+  try {
+    const dsManager = res.locals.freezr?.dsManager
+    const freezrPrefs = res.locals.freezr?.freezrPrefs
+    if (!dsManager || !freezrPrefs) return sendFailure(res, 'dsManager or freezrPrefs not available', 'handleListAppJobs', 500)
+    const adminId = req.session.logged_in_user_id
+
+    const appListDb = await dsManager.getorInitDb(userAppListOAC(adminId), { freezrPrefs })
+    const apps = (await appListDb.query({}, {})) || []
+    const trustedJobsDb = await dsManager.getorInitDb(TRUSTED_JOBS_OAC, { freezrPrefs })
+    const trusted = await listTrustedJobs(trustedJobsDb)
+    const trustedFor = (app, name) => trusted.find(t => t.app_name === app && t.job_name === name && t.trusted)
+
+    const out = []
+    for (const app of apps) {
+      const jobs = app.manifest?.jobs || []
+      if (!jobs.length) continue
+      out.push({
+        app_name: app.app_name,
+        display_name: app.manifest?.display_name || app.app_name,
+        jobs: jobs.map(j => {
+          const t = trustedFor(app.app_name, j.name)
+          return {
+            name: j.name,
+            schedule: j.schedule || null,
+            maxRuntime: j.maxRuntime || null,
+            description: j.description || null,
+            trusted: !!t,
+            audience: t ? t.audience : null
+          }
+        })
+      })
+    }
+    return sendApiSuccess(res, { apps: out })
+  } catch (error) {
+    console.error('❌ Error in handleListAppJobs:', error)
+    return sendFailure(res, error, 'handleListAppJobs', 500)
+  }
+}
+
+/**
+ * POST /adminapi/trust_job  { app_name, job_name, audience }
+ * Copy the job's code from the admin's installed app into users_jobs/<app>/<name>/index.mjs
+ * and write the trust record (with audience). This is the "install a trusted job" action.
+ */
+const handleTrustJob = async (req, res) => {
+  try {
+    const dsManager = res.locals.freezr?.dsManager
+    const freezrPrefs = res.locals.freezr?.freezrPrefs
+    if (!dsManager || !freezrPrefs) return sendFailure(res, 'dsManager or freezrPrefs not available', 'handleTrustJob', 500)
+    const adminId = req.session.logged_in_user_id
+
+    const appName = req.body?.app_name
+    const jobName = req.body?.job_name
+    const audience = req.body?.audience || 'admins'
+    if (!appName || !jobName) return sendFailure(res, 'app_name and job_name required', 'handleTrustJob', 400)
+    if (!/^[a-zA-Z0-9._-]+$/.test(jobName) || jobName.includes('..')) return sendFailure(res, 'invalid job_name', 'handleTrustJob', 400)
+
+    // Copy the approved job code into the trusted-jobs dir the local runner loads from. Prefer the
+    // per-job zip built at install (jobs/<name>.zip) — it carries the WHOLE folder (index.mjs +
+    // package.json + node_modules), so a trusted Tier-2 job runs WITH its dependencies. Fall back to
+    // the single index.mjs for apps installed before the zip existed.
+    const userDS = await dsManager.getOrSetUserDS(adminId, { freezrPrefs })
+    const appFS = await userDS.getorInitAppFS(appName, {})
+
+    // Materialize the admin-approved copy into the local users_jobs cache (full folder incl.
+    // node_modules if a bundle, else single index.mjs). Sources from THIS admin's appFS — the same
+    // approved copy the startup rebuild uses, so the trust snapshot is consistent across restarts.
+    const mat = await materializeJobToCache({ appFS, app: appName, name: jobName })
+    if (!mat.ok) return sendFailure(res, 'job code missing or unreadable (got an empty or non-JS response from app storage — try re-installing the app)', 'handleTrustJob', 400)
+    const filesWritten = mat.files
+    const usedZip = mat.usedZip
+
+    // Stamp the approved code's identity so a later re-install that CHANGES the code disables this
+    // trust (the admin must re-review). Computed from the same appFS the code was materialized from.
+    const codeId = await jobCodeIdentity(appFS, jobName)
+    const trustedJobsDb = await dsManager.getorInitDb(TRUSTED_JOBS_OAC, { freezrPrefs })
+    const rec = await trustJob(trustedJobsDb, { appName, jobName, audience, installedBy: adminId, codeId })
+    bjLog('🔎 TMPJOBLOG 🔒 trusted ' + appName + '/' + jobName + ' (' + (usedZip ? 'full folder' : 'index.mjs only') + ', ' + filesWritten + ' file(s)) audience=' + rec.audience + ' codeId=' + (codeId ? codeId.slice(0, 8) : 'n/a'))
+    return sendApiSuccess(res, { trusted: true, app_name: appName, job_name: jobName, audience: rec.audience, files: filesWritten, withDeps: usedZip })
+  } catch (error) {
+    console.error('❌ Error in handleTrustJob:', error)
+    return sendFailure(res, error, 'handleTrustJob', 500)
+  }
+}
+
+/**
+ * POST /adminapi/untrust_job  { app_name, job_name }
+ * Remove the trust record and the installed code copy.
+ */
+const handleUntrustJob = async (req, res) => {
+  try {
+    const dsManager = res.locals.freezr?.dsManager
+    const freezrPrefs = res.locals.freezr?.freezrPrefs
+    if (!dsManager || !freezrPrefs) return sendFailure(res, 'dsManager or freezrPrefs not available', 'handleUntrustJob', 500)
+    const appName = req.body?.app_name
+    const jobName = req.body?.job_name
+    if (!appName || !jobName) return sendFailure(res, 'app_name and job_name required', 'handleUntrustJob', 400)
+
+    const trustedJobsDb = await dsManager.getorInitDb(TRUSTED_JOBS_OAC, { freezrPrefs })
+    await untrustJob(trustedJobsDb, appName, jobName)
+    try { await rm(dirname(jobCodePath(appName, jobName)), { recursive: true, force: true }) } catch (e) { /* best effort */ }
+    return sendApiSuccess(res, { untrusted: true, app_name: appName, job_name: jobName })
+  } catch (error) {
+    console.error('❌ Error in handleUntrustJob:', error)
+    return sendFailure(res, error, 'handleUntrustJob', 500)
+  }
+}
+
+// ===== SCHEDULED JOBS (visibility + manual tick) =====
+
+/**
+ * GET /adminapi/list_scheduled_jobs — every scheduled-jobs row (all users), for the admin
+ * "Scheduled Jobs" page. Shows next-run time, last status + why a job is waiting/failing.
+ */
+const handleListScheduledJobs = async (req, res) => {
+  try {
+    const dsManager = res.locals.freezr?.dsManager
+    const freezrPrefs = res.locals.freezr?.freezrPrefs
+    if (!dsManager || !freezrPrefs) return sendFailure(res, 'dsManager or freezrPrefs not available', 'handleListScheduledJobs', 500)
+    const db = await dsManager.getorInitDb(SCHEDULED_JOBS_OAC, { freezrPrefs })
+    const rows = (await db.query({}, {})) || []
+    const now = Date.now()
+    const jobs = rows.map(r => ({
+      user: r.owner_id,
+      app: r.app_name,
+      job: r.job_name,
+      schedule: r.schedule,
+      enabled: r.enabled !== false,
+      last_status: r.last_status || null,
+      last_error: r.last_error || null,
+      consecutive_failures: r.consecutive_failures || 0,
+      maxRuntime: r.maxRuntime || null,
+      next_run_at: r.next_run_at || null,
+      next_run_iso: r.next_run_at ? new Date(r.next_run_at).toISOString() : null,
+      due_in_seconds: (typeof r.next_run_at === 'number') ? Math.round((r.next_run_at - now) / 1000) : null,
+      last_run_iso: r.last_run_at ? new Date(r.last_run_at).toISOString() : null
+    })).sort((a, b) => (a.next_run_at || 0) - (b.next_run_at || 0))
+    return sendApiSuccess(res, { scheduler_disabled: !!freezrPrefs.scheduler_disabled, now, jobs })
+  } catch (error) {
+    console.error('❌ Error in handleListScheduledJobs:', error)
+    return sendFailure(res, error, 'handleListScheduledJobs', 500)
+  }
+}
+
+/**
+ * POST /adminapi/run_scheduler_now — force one scheduler tick now (debug; no waiting for the
+ * heartbeat). Returns what ran (incl. waiting reasons).
+ */
+const handleRunSchedulerNow = async (req, res) => {
+  try {
+    const dsManager = res.locals.freezr?.dsManager
+    const freezrPrefs = res.locals.freezr?.freezrPrefs
+    const freezrStatus = res.locals.freezr?.freezrStatus
+    if (!dsManager || !freezrPrefs) return sendFailure(res, 'dsManager or freezrPrefs not available', 'handleRunSchedulerNow', 500)
+    const { createScheduler } = await import('../../jobs/scheduler.mjs')
+    const out = await createScheduler({ dsManager, freezrPrefs, freezrStatus, logManager: res.locals.freezr?.logManager }).tick()
+    return sendApiSuccess(res, out)
+  } catch (error) {
+    console.error('❌ Error in handleRunSchedulerNow:', error)
+    return sendFailure(res, error, 'handleRunSchedulerNow', 500)
+  }
+}
+
 const handleAdminAction = async (req, res) => {
   try {
     const action = req.params.action
@@ -863,6 +1093,20 @@ const handleAdminAction = async (req, res) => {
         return await handleSetCachePrefs(req, res)
       case 'clear_all_caches':
         return await handleClearAllCaches(req, res)
+      case 'get_console_flags':
+        return await handleGetConsoleFlags(req, res)
+      case 'set_console_flags':
+        return await handleSetConsoleFlags(req, res)
+      case 'list_app_jobs':
+        return await handleListAppJobs(req, res)
+      case 'trust_job':
+        return await handleTrustJob(req, res)
+      case 'untrust_job':
+        return await handleUntrustJob(req, res)
+      case 'list_scheduled_jobs':
+        return await handleListScheduledJobs(req, res)
+      case 'run_scheduler_now':
+        return await handleRunSchedulerNow(req, res)
       default:
         return sendFailure(res, `Unknown action: ${action}`, 'handleAdminAction', 404)
     }

@@ -27,7 +27,7 @@ export const computeNextRunAt = (schedule, fromMs = Date.now()) =>
   fromMs + (SCHEDULE_MS[schedule] || SCHEDULE_MS.daily)
 
 /** Enable (or re-enable / update) a scheduled job. Returns the record. */
-export async function enableJob (db, { userId, appName, jobName, schedule, maxRuntime = null, nextRunAt, location = 'auto' }) {
+export async function enableJob (db, { userId, appName, jobName, schedule, maxRuntime = null, memoryMb = null, nextRunAt, location = 'auto' }) {
   if (!db) throw new Error('scheduledJobsService: db handle required')
   if (!userId || !appName || !jobName || !schedule) throw new Error('enableJob: userId, appName, jobName, schedule required')
   const record = {
@@ -36,6 +36,7 @@ export async function enableJob (db, { userId, appName, jobName, schedule, maxRu
     job_name: jobName,
     schedule,
     maxRuntime,
+    memoryMb, // serverless memory (MB) for scheduled runs — from the manifest job entry; null → default
     location, // where scheduled runs go (auto|local|cloud) — the user's choice on the schedule_job grant
     enabled: true,
     next_run_at: (typeof nextRunAt === 'number') ? nextRunAt : computeNextRunAt(schedule),

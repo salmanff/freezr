@@ -49,8 +49,27 @@ freezr.initPageScripts = async function () {
   document.getElementById('button_computeDelete').onclick = deleteCompute
   document.getElementById('button_compute_createRole').onclick = createComputeRole
 
-  // Connect / Edit are now full-page navigations to /connections/new and
-  // /connections/edit?name=<name>. The modal that used to live here has been removed.
+  // OAuth Connect / Edit are full-page navigations to /connections/new and
+  // /connections/edit?name=<name>. IMAP mailboxes (app-password, no OAuth) are
+  // created right here via the SDK, like LLM/compute credentials — this app owns
+  // the resources table; the connections app doesn't.
+  const imapOverlay = document.getElementById('imap_overlay')
+  const imapOverlayClose = document.getElementById('imap_overlay_close')
+  if (imapOverlayClose) imapOverlayClose.onclick = function () { if (imapOverlay) imapOverlay.style.display = 'none' }
+  if (imapOverlay) imapOverlay.onclick = function (e) { if (e.target === imapOverlay) imapOverlay.style.display = 'none' }
+  document.getElementById('button_addnew_imap').onclick = function () {
+    clearImapForm()
+    applyImapPreset('yahoo')
+    if (imapOverlay) {
+      imapOverlay.style.display = 'flex'
+      // The .overlay class isn't styled as a fixed modal on this page, so the form
+      // renders in normal flow below the fold — scroll it into view so the button
+      // doesn't feel like a no-op. Short delay lets layout settle after display:flex.
+      setTimeout(function () { imapOverlay.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, 50)
+    }
+  }
+  document.getElementById('imap_preset').onchange = function () { applyImapPreset(this.value) }
+  document.getElementById('button_imapSave').onclick = saveImap
 
   // Load all resources in a single query (per the doc note: prefer simple queries + filter client-side).
   try {
@@ -460,7 +479,95 @@ const redrawComputeList = function () {
  *  Connected Accounts section (Phase 1 Step 3)
  * =================================================================== */
 
-// Create / edit moved to dedicated pages /connections/new and /connections/edit?name=...
+// OAuth create / edit moved to dedicated pages /connections/new and /connections/edit?name=...
+
+/* =====================================================================
+ *  IMAP mailbox (app-password) connections — provider 'imap'
+ *  Written directly to the resources table as type:'connection'. The server
+ *  encrypts the imap/smtp credential blobs on write (resourceCrypto.mjs). No
+ *  OAuth, no token refresh — the mail app talks to it identically to Gmail.
+ * =================================================================== */
+
+const IMAP_PRESETS = {
+  yahoo: { imapHost: 'imap.mail.yahoo.com', imapPort: 993, smtpHost: 'smtp.mail.yahoo.com', smtpPort: 465 },
+  icloud: { imapHost: 'imap.mail.me.com', imapPort: 993, smtpHost: 'smtp.mail.me.com', smtpPort: 587 },
+  fastmail: { imapHost: 'imap.fastmail.com', imapPort: 993, smtpHost: 'smtp.fastmail.com', smtpPort: 465 },
+  gmail: { imapHost: 'imap.gmail.com', imapPort: 993, smtpHost: 'smtp.gmail.com', smtpPort: 465 },
+  other: { imapHost: '', imapPort: 993, smtpHost: '', smtpPort: 465 }
+}
+const CONN_NAME_RX = /^[A-Za-z0-9_-]+$/
+
+const clearImapForm = function () {
+  document.getElementById('imap_name').value = ''
+  document.getElementById('imap_email').value = ''
+  document.getElementById('imap_pass').value = ''
+  document.getElementById('imap_preset').value = 'yahoo'
+  document.getElementById('imap_access').value = 'readwrite'
+}
+
+const applyImapPreset = function (key) {
+  const p = IMAP_PRESETS[key] || IMAP_PRESETS.other
+  document.getElementById('imap_host').value = p.imapHost
+  document.getElementById('imap_port').value = p.imapPort
+  document.getElementById('smtp_host').value = p.smtpHost
+  document.getElementById('smtp_port').value = p.smtpPort
+}
+
+const saveImap = async function () {
+  const connectionName = document.getElementById('imap_name').value.trim()
+  const email = document.getElementById('imap_email').value.trim()
+  const pass = document.getElementById('imap_pass').value
+  const imapHost = document.getElementById('imap_host').value.trim()
+  const imapPort = parseInt(document.getElementById('imap_port').value, 10) || 993
+  const smtpHost = document.getElementById('smtp_host').value.trim()
+  const smtpPort = parseInt(document.getElementById('smtp_port').value, 10) || 465
+  const access = document.getElementById('imap_access').value === 'read' ? 'read' : 'readwrite'
+
+  if (!connectionName) { showWarning('Connection name is required'); return }
+  if (!CONN_NAME_RX.test(connectionName)) { showWarning('Connection name: letters, digits, underscore and dash only'); return }
+  if (state.connections.find(c => c.connectionName === connectionName)) { showWarning('A connection named "' + connectionName + '" already exists'); return }
+  if (!email) { showWarning('Email address is required'); return }
+  if (!pass) { showWarning('App password is required'); return }
+  if (!imapHost || !smtpHost) { showWarning('IMAP and SMTP hosts are required'); return }
+
+  // Most providers use implicit TLS on 993 (IMAP) and 465 (SMTP); STARTTLS ports
+  // (143 / 587) are not implicit-TLS, so flag secure=false for those.
+  const imapSecure = imapPort !== 143
+  const smtpSecure = smtpPort !== 587 && smtpPort !== 25
+
+  const record = {
+    type: 'connection',
+    provider: 'imap',
+    connectionName,
+    account_email: email,
+    services: ['mail'],
+    access: { mail: access },
+    status: 'ok',
+    sync_bodies: false,
+    sync_attachments: false,
+    imap: { host: imapHost, port: imapPort, secure: imapSecure, user: email, pass },
+    smtp: { host: smtpHost, port: smtpPort, secure: smtpSecure, user: email, pass }
+  }
+
+  try {
+    showLoading(true)
+    const result = await freezr.create(TABLE_NAME, record)
+    if (!result || result.error) throw new Error(result?.error || 'Error creating connection')
+    // Mirror the stored shape locally minus the secrets (never keep the password in page state).
+    state.connections.push({
+      _id: result._id, type: 'connection', provider: 'imap', connectionName,
+      account_email: email, services: ['mail'], access: { mail: access }, status: 'ok'
+    })
+    showLoading(false)
+    const overlay = document.getElementById('imap_overlay')
+    if (overlay) overlay.style.display = 'none'
+    redrawConnectionList()
+    showSuccess('Added IMAP mailbox "' + connectionName + '". Open it from the mail app.')
+  } catch (e) {
+    showLoading(false)
+    showWarning(e.message || 'Error saving IMAP mailbox')
+  }
+}
 // This file now only handles the LIST view + Disconnect action + URL-param banners.
 
 const disconnectConnection = async function (doc) {
@@ -543,6 +650,31 @@ const redrawConnectionList = function () {
 
     const actions = document.createElement('div')
     actions.style.cssText = 'display: flex; gap: 0.5rem; flex-wrap: wrap;'
+
+    // Per-service action links (mirror of the /connections page). Each
+    // per-service page picks the connection itself via /feps/connections/accounts;
+    // the link is just a navigation hint, one per service the connection has.
+    if (services.includes('mail')) {
+      const openMail = document.createElement('a')
+      openMail.className = 'smallTextButt'
+      openMail.href = '/connections/mail'
+      openMail.innerText = 'Open Mail'
+      actions.appendChild(openMail)
+    }
+    if (services.includes('contacts')) {
+      const openContacts = document.createElement('a')
+      openContacts.className = 'smallTextButt'
+      openContacts.href = '/connections/contacts'
+      openContacts.innerText = 'Open Contacts'
+      actions.appendChild(openContacts)
+    }
+    if (services.includes('calendar')) {
+      const openCal = document.createElement('a')
+      openCal.className = 'smallTextButt'
+      openCal.href = '/connections/calendar'
+      openCal.innerText = 'Open Calendar'
+      actions.appendChild(openCal)
+    }
 
     const editLink = document.createElement('a')
     editLink.className = 'smallTextButt'

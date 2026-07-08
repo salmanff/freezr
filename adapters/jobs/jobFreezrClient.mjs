@@ -16,9 +16,11 @@
 // load (from common/freezrApiClient.manifest.json, shared with pageLoader + sdkAddons so it can't
 // drift). The portable vm/fetch logic lives in jobClientCore.mjs and is reused by both sides.
 //
-// CAVEAT: two addon helpers read a streaming/binary Response (llm _streamingAsk, connection binary
-// downloads). The fetch shim returns a JSON-style Response, so those two paths aren't supported
-// in-process yet (everything else — all CRUD, non-streaming llm.ask, connection metadata — is).
+// TRANSPORT NOTE: the fetch shim carries JSON/text faithfully — including SSE (llm _streamingAsk
+// replays as a single chunk; the final result is identical). Raw binary can't ride it (UTF-8 round-
+// trip corrupts non-text bytes), so the two binary file paths — freezr.upload and
+// connections.mail.getAttachment — switch to a base64-over-JSON path when headless
+// (freezr.app.isWebBased === false). See job-download-supplement.md for the full design.
 
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'

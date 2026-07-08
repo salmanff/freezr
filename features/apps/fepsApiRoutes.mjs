@@ -75,8 +75,38 @@ export const createFepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
   // Middleware for LLM routes
   const llmPerms = createGetLlmPerms(dsManager, freezrPrefs)
   const uploadLlm = multer().array('file')
+
+  // Decode a base64 string strictly. Buffer.from(str, 'base64') is LENIENT — for a string it never
+  // throws; it silently drops characters outside the base64 alphabet and decodes what's left. So a
+  // corrupt payload would otherwise be written as a real (but wrong) file rather than rejected.
+  // Re-encode and compare (ignoring whitespace and trailing '=' padding) to reject anything that
+  // isn't genuine standard base64. Returns the decoded Buffer, or null if the input is not valid
+  // base64. (Truncation of otherwise-valid base64 can't be caught without a length/checksum — out
+  // of scope; this catches malformed/garbage input, which is the silent-corruption case.)
+  const decodeBase64Strict = (str) => {
+    if (typeof str !== 'string') return null
+    const buffer = Buffer.from(str, 'base64')
+    const norm = (s) => s.replace(/\s+/g, '').replace(/=+$/, '')
+    return norm(buffer.toString('base64')) === norm(str) ? buffer : null
+  }
+
   const uploadLlmIfNeeded = (req, res, next) => {
     const isEmpty = (obj) => { for (const prop in obj) { if (Object.hasOwn(obj, prop)) return false } return true }
+    // Headless/job path: a background job has no multipart socket stream for multer, so LLM file
+    // inputs arrive as base64 JSON (filesBase64: [{ fileName, mimeType, contentBase64 }]). Synthesize
+    // the multer-style req.files (originalname + buffer) so the controller/connectors are unchanged.
+    // `filesBase64` is therefore a RESERVED top-level body key on this route. See job-download-supplement.md.
+    if (req.body && Array.isArray(req.body.filesBase64)) {
+      const files = []
+      for (const f of req.body.filesBase64) {
+        const buffer = decodeBase64Strict((f && f.contentBase64) || '')
+        if (buffer === null) return sendFailure(res, 'Invalid filesBase64: contentBase64 is not valid base64', 'uploadLlmIfNeeded', 400)
+        files.push({ originalname: (f && f.fileName) || 'file', buffer, size: buffer.length, mimetype: (f && f.mimeType) || '' })
+      }
+      req.files = files
+      delete req.body.filesBase64
+      return next()
+    }
     if (isEmpty(req.body)) {
       uploadLlm(req, res, (err) => {
         if (err) return sendFailure(res, err, 'uploadLlmIfNeeded', 400)
@@ -93,8 +123,13 @@ export const createFepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
   // Multer middleware for file uploads
   const upload = multer().single('file')
   
-  // Upload middleware - handles file upload and parses options
-  const uploadIfNeeded = (req, res, next) => {
+  // Upload middleware — handles file upload and parses options. `acceptBase64` enables the headless/job
+  // base64-JSON path (a background job has no multipart socket stream for multer): the file arrives as
+  // { contentBase64, fileName, mimeType, ...options } and we synthesize the multer-style req.file so the
+  // controller is unchanged. When enabled, `contentBase64` is a RESERVED top-level body key — so it is
+  // enabled ONLY for /upload, NOT for /serverless, whose JSON body (e.g. inputParams) must pass through
+  // untouched. Jobs never upload via /serverless; they use /upload. See job-download-supplement.md.
+  const makeUploadIfNeeded = (acceptBase64) => (req, res, next) => {
     // Check if body is empty (indicating file upload)
     const isEmpty = (obj) => {
       for (const prop in obj) {
@@ -104,7 +139,22 @@ export const createFepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
       }
       return true
     }
-    
+
+    if (acceptBase64 && req.body && typeof req.body === 'object' && typeof req.body.contentBase64 === 'string') {
+      const buffer = decodeBase64Strict(req.body.contentBase64)
+      if (buffer === null) {
+        return sendFailure(res, 'Invalid contentBase64: not valid base64', 'uploadIfNeeded', 400)
+      }
+      req.file = {
+        originalname: req.body.fileName || 'file',
+        buffer,
+        size: buffer.length,
+        mimetype: req.body.mimeType || ''
+      }
+      delete req.body.contentBase64
+      return next()
+    }
+
     if (isEmpty(req.body)) {
       // File upload expected
       upload(req, res, (err) => {
@@ -127,6 +177,8 @@ export const createFepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
       next()
     }
   }
+  const uploadIfNeeded = makeUploadIfNeeded(true) // /upload — base64-JSON path enabled for headless jobs
+  const uploadIfNeededMultipartOnly = makeUploadIfNeeded(false) // /serverless — JSON body passes through untouched (no base64 hijack)
   
   // ===== CREATE CONTROLLERS =====
   const accountApiController = createAccountApiController()
@@ -409,7 +461,7 @@ export const createFepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * For file uploads (upsertlocalservice):
    * - file: The zip file containing the microservice code
    */
-  router.put('/serverless/:task', setupGuard, getAppTokenInfo, apiRateLimit, uploadIfNeeded, serverlessPerms, addAppFsFor3PFunctions, add3PFunctionFS, cepsApiController.serverlessTasks)
+  router.put('/serverless/:task', setupGuard, getAppTokenInfo, apiRateLimit, uploadIfNeededMultipartOnly, serverlessPerms, addAppFsFor3PFunctions, add3PFunctionFS, cepsApiController.serverlessTasks)
   router.get('/serverless/:task', setupGuard, getAppTokenInfo, apiRateLimit, serverlessPerms, add3PFunctionFS, cepsApiController.serverlessTasks)
 
   // ===== LLM ROUTES =====

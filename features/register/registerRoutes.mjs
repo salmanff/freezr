@@ -63,13 +63,8 @@ export const createRegisterPageRoutes = ({ dsManager, freezrPrefs, freezrStatus 
   router.get('/firstSetUp', firstSetupGuard, addFreezrStatusAndDsManagerForFirstSetup, addLocalManagerForFirstSetup, registerPageController.generateFirstSetUpPage)
 
   /**
-   * GET /register/newparams
-   * New params page - only accessible if user is incomplete
-   * currently not active
+   * GET /register/newparams => switched to /account/reset
    */
-  // router.get('/newparams', firstSetupGuard, (req, res, next) => { 
-  //   req.params.app_name = 'info.freezr.register'; next();
-  // }, addUserDSAndAppFS, registerPageController.generateNewParamsPage)
 
 
   /**

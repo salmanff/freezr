@@ -125,11 +125,12 @@ export const ensureFreshAccessToken = async ({ dsManager, freezrPrefs, userId, c
     throw err
   }
 
-  // Build the new encrypted oauth blob, preserving the refresh token (Google's refresh
-  // response usually omits it — the original stays valid until revoked).
+  // Build the new encrypted oauth blob. Google's refresh response omits the refresh
+  // token (the original stays valid until revoked); Microsoft ROTATES it — when the
+  // provider returns a new refresh token, persist it, else keep the current one.
   const newOauth = {
     accessToken: refreshed.accessToken,
-    refreshToken: currentOauth.refreshToken,
+    refreshToken: refreshed.refreshToken || currentOauth.refreshToken,
     expiry: refreshed.expiry,
     oauthConfigName: currentOauth.oauthConfigName || oauthConfig.name
   }

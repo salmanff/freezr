@@ -87,6 +87,12 @@ export function buildFreezrClient ({ transport, freezrMeta = {}, sources }) {
     // inject them, so without these freezr.llm.ask throws "TextDecoder is not defined" inside a job.
     TextDecoder,
     TextEncoder,
+    // Buffer/Blob: the headless file paths (freezr.upload + connections.mail.getAttachment)
+    // encode/decode base64 and build a Blob. The vm sandbox has no host globals unless injected;
+    // both exist on the freezr host (Node) and in the serverless bundle (Lambda nodejs20.x), so
+    // this one injection covers both runners. See job-download-supplement.md.
+    Buffer,
+    Blob,
     setTimeout,
     clearTimeout,
     URL,

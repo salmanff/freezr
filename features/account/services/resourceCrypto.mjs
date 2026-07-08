@@ -11,7 +11,10 @@
 //
 // Per-type field handling:
 //   - type: 'llm'         — `key` (string) is wrapped as { value } then encrypted
-//   - type: 'connection'  — `oauth` (object) is encrypted as-is
+//   - type: 'connection'  — `oauth` (OAuth providers) AND `imap`/`smtp` (IMAP
+//                           app-password connections) are each encrypted as-is.
+//                           A record has either `oauth` (Gmail/Graph) or
+//                           `imap`+`smtp` (IMAP), never both — each is optional.
 //   - type: 'compute'     — `secret` (object: { accessKeyId, secretAccessKey, arnRole }) encrypted as-is
 //
 // Both directions are idempotent: encrypting an already-encrypted record returns
@@ -60,11 +63,17 @@ export const encryptResourceSensitiveFields = (record) => {
   }
 
   if (record.type === 'connection') {
-    if (!record.oauth || typeof record.oauth !== 'object') return record
-    // OAuth controller already encrypts via encryptParams before writing here, but
-    // this hook is a safety net in case the connection record arrives in plaintext
-    // via some other path (e.g. a future admin reseed). Idempotent.
-    return { ...record, oauth: encryptParams(record.oauth) }
+    // OAuth controller already encrypts `oauth` via encryptParams before writing
+    // here, but this hook is a safety net in case the record arrives in plaintext
+    // via some other path. IMAP app-password connections are written directly via
+    // the SDK (no OAuth controller), so their `imap`/`smtp` blobs are encrypted
+    // here. encryptParams is idempotent, so re-encrypting is safe. A field that
+    // isn't present (or isn't an object) is left untouched.
+    let out = record
+    if (out.oauth && typeof out.oauth === 'object') out = { ...out, oauth: encryptParams(out.oauth) }
+    if (out.imap && typeof out.imap === 'object') out = { ...out, imap: encryptParams(out.imap) }
+    if (out.smtp && typeof out.smtp === 'object') out = { ...out, smtp: encryptParams(out.smtp) }
+    return out
   }
 
   if (record.type === 'compute') {
@@ -104,8 +113,11 @@ export const decryptResourceSensitiveFields = (record) => {
   }
 
   if (record.type === 'connection') {
-    if (!record.oauth || typeof record.oauth !== 'object') return record
-    return { ...record, oauth: decryptParams(record.oauth) }
+    let out = record
+    if (out.oauth && typeof out.oauth === 'object') out = { ...out, oauth: decryptParams(out.oauth) }
+    if (out.imap && typeof out.imap === 'object') out = { ...out, imap: decryptParams(out.imap) }
+    if (out.smtp && typeof out.smtp === 'object') out = { ...out, smtp: decryptParams(out.smtp) }
+    return out
   }
 
   if (record.type === 'compute') {

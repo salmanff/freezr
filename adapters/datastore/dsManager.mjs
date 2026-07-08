@@ -3,6 +3,7 @@
 // Updated to pass UserCache instances to USER_DS instead of full CacheManager
 
 import USER_DS, { appTableName } from './userDsMgr.mjs'
+import { decryptParams } from '../../features/register/services/registerServices.mjs'
 import { SYSTEM_USER_IDS, FREEZR_ADMIN_DBs } from '../../common/helpers/config.mjs'
 import { removeLastPathElement } from '../../common/helpers/utils.mjs'
 import CacheManager from './cache/cacheManager.mjs'
@@ -76,7 +77,15 @@ function DATA_STORE_MANAGER () {
         const slParams = rawSlParams
         const lmParams = rawLmParams
 
-        if (fsParams && fsParams.type && dbParams && dbParams.type) {
+        // fsParams/dbParams may be stored encrypted ({ __enc: ... }) — that on-record
+        // envelope has no top-level `.type`. After a migration to a user's own storage
+        // the record holds encrypted params, so read the *decrypted* type for the
+        // completeness gate (USER_DS decrypts again internally when it connects).
+        // System-fs users were substituted to plaintext above; decryptParams is a
+        // pass-through for plaintext, so this is uniform for both cases.
+        const fsType = decryptParams(fsParams)?.type
+        const dbType = decryptParams(dbParams)?.type
+        if (fsParams && fsType && dbParams && dbType) {
           // Create or get UserCache for this owner (with scoped interface for security)
           if (!self.userCaches[owner]) {
             const scopedInterface = self.cacheManager.createUserInterface(owner)

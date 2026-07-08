@@ -14,9 +14,17 @@ if (typeof freezr === 'undefined') {
     // Run a job ON DEMAND. `name` is the app's own job id, or a fully-qualified third-party job id
     // '<ownerApp>.jobs.<job>'. opts.location ('local'|'cloud') is a dev override, honored only when
     // the user's grant location is 'auto'. Requires run_job (third-party) / optional for own jobs.
+    //   opts.maxRuntime — run budget, e.g. '300s' (defaults server-side to 30s).
+    //   opts.memoryMb   — serverless function memory in MB (cloud runs); raise it for memory-heavy
+    //                     jobs (e.g. ones that buffer mail/attachments) to avoid out-of-memory kills.
+    //   opts.redeploy   — force a fresh code/config upload before running. Needed once after changing
+    //                     maxRuntime/memoryMb so an already-deployed cloud function picks up the change.
     async run (name, params = {}, opts = {}) {
       const body = { params: params || {} }
       if (opts.location) body.location = opts.location
+      if (opts.maxRuntime) body.maxRuntime = opts.maxRuntime
+      if (opts.memoryMb) body.memoryMb = opts.memoryMb
+      if (opts.redeploy) body.redeploy = true
       const writeOptions = opts.appToken ? { appToken: opts.appToken } : {}
       return freezr.apiRequest('POST', (opts.host || '') + '/jobs/run/' + encodeURIComponent(name), body, writeOptions)
     },

@@ -24,7 +24,9 @@
 //       hasAttachments,
 //       labels              // string[] — Gmail labels pass through; Graph folders flatten here later
 //       // when options.includeAttachments === true:
-//       attachments: [{ id, filename, mimeType, sizeBytes }]
+//       attachments: [{ id, filename, mimeType, sizeBytes, contentId, inline }]
+//                     // contentId (cid, no angle brackets) + inline flag let callers
+//                     // re-link `<img src="cid:...">` inline images to attachment bytes
 //       // (bodyText / bodyHtml are NEVER returned by listMessages — see normalizeMessage)
 //     }],
 //     nextPageToken         // string|null — opaque Gmail cursor; null when no more pages
@@ -165,12 +167,19 @@ const walkPayload = (payload, { decodeBodies = false } = {}) => {
     const attachmentId = part.body?.attachmentId || null
 
     if (attachmentId || filename) {
-      // It's an attachment, not an inline body
+      // It's an attachment, not an inline body. Surface the Content-ID (cid) and
+      // inline disposition so callers can re-link inline images referenced by
+      // `<img src="cid:...">` in the HTML body to the stored attachment bytes.
+      const rawCid = headerValue(part.headers, 'Content-ID') || ''
+      const contentId = rawCid.replace(/^</, '').replace(/>$/, '').trim() || null
+      const disposition = (headerValue(part.headers, 'Content-Disposition') || '').toLowerCase()
       attachments.push({
         id: attachmentId || null,
         filename: filename || '(unnamed)',
         mimeType: part.mimeType || 'application/octet-stream',
-        sizeBytes: part.body?.size || 0
+        sizeBytes: part.body?.size || 0,
+        contentId,
+        inline: disposition.startsWith('inline') || !!contentId
       })
     } else if (decodeBodies && mime === 'text/plain' && part.body?.data && bodyText === null) {
       bodyText = decodeBase64Url(part.body.data)
@@ -208,6 +217,11 @@ const normalizeMessage = (gm, { includeAttachments = false, includeBodies = fals
   const base = {
     id: gm.id,
     threadId: gm.threadId,
+    // RFC-822 threading headers, kept raw (angle brackets included) so a reply can
+    // pass messageId straight back as sendMessage's inReplyTo/references.
+    messageId: headerValue(headers, 'Message-ID'),
+    inReplyTo: headerValue(headers, 'In-Reply-To'),
+    references: headerValue(headers, 'References'),
     from: parseAddress(headerValue(headers, 'From')),
     to: parseAddressList(headerValue(headers, 'To')),
     cc: parseAddressList(headerValue(headers, 'Cc')),
@@ -280,7 +294,8 @@ export const listMessages = async (accessToken, options = {}) => {
   // freezr_mail_phase2.md for the cross-provider design.
   const perMessageQuery = wantAttachments
     ? '?format=full'
-    : '?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Subject'
+    : '?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Subject' +
+      '&metadataHeaders=Message-ID&metadataHeaders=In-Reply-To&metadataHeaders=References'
 
   // Parallel-fetch capped at MAX_PARALLEL — Gmail's per-user concurrent-quota safety.
   const messages = await runConcurrent(ids, MAX_PARALLEL, async (id) => {
@@ -490,7 +505,8 @@ export const getNewer = async (accessToken, lastToken, options = {}) => {
     const fetched = await runConcurrent(ids, MAX_PARALLEL, async (id) => {
       try {
         const url2 = GMAIL_BASE + '/messages/' + encodeURIComponent(id) +
-          '?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Subject'
+          '?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Subject' +
+          '&metadataHeaders=Message-ID&metadataHeaders=In-Reply-To&metadataHeaders=References'
         const gm = await gmailFetch(url2, accessToken)
         return { id, message: normalizeMessage(gm) }
       } catch (err) {

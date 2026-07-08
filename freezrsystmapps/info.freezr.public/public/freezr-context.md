@@ -519,8 +519,11 @@ await freezr.connections.mail.listFolders({ connectionName })
 
 // Paginated message metadata (newest first). Returns
 // { messages: [...], nextPageToken: string|null }.
-// Each message: { id, threadId, from: {address, name}, to, cc, subject,
+// Each message: { id, threadId, messageId, inReplyTo, references,
+//                 from: {address, name}, to, cc, subject,
 //                 receivedAt (ms), snippet, isRead, hasAttachments, labels }.
+// messageId/inReplyTo/references are the RFC 822 threading headers (null when
+// absent, angle brackets preserved) — use them to build reply chains across clients.
 // Bodies are NOT returned by listMessages — use getMessage for those.
 await freezr.connections.mail.listMessages({
   connectionName,
@@ -545,6 +548,7 @@ await freezr.connections.mail.searchMessages({
 
 // Full message including bodies + attachment metadata.
 // Returns { message: { ... + bodyText, bodyHtml, attachments: [{ id, filename, mimeType, sizeBytes }] } }.
+// Also carries messageId/inReplyTo/references (RFC 822 threading headers) as above.
 // SECURITY: NEVER pass bodyHtml directly to .innerHTML. See "Rendering email
 // safely" in the use_mail permission section.
 await freezr.connections.mail.getMessage({ connectionName, messageId })
@@ -570,7 +574,8 @@ await freezr.connections.mail.getNewer({ connectionName, lastToken, limit })
 // Send a message. Requires 'write' scope in the granted use_mail permission
 // AND connection.access.mail === 'readwrite'. Returns { messageId, threadId }.
 // Attachments are inline base64 — keep total payload under ~20 MB.
-// For replies: pass threadId from the parent's getMessage result.
+// For replies: pass the parent's threadId AND inReplyTo (the parent's
+// `messageId` field from listMessages/getMessage).
 await freezr.connections.mail.sendMessage({
   connectionName,
   to,                            // string | string[] | [{ address, name }]
@@ -579,7 +584,8 @@ await freezr.connections.mail.sendMessage({
   bodyText, bodyHtml,            // either or both (both -> multipart/alternative)
   attachments,                   // [{ filename, mimeType, contentBase64 }]
   threadId,                      // for replies (Gmail-side threading)
-  inReplyTo, references          // RFC 822 Message-ID headers for cross-client threading
+  inReplyTo,                     // parent's messageId (RFC 822 Message-ID) for cross-client threading
+  references                     // full chain: parent.references + ' ' + parent.messageId (defaults to inReplyTo)
 })
 
 // Save a draft on the provider. Same args as sendMessage.
@@ -662,7 +668,9 @@ await freezr.jobs.ping(options?)
 // Run a job ON DEMAND. name = your own job's name, or a fully-qualified third-party job
 // '<ownerApp>.jobs.<job>'. params is passed to the handler. (run_job required for third-party.)
 await freezr.jobs.run(name, params?, options?)
-// options: { location: 'local'|'cloud' (dev override, honored only when the user's grant is 'auto'), appToken, host }
+// options: { location: 'local'|'cloud' (dev override, honored only when the user's grant is 'auto'),
+//            maxRuntime (e.g. '300s'), memoryMb (cloud function memory — raise for memory-heavy jobs),
+//            redeploy (force a fresh code/config upload), appToken, host }
 // Returns { ok, result, error, durationMs, usage?, location }
 
 // START the recurring schedule for your own job. Granting schedule_job is CONSENT only — it does not
@@ -1197,7 +1205,8 @@ try {
     labelIds: ['INBOX'],
     limit: 25
   })
-  // messages[i]: { id, threadId, from, to, subject, receivedAt, snippet,
+  // messages[i]: { id, threadId, messageId, inReplyTo, references,
+  //               from, to, subject, receivedAt, snippet,
   //               isRead, hasAttachments, labels }
 } catch (err) {
   if (freezr.connections.mail.handleTokenExpired(err)) return  // redirected
@@ -1243,8 +1252,10 @@ await freezr.connections.mail.sendMessage({
   to: ['recipient@example.com'],
   subject: 'Hello',
   bodyText: 'Plain-text body.',
-  // For replies: pass parent.threadId from getMessage()
-  threadId: parent?.threadId
+  // For replies: pass parent.threadId + RFC 822 threading headers from getMessage()
+  threadId: parent?.threadId,
+  inReplyTo: parent?.messageId,
+  references: [parent?.references, parent?.messageId].filter(Boolean).join(' ')
 })
 ```
 
@@ -1492,3 +1503,49 @@ if (readPerm && readPerm.granted) {
 - When adding a permission, always update the manifest.json "permissions" array AND write the code that uses it.
 - When making records public, create a pcard template file in the `public/` folder and add a "public_pages" entry so records render correctly on public URLs. All public_pages files must also be in the `public/` folder.
 - Include the new permission name in the summary's "newPermissions" array so the system can prompt the user to grant it.
+
+---
+
+## Local Dev Access & Tokens
+
+### Programmatic dev access — `.freezr-access.local.json`
+
+When developing a freezr app locally (the app folder lives inside the freezr server's
+`users_freezr/{user}/apps/{app-name}/` directory), a file called
+`.freezr-access.local.json` at the app root may hold dev API credentials:
+
+```json
+{
+  "baseUrl": "http://localhost:3000",
+  "userId": "<freezr user id>",
+  "appName": "<this app's name>",
+  "appToken": "<long-lived CEPS app token, read+write on this app's own tables>",
+  "appTokenExpires": "<ISO date>",
+  "accountsToken": null,
+  "accountsTokenExpires": null,
+  "examples": { "queryTable": "<curl>", "writeRecord": "<curl>", "updateAppFromCode": "<how to re-install>" },
+  "howToRegenerate": "<where the user regenerates these tokens>"
+}
+```
+
+Rules for using it:
+
+- **Use the `appToken` as a Bearer token** to verify your work end-to-end against the
+  running server, e.g. `curl -H "Authorization: Bearer <appToken>" -X POST
+  "<baseUrl>/ceps/query/<appName>.<collection>" -H "Content-Type: application/json" -d '{"count":5}'`.
+  It grants read/write on this app's own tables only. Ready-made curl examples are in the
+  file's `examples` field.
+- **This file is secret and must stay gitignored.** Never copy token values into committed
+  files, docs, code, or memory — always reference the file by path and read values at run time.
+- **If the file is missing, `appToken` is null, the expiry date has passed, or API calls
+  return 401 (e.g. "Token not found" / "Token is expired"): do not try to mint a token
+  yourself — ask the user to regenerate it.** The user does this in a logged-in browser at
+  `<baseUrl>/account/home` → "Install Existing Apps" → **Dev** tab → select the app →
+  **"Regenerate Tokens for App"**. That overwrites `.freezr-access.local.json` with fresh
+  tokens (and keeps it gitignored).
+- **After changing `manifest.json`** (new collections, permissions, pages), the app must be
+  re-installed for the server to pick the changes up. There is no long-lived token for this
+  action (`accountsToken` is null: account actions are session-only), so tell the user to
+  open `<baseUrl>/account/home?devUpdateApp=<appName>` in their logged-in browser — that
+  opens the Dev tab with the app pre-selected — and then press **"Regenerate App from
+  Files"**. (Give them the full URL with the real app name filled in.)

@@ -16,6 +16,7 @@ import { dirname, resolve } from 'path'
 import { CHAT_PROMPT } from './chatPrompt.js'
 import { API_REFERENCE } from './apiReference.js'
 import { PERMISSION_PROMPT } from './permissionPrompt.js'
+import { DEV_ACCESS_PROMPT } from './devAccess.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const outPath = resolve(here, '../../../info.freezr.public/public/freezr-context.md')
@@ -53,6 +54,12 @@ const bundle = [
   '## Permissions',
   '',
   PERMISSION_PROMPT.trim(),
+  '',
+  '---',
+  '',
+  '## Local Dev Access & Tokens',
+  '',
+  DEV_ACCESS_PROMPT.trim(),
   ''
 ].join('\n')
 

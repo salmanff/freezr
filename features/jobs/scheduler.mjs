@@ -74,6 +74,7 @@ export function createScheduler ({ dsManager, freezrPrefs, freezrStatus, logMana
             baseUrl: (freezrPrefs && freezrPrefs.serverless_callback_url) || null,
             ownerApp: job.app_name, jobName: job.job_name, userId: job.owner_id,
             maxRuntime: job.maxRuntime || '30s',
+            memoryMb: job.memoryMb || null,
             hint: grants[0].location || 'auto',
             isAdmin,
             // CLOUD: source the job code + deploy-identity from the owner-user's own installed app (no

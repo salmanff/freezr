@@ -220,6 +220,13 @@ export const createAcctApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
 
   router.get('/generateAppPassword', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addTokenDb, isLoggedInAccountAppRequest, accountApiController.generateAppPassword)
 
+  // Dev helper: mint a long-lived app token and write it (with curl examples) into
+  // {app folder}/.freezr-access.local.json for programmatic dev access; also gitignores it there.
+  router.post('/generateDevAccessFile', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addTokenDb, addFreezrAccountAsReqParam, addUserDSAndAppFS, isLoggedInAccountAppRequest, accountApiController.generateDevAccessFileController)
+
+  // Dev helper: refresh the app folder's copy of freezr-context.md (LLM guidance doc) from the master.
+  router.post('/generateDevContextFile', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addFreezrAccountAsReqParam, addUserDSAndAppFS, isLoggedInAccountAppRequest, accountApiController.generateDevContextFileController)
+
   router.post('/updateAppFromFiles', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addFreezrAccountAsReqParam, addUserDSAndAppFS, addOwnerPermsDb, addPublicManifestsDb, addTrustedJobsDbIfAdmin, isLoggedInAccountAppRequest, accountApiController.updateAppFromFilesController)
   router.post('/appMgmtActions', setupGuard, loggedInGuard, getAndCheckAccountOrCreatorAppTokenInfo, addFreezrAccountAsReqParam, addUserDSAndAppFS, addPublicManifestsDb, addPublicRecordsDB, isLoggedInAccountAppRequest, accountApiController.handleAppMgmtActions)
 

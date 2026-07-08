@@ -331,7 +331,7 @@ class AppTableCache {
     // (no sort, or _date_modified: -1). Ascending or other sorts must skip Recent.
     const recentRecords = this._getRecentCache()
     const count = options?.count || options?.limit || (this.config.cacheCountMax || 1000)
-    if (!options?.count && !options?.limit) console.warn('NO OPTIONS COUNT OR LIMIT ', { options })
+    // if (!options?.count && !options?.limit) console.warn('NO OPTIONS COUNT OR LIMIT ', { options })
     if (recentRecords !== null && isDefaultSort(options?.sort)) {
       const filtered = filterRecords(recentRecords, query, options)
       if (filtered.length >= count) {

@@ -162,10 +162,23 @@ freezr Account Home
     
             <div id="tab_dev" style="display:none" class="tabcontent">
                 <h3>Developer Options</h3>
-                <div>Add an existing folder to Apps list. Enter app name here if the app folder already exists.</div>
-                <div class="input"  id="appNameFromFolder" contenteditable="true"></div>
-                <div class="fBoxGrid">
-                    <div id="button_updateAppFromFiles" class="freezrButt">Add</div>
+                <div>Add an existing folder to Apps list, or regenerate an already-added app from its files. Pick an installed app or enter the folder name of a new one.</div>
+                <input class="input" id="appNameFromFolder" list="devAppNamesList" placeholder="app.name.here" />
+                <datalist id="devAppNamesList">
+                    {{#user_apps}}<option value="{{app_name}}"></option>{{/user_apps}}
+                </datalist>
+                <div id="devTokenResultBox"></div>
+                <div class="dev-action-row">
+                    <div id="button_updateAppFromFiles" class="freezrButt">Regenerate App from Files</div>
+                    <span class="dev-action-desc">Adds the app folder to your Apps list, or re-installs an existing app from its files (re-reads manifest.json, permissions and pages).</span>
+                </div>
+                <div class="dev-action-row">
+                    <div id="button_regenerateDevTokens" class="freezrButt">Regenerate Tokens for App</div>
+                    <span class="dev-action-desc">Writes a long-lived API token into the app folder (.freezr-access.local.json) so dev tools and AI coding agents can read and write this app's data. <b>Warning: This gives full access to your app's data.</b></span>
+                </div>
+                <div class="dev-action-row">
+                    <div id="button_generateContextFile" class="freezrButt">(re)Generate context file for LLMs</div>
+                    <span class="dev-action-desc">Copies the latest freezr-context.md into the app folder — the guidance doc that teaches AI coding assistants (Claude, Cursor, ChatGPT...) how to build freezr apps.</span>
                 </div>
             </div>
     

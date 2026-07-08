@@ -439,7 +439,9 @@ await freezr.jobs.ping(options?)
 // Run a job ON DEMAND. name = your own job's name, or a fully-qualified third-party job
 // '<ownerApp>.jobs.<job>'. params is passed to the handler. (run_job required for third-party.)
 await freezr.jobs.run(name, params?, options?)
-// options: { location: 'local'|'cloud' (dev override, honored only when the user's grant is 'auto'), appToken, host }
+// options: { location: 'local'|'cloud' (dev override, honored only when the user's grant is 'auto'),
+//            maxRuntime (e.g. '300s'), memoryMb (cloud function memory — raise for memory-heavy jobs),
+//            redeploy (force a fresh code/config upload), appToken, host }
 // Returns { ok, result, error, durationMs, usage?, location }
 
 // START the recurring schedule for your own job. Granting schedule_job is CONSENT only — it does not

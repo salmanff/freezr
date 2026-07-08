@@ -347,10 +347,43 @@ const freezr = (function() {
         delete options.host
       }
 
+      // Headless background job path: a background job has no multipart transport (no socket / no browser
+      // FormData over the wire), so send the bytes as base64 JSON, which the upload route accepts.
+      // Accepts a Blob (e.g. straight from getAttachment), ArrayBuffer, typed array / Buffer, or a
+      // base64 string. Buffer is provided by the job sandbox. See job-download-supplement.md.
+      if (!freezr.app.isWebBased) {
+        let contentBase64
+        let inferredName
+        let inferredType
+        if (typeof file === 'string') {
+          contentBase64 = file // already base64
+        } else if (typeof Blob !== 'undefined' && file instanceof Blob) {
+          contentBase64 = Buffer.from(await file.arrayBuffer()).toString('base64')
+          inferredName = file.name
+          inferredType = file.type
+        } else if (file instanceof ArrayBuffer) {
+          contentBase64 = Buffer.from(file).toString('base64')
+        } else if (ArrayBuffer.isView(file)) {
+          contentBase64 = Buffer.from(file.buffer, file.byteOffset, file.byteLength).toString('base64')
+        } else {
+          throw new Error('upload (job): pass a Blob, ArrayBuffer, typed array/Buffer, or base64 string')
+        }
+        const body = {
+          ...options,
+          contentBase64,
+          fileName: options.fileName || inferredName || 'file',
+          mimeType: options.mimeType || inferredType || undefined
+        }
+        delete body.appToken
+        delete body.host
+        const jsonOptions = writeOptions.appToken ? { appToken: writeOptions.appToken } : {}
+        return await apiRequest('PUT', url, body, jsonOptions)
+      }
+
       const uploadData = new FormData()
       uploadData.append('file', file)
       uploadData.append('options', JSON.stringify(options))
-      
+
       return await apiRequest('PUT', url, uploadData, writeOptions)
     },
 

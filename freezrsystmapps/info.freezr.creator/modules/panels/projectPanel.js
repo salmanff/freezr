@@ -85,13 +85,16 @@ const validAppName = (appName) => {
   return true
 }
 
-const createApp = async (appName) => {
+const createApp = async (appName, creationText) => {
   const result = await freezr.apiRequest('POST', '/creatorapi/create_new_app', { app_name: appName })
   if (!result || result.error) {
     throw new Error(result?.error || 'Create app failed.')
   }
   try {
-    const histResult = await freezr.create('appUpdates', { appName, action: 'created', timestamp: new Date().toISOString() })
+    const createdEntry = { appName, action: 'created', timestamp: new Date().toISOString() }
+    // Record the original creation text so the History tab shows what was asked for.
+    if (creationText) createdEntry.userPrompt = creationText
+    const histResult = await freezr.create('appUpdates', createdEntry)
     result._historyId = histResult?._id || histResult?.id || null
   } catch (err) {
     console.warn('Could not record appUpdates entry:', err)
@@ -1214,7 +1217,7 @@ export const renderProjectPanel = ({ container, state, getState, setState }) => 
     }
 
     try {
-      const result = await createApp(nameCheck.value)
+      const result = await createApp(nameCheck.value, description)
       if (!result?.success) throw new Error('Create app failed.')
 
       try {

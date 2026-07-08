@@ -1,6 +1,8 @@
 // freezr.info - Modern ES6 Module - Account API Controller
 // Implements API endpoints for account actions (JSON), separate from page rendering
 
+import fs from 'fs'
+import path from 'path'
 import { sendApiSuccess, sendFailure } from '../../../adapters/http/responses.mjs'
 import { generateAndSaveAppPasswordForUser, changeUserPassword, invalidateAppToken, deleteAllAppTokensForUser } from '../services/passwordService.mjs'
 import { getStructuredAppListForUser } from '../services/accountQueryService.mjs'
@@ -13,6 +15,7 @@ import { userPERMS_OAC, userAppListOAC, constructAppIdStringFrom, isSystemApp, v
 import { startsWithOneOf } from '../../../common/helpers/utils.mjs'
 import { deleteLocalFolderAndContents } from '../../../adapters/datastore/fsConnectors/fileHandler.mjs'
 import { OAUTH_PROVIDERS } from '../../oauth/services/providers/index.mjs'
+import { ensureContextDoc } from '../../creator/controllers/creatorApiController.mjs'
 import { decryptResourceSensitiveFields } from '../services/resourceCrypto.mjs'
 
 /**
@@ -60,6 +63,172 @@ const generateAppPassword = async (req, res) => {
   return sendApiSuccess(res, result)
   } catch (error) {
     return sendFailure(res, error, 'accountApiController.generateAppPassword', 500)
+  }
+}
+
+const DEV_ACCESS_FILE_NAME = '.freezr-access.local.json'
+
+/**
+ * Generate a long-lived dev app token and write it into the app folder's
+ * .freezr-access.local.json, for programmatic verification by dev tools
+ * (e.g. Claude Code) working inside the app repo. Local file systems only.
+ * Also ensures the file is listed in the app folder's .gitignore.
+ *
+ * Uses the same token machinery as generateAppPassword (expiry:null → server
+ * cap, currently 6 months). The freshly minted app_token is directly usable
+ * as a Bearer token on /ceps and /feps data routes.
+ *
+ * Dependencies expected from middleware chain:
+ * - req.session.logged_in_user_id, req.session.device_code
+ * - res.locals.freezr.appTokenDb (from addTokenDb)
+ * - res.locals.freezr.userDS (from createAddUserDSAndAppFS)
+ */
+const generateDevAccessFileController = async (req, res) => {
+  try {
+    const userId = req.session?.logged_in_user_id
+    if (!userId) {
+      return sendFailure(res, 'Missing user id', 'accountApiController.generateDevAccessFile', 401)
+    }
+    const appName = req.body?.app_name
+    if (!appName) {
+      return sendFailure(res, 'Missing app name', 'accountApiController.generateDevAccessFile', 400)
+    }
+    if (!validAppName(appName) || isSystemApp(appName)) {
+      return sendFailure(res, 'Cannot generate dev access tokens for this app name', 'accountApiController.generateDevAccessFile', 403)
+    }
+
+    const tokenDb = res.locals?.freezr?.appTokenDb
+    if (!tokenDb) {
+      return sendFailure(res, 'App token database not available', 'accountApiController.generateDevAccessFile', 500)
+    }
+    const userDS = res.locals?.freezr?.userDS
+    if (!userDS) {
+      return sendFailure(res, 'User data store not available', 'accountApiController.generateDevAccessFile', 500)
+    }
+
+    const appFS = await userDS.getorInitAppFS(appName, {})
+    const fsType = appFS?.fsParams?.type
+    if (fsType !== 'local' && fsType !== 'glitch') {
+      return sendFailure(res, 'Dev access files can only be written for apps stored on the local file system', 'accountApiController.generateDevAccessFile', 400)
+    }
+
+    const appPath = (appFS.fsParams.rootFolder || FREEZR_USER_FILES_DIR) + '/' + userId + '/apps/' + appName
+    try {
+      const stat = await fs.promises.stat(appPath)
+      if (!stat.isDirectory()) throw new Error('not a directory')
+    } catch (e) {
+      return sendFailure(res, 'App folder not found: ' + appPath, 'accountApiController.generateDevAccessFile', 404)
+    }
+
+    // Mint via the existing token path; expiry null → server cap (max allowed)
+    const { app_password: appPassword } = await generateAndSaveAppPasswordForUser(tokenDb, userId, appName, {
+      deviceCode: req.session.device_code,
+      expiry: null,
+      oneDevice: false
+    })
+    const tokenRecords = await tokenDb.query({ app_password: appPassword }, {})
+    if (!tokenRecords || tokenRecords.length === 0 || !tokenRecords[0].app_token) {
+      return sendFailure(res, 'Could not retrieve newly created app token', 'accountApiController.generateDevAccessFile', 500)
+    }
+    const appToken = tokenRecords[0].app_token
+    const appTokenExpires = new Date(tokenRecords[0].expiry).toISOString()
+
+    const baseUrl = (startsWithOneOf(req.headers.host, ['localhost']) ? 'http' : 'https') + '://' + req.headers.host
+    const exampleTable = appName + '.<collection>'
+
+    // Preserve any custom fields if the file already exists
+    const accessFilePath = path.join(appPath, DEV_ACCESS_FILE_NAME)
+    let existing = {}
+    try {
+      existing = JSON.parse(await fs.promises.readFile(accessFilePath, 'utf8'))
+      if (!existing || typeof existing !== 'object' || Array.isArray(existing)) existing = {}
+    } catch (e) { /* no existing file or unparseable - start fresh */ }
+
+    const fileContent = {
+      ...existing,
+      _comment: 'Local dev access tokens for programmatic verification (e.g. Claude Code). NEVER commit - this file must stay gitignored.',
+      baseUrl,
+      userId,
+      appName,
+      appToken,
+      appTokenExpires,
+      accountsToken: null, // account-path actions (app reinstall) are session-cookie-only; see examples.updateAppFromCode
+      accountsTokenExpires: null,
+      examples: {
+        queryTable: 'curl -s -X POST "' + baseUrl + '/ceps/query/' + exampleTable + '" -H "Authorization: Bearer ' + appToken + '" -H "Content-Type: application/json" -d \'{"count":5}\'',
+        writeRecord: 'curl -s -X POST "' + baseUrl + '/ceps/write/' + exampleTable + '" -H "Authorization: Bearer ' + appToken + '" -H "Content-Type: application/json" -d \'{"exampleField":"exampleValue"}\'',
+        updateAppFromCode: 'manual only - open ' + baseUrl + '/account/home?devUpdateApp=' + appName + ' in a logged-in browser (pre-selects this app on the Dev tab), then press "Regenerate App from Files"'
+      },
+      howToRegenerate: 'Open ' + baseUrl + '/account/home in a logged-in browser (user ' + userId + '), go to "Install Existing Apps" > Dev tab, select ' + appName + ' and press "Regenerate Tokens for App". That overwrites this file with fresh tokens (max expiry is set by the server, currently 6 months).'
+    }
+    await fs.promises.writeFile(accessFilePath, JSON.stringify(fileContent, null, 2) + '\n')
+
+    // Ensure the access file is gitignored in the app folder
+    const gitignorePath = path.join(appPath, '.gitignore')
+    let gitignoreUpdated = false
+    let gitignoreContent = ''
+    try {
+      gitignoreContent = await fs.promises.readFile(gitignorePath, 'utf8')
+    } catch (e) { /* no .gitignore yet */ }
+    const gitignoreLines = gitignoreContent.split('\n').map(l => l.trim())
+    if (!gitignoreLines.includes(DEV_ACCESS_FILE_NAME)) {
+      const newContent = gitignoreContent.length > 0
+        ? gitignoreContent.replace(/\n*$/, '\n') + DEV_ACCESS_FILE_NAME + '\n'
+        : DEV_ACCESS_FILE_NAME + '\n'
+      await fs.promises.writeFile(gitignorePath, newContent)
+      gitignoreUpdated = true
+    }
+
+    // Token itself is deliberately NOT returned - it lives in the file only
+    return sendApiSuccess(res, {
+      success: true,
+      appName,
+      filePath: accessFilePath,
+      appTokenExpires,
+      gitignoreUpdated
+    })
+  } catch (error) {
+    console.error('❌ Error in generateDevAccessFile:', error)
+    return sendFailure(res, error, 'accountApiController.generateDevAccessFile', 500)
+  }
+}
+
+/**
+ * Refresh the app folder's copy of freezr-context.md (LLM/dev guidance doc)
+ * from the freezr-shipped master. Used by the Dev tab's "(re)Generate context
+ * file for LLMs" button. Works on any app FS type (uses appFS read/write).
+ *
+ * Dependencies expected from middleware chain:
+ * - req.session.logged_in_user_id
+ * - res.locals.freezr.userDS (from createAddUserDSAndAppFS)
+ */
+const generateDevContextFileController = async (req, res) => {
+  try {
+    const userId = req.session?.logged_in_user_id
+    if (!userId) {
+      return sendFailure(res, 'Missing user id', 'accountApiController.generateDevContextFile', 401)
+    }
+    const appName = req.body?.app_name
+    if (!appName) {
+      return sendFailure(res, 'Missing app name', 'accountApiController.generateDevContextFile', 400)
+    }
+    if (!validAppName(appName) || isSystemApp(appName)) {
+      return sendFailure(res, 'Cannot generate a context file for this app name', 'accountApiController.generateDevContextFile', 403)
+    }
+    const userDS = res.locals?.freezr?.userDS
+    if (!userDS) {
+      return sendFailure(res, 'User data store not available', 'accountApiController.generateDevContextFile', 500)
+    }
+
+    const appFS = await userDS.getorInitAppFS(appName, {})
+    const result = await ensureContextDoc(appFS)
+    if (result.action === 'skipped') {
+      return sendFailure(res, 'Could not write context file: ' + (result.reason || 'unknown reason'), 'accountApiController.generateDevContextFile', 500)
+    }
+    return sendApiSuccess(res, { success: true, appName, action: result.action })
+  } catch (error) {
+    console.error('❌ Error in generateDevContextFile:', error)
+    return sendFailure(res, error, 'accountApiController.generateDevContextFile', 500)
   }
 }
 
@@ -1297,6 +1466,8 @@ export const changeNamedPermissionsHandler = async (req, res) => {
 export const createAccountApiController = () => {
   return {
     generateAppPassword,
+    generateDevAccessFileController,
+    generateDevContextFileController,
     handleAccountActions,
     handleGettingAccountInfo,
     userAppLogOut,

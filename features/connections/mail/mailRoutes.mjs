@@ -156,6 +156,19 @@ export const createMailApiRoutes = ({ dsManager, freezrPrefs, freezrStatus }) =>
 
         const { buffer } = await getAttachment({ dsManager, freezrPrefs, userId, connection, messageId, attachmentId })
 
+        // Headless/job path: a background job's transport carries JSON faithfully but corrupts
+        // raw binary (UTF-8 round-trip). When the job client asks for ?encoding=base64, return the
+        // bytes as base64-in-JSON instead of res.end(buffer). See job-download-supplement.md.
+        if (req.query.encoding === 'base64') {
+          return res.json({
+            success: true,
+            filename: filenameHint,
+            mimeType,
+            sizeBytes: buffer.length,
+            contentBase64: buffer.toString('base64')
+          })
+        }
+
         res.setHeader('Content-Type', mimeType)
         res.setHeader('Content-Length', buffer.length)
         res.setHeader('Content-Disposition', buildContentDisposition(filenameHint))

@@ -78,7 +78,10 @@ export const createAddUserDSAndAppFS = (dsManager, freezrPrefs, freezrStatus) =>
       
     } catch (error) {
       if (error.message === 'user incomplete') {
-        return res.redirect('/register/newparams?error=user_incomplete')
+        // The user's stored fs/db params are missing or unusable, so their data store can't be
+        // built. /account/reset is the recovery page that loads even when the user's store is
+        // unreachable (see appPageRoutes 'RECOVERY EXCEPTION');
+        return res.redirect('/account/reset?reason=user_incomplete')
       }
       console.error('❌ Error in addUserAppsAndPermDBs middleware:', error)
       sendFailure(res, error, 'createAddUserDSAndAppFS', 500)

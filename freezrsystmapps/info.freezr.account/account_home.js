@@ -93,6 +93,24 @@ freezr.initPageScripts = function () {
     document.getElementById('app_list').firstElementChild.style.display = 'none'
     window.history.pushState(null, 'Welcome to freezr', '/')
   }
+
+  // Dev shortcut: /account/home?devUpdateApp=<app.name> opens the Dev tab with the
+  // app pre-selected (used from .freezr-access.local.json / dev tooling). The user
+  // still has to press "Regenerate App from Files" — deliberately NOT auto-run, so a
+  // crafted link cannot trigger a re-install without an explicit click.
+  const devUpdateApp = searchParams.get('devUpdateApp')
+  if (devUpdateApp) {
+    if (!freezrMeta.adminUser) {
+      showError('devUpdateApp is only available to admin users')
+    } else {
+      document.getElementById('appNameFromFolder').value = devUpdateApp
+      buttons.tabs(['dev'])
+      document.getElementById('installDialogueBox').scrollIntoView()
+      const regenButt = document.getElementById('button_updateAppFromFiles')
+      regenButt.style.outline = '2px solid var(--freezr-accent)'
+      showDevTokenResult('Press "Regenerate App from Files" to re-install ' + devUpdateApp + ' from its folder.', false)
+    }
+  }
 }
 
 // Install progress feedback
@@ -353,7 +371,7 @@ const buttons = {
     }
   },
   updateAppFromFiles: function () {
-    const appName = document.getElementById('appNameFromFolder').innerText
+    const appName = document.getElementById('appNameFromFolder').value.trim()
     if (!appName) {
       showError('Please enter an app name')
     } else if (!isValidAppName(appName)) {
@@ -373,6 +391,77 @@ const buttons = {
           showInstallResult({ error: 'Error updating app! ' + error.message })
         })
     }
+  },
+  regenerateDevTokens: function () {
+    const appName = document.getElementById('appNameFromFolder').value.trim()
+    if (!appName) {
+      showError('Please enter or select an app name')
+    } else if (!isValidAppName(appName)) {
+      showError('Invalid app name - please correct the app name')
+    } else if (!window.confirm('This writes a long-lived access token into the app folder (' + appName + '/.freezr-access.local.json). Any tool that can read that folder - including an LLM or AI coding agent working on the app - gets FULL READ AND WRITE ACCESS to this app\'s data on your freezr until the token expires or is revoked.\n\nContinue?')) {
+      // user declined - do nothing
+    } else {
+      showDevTokenResult('Generating tokens for ' + appName + '...', false)
+      freezr.apiRequest('POST', '/acctapi/generateDevAccessFile', { app_name: appName })
+        .then(returndata => {
+          if (returndata.error || returndata.errors) {
+            console.warn({ returndata })
+            showDevTokenResult('Error generating tokens: ' + (returndata.error || returndata.errors), true)
+          } else {
+            showDevTokenResult('Dev tokens for ' + appName + ' written to ' + returndata.filePath +
+              ' (expires ' + (returndata.appTokenExpires || '?').slice(0, 10) + ').' +
+              (returndata.gitignoreUpdated ? ' Added the file to the app\'s .gitignore.' : ''), false)
+          }
+        })
+        .catch(error => {
+          console.warn({ error })
+          showDevTokenResult('Error generating tokens: ' + error.message, true)
+        })
+    }
+  },
+  generateContextFile: function () {
+    const appName = document.getElementById('appNameFromFolder').value.trim()
+    if (!appName) {
+      showError('Please enter or select an app name')
+    } else if (!isValidAppName(appName)) {
+      showError('Invalid app name - please correct the app name')
+    } else {
+      showDevTokenResult('Generating context file for ' + appName + '...', false)
+      freezr.apiRequest('POST', '/acctapi/generateDevContextFile', { app_name: appName })
+        .then(returndata => {
+          if (returndata.error || returndata.errors) {
+            console.warn({ returndata })
+            showDevTokenResult('Error generating context file: ' + (returndata.error || returndata.errors), true)
+          } else {
+            const actionText = { created: 'was created in', updated: 'was updated in', uptodate: 'is already up to date in' }[returndata.action] || 'was written to'
+            // Static instruction strings only - safe for innerHTML
+            showDevTokenResult('freezr-context.md ' + actionText + ' the ' + appName + ' app folder.' + CONTEXT_FILE_INSTRUCTIONS_HTML, false, true)
+          }
+        })
+        .catch(error => {
+          console.warn({ error })
+          showDevTokenResult('Error generating context file: ' + error.message, true)
+        })
+    }
+  }
+}
+// How to attach freezr-context.md to each AI assistant - mirrors the "How to use
+// this file" section at the top of the generated freezr-context.md itself.
+const CONTEXT_FILE_INSTRUCTIONS_HTML = '<div style="margin-top:0.5rem; font-weight:bold;">To make your AI coding assistant use it:</div>' +
+  '<ul style="margin:0.25rem 0 0 1.25rem; padding:0;">' +
+  '<li><b>Claude Code:</b> create a CLAUDE.md file at the app folder root containing one line &mdash; <code>@freezr-context.md</code>. It is auto-loaded every session.</li>' +
+  '<li><b>Cursor:</b> save a copy as <code>.cursor/rules/freezr.mdc</code>, or add a rule pointing to <code>freezr-context.md</code>.</li>' +
+  '<li><b>GitHub Copilot / Codex / other agents:</b> rename or symlink the file to <code>AGENTS.md</code> at the folder root.</li>' +
+  '<li><b>ChatGPT (web):</b> upload <code>freezr-context.md</code> to your conversation or Project files and tell it to follow the file when writing freezr app code.</li>' +
+  '</ul>'
+const showDevTokenResult = function (message, isError, isTrustedHtml) {
+  const box = document.getElementById('devTokenResultBox')
+  if (!box) return
+  box.className = isError ? 'errorBox' : 'successBox'
+  if (isTrustedHtml) {
+    box.innerHTML = message || ''
+  } else {
+    box.innerText = message || ''
   }
 }
 const installSuccessProcess = function (returndata) {

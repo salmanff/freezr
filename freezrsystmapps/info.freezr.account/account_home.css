@@ -223,6 +223,24 @@
   font-size: 14px;
 }
 
+/* ===== Dev tab action rows ===== */
+.dev-action-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+.dev-action-row .freezrButt {
+  flex: 0 0 240px;
+  text-align: center;
+}
+
+.dev-action-desc {
+  font-size: 13px;
+  color: var(--freezr-text-muted);
+}
+
 /* ===== Input Fields ===== */
 .input {
   padding: 0.6rem 0.75rem;

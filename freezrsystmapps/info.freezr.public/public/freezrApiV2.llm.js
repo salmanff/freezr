@@ -94,6 +94,26 @@ if (typeof freezr === 'undefined') {
     return finalResult
   }
 
+  // Headless background job helper: normalise one LLM file input into { fileName, mimeType, contentBase64 }.
+  // A background job has no browser File, so it passes a Blob (e.g. from getAttachment) or a plain object
+  // { fileName|name, mimeType|type, contentBase64 | buffer | data }. Buffer is provided by the job
+  // sandbox. Connectors derive media type from the filename, so pass a sensible fileName.
+  async function _toLlmFilePayload (f) {
+    if (typeof Blob !== 'undefined' && f instanceof Blob) {
+      return { fileName: f.name || 'file', mimeType: f.type || undefined, contentBase64: Buffer.from(await f.arrayBuffer()).toString('base64') }
+    }
+    if (f && typeof f === 'object') {
+      const fileName = f.fileName || f.name || 'file'
+      const mimeType = f.mimeType || f.type || undefined
+      if (typeof f.contentBase64 === 'string') return { fileName, mimeType, contentBase64: f.contentBase64 }
+      const raw = f.buffer || f.data
+      if (typeof raw === 'string') return { fileName, mimeType, contentBase64: raw } // assume base64
+      if (raw instanceof ArrayBuffer) return { fileName, mimeType, contentBase64: Buffer.from(raw).toString('base64') }
+      if (ArrayBuffer.isView(raw)) return { fileName, mimeType, contentBase64: Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength).toString('base64') }
+    }
+    throw new Error('llm.ask (job): each file must be a Blob, or { fileName, mimeType, contentBase64 | buffer }')
+  }
+
   // ============================================
   // freezr.llm
   // ============================================
@@ -159,8 +179,28 @@ if (typeof freezr === 'undefined') {
       }
 
       if (options.files) {
-        const uploadData = new FormData()
         const fileList = Array.isArray(options.files) ? options.files : [options.files]
+
+        // Headless/job path: no multipart transport — send files as base64 JSON. The server
+        // (uploadLlmIfNeeded) rebuilds req.files, so the connectors are unchanged. The response is
+        // still SSE, which the job transport carries faithfully. See job-download-supplement.md.
+        if (!freezr.app.isWebBased) {
+          const filesBase64 = []
+          for (const f of fileList) filesBase64.push(await _toLlmFilePayload(f))
+          const bodyOptions = {
+            provider: options.provider,
+            family: options.family,
+            model: options.model,
+            max_tokens: options.max_tokens,
+            noCosts: options.noCosts,
+            role: options.role,
+            responseType: options.responseType,
+            thinking: options.thinking
+          }
+          return _streamingAsk(url, { prompt, context: options.context, options: bodyOptions, filesBase64 }, streamOpts)
+        }
+
+        const uploadData = new FormData()
         fileList.forEach(f => uploadData.append('file', f))
         const bodyOptions = {
           prompt,

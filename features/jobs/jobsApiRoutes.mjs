@@ -145,6 +145,9 @@ export const createJobsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
       userId,
       params: req.body.params || {},
       maxRuntime: req.body.maxRuntime || '30s',
+      // memoryMb: the serverless function's memory (MB) for this run — an OPTION the app supplies
+      // (e.g. from its manifest job entry), not a credential. null → the runner's default.
+      memoryMb: req.body.memoryMb || null,
       hint,
       // The 'admins' audience gate. Check the (trustworthy, server-set) session flag FIRST so a real
       // admin session skips the DB hit; an app-token request rarely carries it, so we then fall back to
@@ -220,7 +223,7 @@ export const createJobsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
     if (!job) return sendFailure(res, 'job ' + jobName + ' does not declare a schedule in the app manifest', 'jobs.schedule', 400)
     if (!isValidSchedule(job.schedule)) return sendFailure(res, 'invalid schedule "' + job.schedule + '" (minutely is dev/test only)', 'jobs.schedule', 400)
 
-    await enableJob(res.locals.freezr.scheduledJobsDb, { userId, appName: callerApp, jobName: job.name, schedule: job.schedule, maxRuntime: job.maxRuntime || null, location: grant.location || 'auto' })
+    await enableJob(res.locals.freezr.scheduledJobsDb, { userId, appName: callerApp, jobName: job.name, schedule: job.schedule, maxRuntime: job.maxRuntime || null, memoryMb: job.memoryMb || null, location: grant.location || 'auto' })
     res.locals.freezr.permGiven = true
     return sendApiSuccess(res, { scheduled: true, job: jobName, schedule: job.schedule, location: grant.location || 'auto' })
   }

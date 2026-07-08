@@ -87,6 +87,11 @@ if (typeof freezr === 'undefined') {
      * List messages for one connection, paginated. Returns
      * `{ success, connectionName, messages, nextPageToken }`.
      *
+     * Each message row carries the RFC 822 threading headers alongside the
+     * provider id: `messageId` (Message-ID), `inReplyTo` and `references`
+     * (each null when the header is absent, angle brackets preserved) — pass
+     * a parent's `messageId` as `inReplyTo` when replying via sendMessage.
+     *
      * @param {Object}   args
      * @param {string}   args.connectionName  Required. The connection to query.
      * @param {number}   [args.limit=20]      1..100.
@@ -127,6 +132,8 @@ if (typeof freezr === 'undefined') {
     /**
      * Fetch one full message with bodies + attachment metadata. Returns
      * `{ success, connectionName, message: { ..., bodyText, bodyHtml, attachments } }`.
+     * The message also carries `messageId` / `inReplyTo` / `references`
+     * (RFC 822 threading headers, null when absent) — see listMessages.
      */
     async getMessage ({ connectionName, messageId } = {}, options = {}) {
       if (!connectionName) throw new Error('getMessage: connectionName is required')
@@ -156,6 +163,24 @@ if (typeof freezr === 'undefined') {
       const params = []
       if (filename) params.push('filename=' + encodeURIComponent(filename))
       if (mimeType) params.push('mimeType=' + encodeURIComponent(mimeType))
+
+      // Headless background job path: a background job has no multipart transport (no socket / no browser
+      // FormData over the wire), so send the bytes as base64 JSON, which the upload route accepts.
+      // Accepts a Blob (e.g. straight from getAttachment), ArrayBuffer, typed array / Buffer, or a
+      // base64 string. Buffer is provided by the job sandbox. See job-download-supplement.md.
+      if (!freezr.app.isWebBased) {
+        params.push('encoding=base64')
+        const jsonUrl = (options.host || '') + '/feps/connections/mail/' +
+          encodeURIComponent(connectionName) + '/messages/' + encodeURIComponent(messageId) +
+          '/attachments/' + encodeURIComponent(attachmentId) + '?' + params.join('&')
+        const writeOptions = options.appToken ? { appToken: options.appToken } : {}
+        const json = await freezr.apiRequest('GET', jsonUrl, null, writeOptions)
+        const u8 = Buffer.from(json.contentBase64 || '', 'base64')
+        if (responseType === 'base64') return json.contentBase64 || ''
+        if (responseType === 'arrayBuffer') return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength)
+        return new Blob([u8], { type: json.mimeType || mimeType || 'application/octet-stream' })
+      }
+
       const url = (options.host || '') + '/feps/connections/mail/' +
         encodeURIComponent(connectionName) + '/messages/' + encodeURIComponent(messageId) +
         '/attachments/' + encodeURIComponent(attachmentId) +
@@ -264,10 +289,12 @@ if (typeof freezr === 'undefined') {
     /**
      * Send a message. Returns `{ success, messageId, threadId }`.
      *
-     * For replies: pass `inReplyTo` (the parent's RFC822 Message-ID — found
-     * in the parent's headers when fetched with getMessage) AND `threadId`
+     * For replies: pass `inReplyTo` (the parent's RFC822 Message-ID — returned
+     * as `messageId` on every listMessages/getMessage row) AND `threadId`
      * (the parent's `threadId`). Both are needed for proper threading on
      * Gmail; Graph also uses `internetMessageId` for In-Reply-To headers.
+     * To preserve the full chain across clients, pass `references` as the
+     * parent's `references` + ' ' + parent's `messageId`.
      *
      * Attachments are inline base64 — keep total payload < ~25 MB or you'll
      * hit provider send limits. Larger sends will need a streamed-upload path
@@ -283,6 +310,8 @@ if (typeof freezr === 'undefined') {
      * @param {string}   [args.bodyHtml]      HTML body. Both bodies → multipart/alternative.
      * @param {Array}    [args.attachments]   [{ filename, mimeType, contentBase64 }]
      * @param {string}   [args.inReplyTo]     Parent's RFC822 Message-ID. Sets In-Reply-To + References.
+     * @param {string}   [args.references]    Full References chain (space-separated
+     *                                        Message-IDs). Defaults to inReplyTo.
      * @param {string}   [args.threadId]      Provider thread id. Pass when replying.
      */
     async sendMessage (args = {}, options = {}) {

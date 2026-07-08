@@ -1171,6 +1171,23 @@ a.panel-cta:visited {
   border-top: none;
 }
 
+.idx-user-prompt {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+  margin: 0 0 5px;
+  padding: 4px 8px;
+  border-left: 2px solid var(--panel-border);
+  background: rgba(127, 127, 127, 0.08);
+  border-radius: 3px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .idx-entry-summary {
   color: var(--muted);
   font-size: 12px;

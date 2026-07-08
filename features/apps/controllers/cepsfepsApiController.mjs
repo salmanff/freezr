@@ -243,7 +243,7 @@ export const createCepsApiController = () => {
       }
     }
 
-    console.log('updateRecord', { rights:res.locals.freezr.rightsToTable, grantedPerms:res.locals.freezr.rightsToTable.grantedPerms, write, options, isCeps, replaceAllFields, isQueryBasedUpdate, dataObjectId, existingRecord })
+    // console.log('updateRecord', { rights:res.locals.freezr.rightsToTable, grantedPerms:res.locals.freezr.rightsToTable.grantedPerms, write, options, isCeps, replaceAllFields, isQueryBasedUpdate, dataObjectId, existingRecord })
 
     const canWrite = res.locals.freezr.rightsToTable.own_record 
       || res.locals.freezr.rightsToTable.write_all
@@ -528,7 +528,11 @@ export const createCepsApiController = () => {
         } else if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || !value) {
           ret[key] = value
         } else if (Array.isArray(value)) {
-          ret[key] = value.map(inner => transformQueryRegexes(inner))
+          // Only recurse into object elements. Primitive elements (e.g. the
+          // strings/numbers in $in / $nin / $all, or $or/$and operands) must be
+          // passed through untouched — recursing a string here would explode it
+          // into a char-indexed object via Object.entries(), corrupting the query.
+          ret[key] = value.map(inner => (inner && typeof inner === 'object') ? transformQueryRegexes(inner) : inner)
         } else if (typeof value === 'object') {
           ret[key] = transformQueryRegexes(value)
         } else {

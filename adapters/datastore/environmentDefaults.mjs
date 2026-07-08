@@ -597,7 +597,7 @@ export async function checkFSAsync (env, options) {
     return returns
 
   } catch (err) {
-    console.warn('🔍 [FS] checkFS error:', { currentTest, err: err?.message })
+    console.warn('🔍 [FS] checkFS error:', { currentTest, err })
     const toSend = { checkpassed: false, resource: 'FS', err, failedtest: currentTest, warnings }
     if (options && options.getRefreshToken && userAppFS && userAppFS.credentials) {
       toSend.refreshToken = userAppFS.credentials.refreshToken

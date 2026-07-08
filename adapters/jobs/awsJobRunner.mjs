@@ -16,7 +16,8 @@
 
 import {
   LambdaClient, LogType, InvokeCommand, CreateFunctionCommand, UpdateFunctionCodeCommand,
-  GetFunctionCommand, DeleteFunctionCommand, Architecture, PackageType, Runtime
+  UpdateFunctionConfigurationCommand, GetFunctionCommand, DeleteFunctionCommand,
+  Architecture, PackageType, Runtime
 } from '@aws-sdk/client-lambda'
 import { IAMClient, CreateRoleCommand, GetRoleCommand } from '@aws-sdk/client-iam'
 import { jobFunctionName, normalizeRunResult } from './jobRunner.mjs'
@@ -28,7 +29,47 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 const DEFAULT_REGION = 'eu-central-1'
 const RUNTIME = Runtime.nodejs20x
 const ROLE_NAME = 'freezrLambdaRole'
-const TIMEOUT_SECONDS = 60 // Lambda's own hard ceiling; the per-run maxRuntime is enforced upstream too
+const TIMEOUT_SECONDS = 60 // fallback when a job declares no maxRuntime
+const LAMBDA_MAX_TIMEOUT_SECONDS = 900 // AWS hard ceiling for any function
+// Lambda defaults a new function to 128MB — far too small for jobs that buffer mail bodies +
+// attachments in memory (each attachment is read as a Blob and base64-encoded for the HTTP upload),
+// which OOMs the runtime ("signal: killed"). Default higher; memory also scales the vCPU share, so
+// this speeds jobs up too. Overridable per compute-credential via credentials.memoryMb.
+const DEFAULT_MEMORY_MB = 512
+
+// maxRuntimeMs (a job's declared budget) → a valid Lambda Timeout in whole seconds, clamped to AWS's
+// [1, 900] range. null/invalid falls back to the default.
+function timeoutSecondsFrom (maxRuntimeMs) {
+  const secs = Math.ceil(Number(maxRuntimeMs) / 1000)
+  if (!Number.isFinite(secs) || secs < 1) return TIMEOUT_SECONDS
+  return Math.min(secs, LAMBDA_MAX_TIMEOUT_SECONDS)
+}
+
+// Turn a raw Lambda FunctionError into a clear, actionable message + a stable errorCode the app can
+// branch on. AWS reports OOM/timeout only as cryptic strings ("signal: killed", "Task timed out"),
+// so without this the app just sees noise. Returns { code, message }.
+function describeLambdaError ({ errorType, raw, memoryMb }) {
+  const text = String(raw == null ? '' : raw)
+  const isOOM = errorType === 'Runtime.OutOfMemory' ||
+    /signal:\s*killed|out ?of ?memory|heap out of memory/i.test(text)
+  if (isOOM) {
+    const mem = memoryMb ? (memoryMb + 'MB') : 'its memory limit'
+    return {
+      code: 'OUT_OF_MEMORY',
+      message: 'job ran out of memory (exceeded ' + mem + ' on the serverless function). ' +
+        'Reduce the work per run (smaller batch_size, or strip attachments) or raise the function memory.'
+    }
+  }
+  const isTimeout = errorType === 'Sandbox.Timedout' || /task timed out/i.test(text)
+  if (isTimeout) {
+    return {
+      code: 'TIMEOUT',
+      message: 'job timed out on the serverless function before finishing. ' +
+        'Reduce the work per run (smaller batch_size) or raise the job maxRuntime.'
+    }
+  }
+  return { code: null, message: text || 'job failed on the serverless function' }
+}
 
 export function createAwsJobRunner ({ credentials, jobsDir, lambdaClient = null, iamClient = null } = {}) {
   if (!credentials || !credentials.accessKeyId || !credentials.secretAccessKey) {
@@ -38,7 +79,27 @@ export function createAwsJobRunner ({ credentials, jobsDir, lambdaClient = null,
   const awsCreds = { accessKeyId: credentials.accessKeyId, secretAccessKey: credentials.secretAccessKey }
   const lambda = lambdaClient || new LambdaClient({ region, credentials: awsCreds })
 
+  // memoryMb is a per-run OPTION (threaded from the job via invokeJob), not a credential — falls back
+  // to DEFAULT_MEMORY_MB. Resolved once here so deploy() and the error path agree.
+  const resolveMemoryMb = (m) => (Number(m) > 0 ? Number(m) : DEFAULT_MEMORY_MB)
+
   const fnName = ({ ownerId, app, name }) => jobFunctionName({ ownerId, appName: app, jobName: name })
+
+  // After UpdateFunctionCode the function is briefly "InProgress" and a config update fails with
+  // ResourceConflictException — retry a few times so memory/timeout still get pushed on existing fns.
+  async function updateConfigWithRetry (functionName, config) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await lambda.send(new UpdateFunctionConfigurationCommand({ FunctionName: functionName, ...config }))
+        return
+      } catch (e) {
+        const transient = e && (e.name === 'ResourceConflictException' ||
+          /update is in progress|in progress|currently in the following state/i.test(e.message || ''))
+        if (transient && attempt < 4) { await sleep(2000); continue }
+        throw e
+      }
+    }
+  }
 
   async function functionExists (functionName) {
     try {
@@ -51,20 +112,29 @@ export function createAwsJobRunner ({ credentials, jobsDir, lambdaClient = null,
   }
 
   /** Assemble + zip + create/update the Lambda function. @returns { ref } | { error } */
-  async function deploy ({ ownerId, app, name, jobsDir: jd, handlerSource = null, jobZip = null } = {}) {
+  async function deploy ({ ownerId, app, name, jobsDir: jd, handlerSource = null, jobZip = null, maxRuntimeMs = null, memoryMb = null } = {}) {
     if (!credentials.arnRole) return { error: 'compute credential has no IAM role (arnRole); set one up first' }
     const functionName = fnName({ ownerId, app, name })
+    const timeoutSec = timeoutSecondsFrom(maxRuntimeMs)
+    const memMb = resolveMemoryMb(memoryMb)
     try {
       const { files, tier } = await assembleJobBundle({ app, name, jobsDir: jd || jobsDir, handlerSource, jobZip })
       const zip = zipBundleFiles(files)
       const exists = await functionExists(functionName)
       const verb = exists ? 'UpdateFunctionCode' : 'CreateFunction'
-      console.log('☁️  AWS LAMBDA → ' + verb + ' "' + functionName + '" region=' + region + ' tier=' + tier + ' zip=' + zip.length + 'B (runtime ' + RUNTIME + ', arm64)')
+      console.log('☁️  AWS LAMBDA → ' + verb + ' "' + functionName + '" region=' + region + ' tier=' + tier + ' zip=' + zip.length + 'B (runtime ' + RUNTIME + ', arm64, mem=' + memMb + 'MB, timeout=' + timeoutSec + 's)')
       const t0 = Date.now()
       if (exists) {
         await lambda.send(new UpdateFunctionCodeCommand({
           FunctionName: functionName, ZipFile: zip, Architectures: [Architecture.arm64]
         }))
+        // Keep memory/timeout in sync — a function CREATED before this (or at the old 128MB default)
+        // keeps its original config across code updates, so without this it would keep OOMing.
+        try {
+          await updateConfigWithRetry(functionName, { MemorySize: memMb, Timeout: timeoutSec })
+        } catch (e) {
+          console.log('☁️  AWS LAMBDA ✗ config update (mem/timeout) FAILED "' + functionName + '": ' + (e && (e.message || String(e))))
+        }
       } else {
         await lambda.send(new CreateFunctionCommand({
           FunctionName: functionName,
@@ -74,7 +144,8 @@ export function createAwsJobRunner ({ credentials, jobsDir, lambdaClient = null,
           Runtime: RUNTIME,
           PackageType: PackageType.Zip,
           Architectures: [Architecture.arm64],
-          Timeout: TIMEOUT_SECONDS
+          MemorySize: memMb,
+          Timeout: timeoutSec
         }))
       }
       console.log('☁️  AWS LAMBDA ← ' + verb + ' OK "' + functionName + '" in ' + (Date.now() - t0) + 'ms')
@@ -102,7 +173,7 @@ export function createAwsJobRunner ({ credentials, jobsDir, lambdaClient = null,
    * run-result shape with normalized usage parsed from the REPORT tail.
    * @returns { ok, result, error, errorCode, durationMs, usage, logs }
    */
-  async function invoke ({ ownerId, app, name, baseUrl, token, params = {}, autoDeploy = true, redeploy = false, jobsDir: jd, handlerSource = null, jobZip = null } = {}) {
+  async function invoke ({ ownerId, app, name, baseUrl, token, params = {}, autoDeploy = true, redeploy = false, jobsDir: jd, handlerSource = null, jobZip = null, maxRuntimeMs = null, memoryMb = null } = {}) {
     const startedAt = Date.now()
     const functionName = fnName({ ownerId, app, name })
     try {
@@ -110,11 +181,11 @@ export function createAwsJobRunner ({ credentials, jobsDir, lambdaClient = null,
       // otherwise we only auto-deploy when the function doesn't exist yet.
       if (redeploy) {
         console.log('☁️  AWS LAMBDA: redeploy requested for "' + functionName + '" — pushing latest code before invoke')
-        const d = await deploy({ ownerId, app, name, jobsDir: jd, handlerSource, jobZip })
+        const d = await deploy({ ownerId, app, name, jobsDir: jd, handlerSource, jobZip, maxRuntimeMs, memoryMb })
         if (d.error) return normalizeRunResult({ ok: false, error: 'deploy failed: ' + d.error, durationMs: Date.now() - startedAt })
       } else if (autoDeploy && !await functionExists(functionName)) {
         console.log('☁️  AWS LAMBDA: "' + functionName + '" not found — auto-deploying before invoke')
-        const d = await deploy({ ownerId, app, name, jobsDir: jd, handlerSource, jobZip })
+        const d = await deploy({ ownerId, app, name, jobsDir: jd, handlerSource, jobZip, maxRuntimeMs, memoryMb })
         if (d.error) return normalizeRunResult({ ok: false, error: 'deploy failed: ' + d.error, durationMs: Date.now() - startedAt })
       }
       // CALLED → (token/secret never logged; only the non-sensitive run shape).
@@ -157,8 +228,12 @@ export function createAwsJobRunner ({ credentials, jobsDir, lambdaClient = null,
 
       if (out.FunctionError) {
         // The handler threw inside Lambda — result holds AWS's { errorMessage, errorType, ... }.
-        const msg = (result && (result.errorMessage || result.message)) || out.FunctionError
-        return normalizeRunResult({ ok: false, error: msg, errorCode: out.FunctionError, durationMs: usage.durationMs, usage, logs })
+        // AWS surfaces OOM / timeout only as cryptic strings ("signal: killed", "Task timed out"),
+        // so translate those into a clear, actionable message + a stable errorCode for the app.
+        const raw = (result && (result.errorMessage || result.message)) || out.FunctionError
+        const errorType = result && result.errorType
+        const { code, message } = describeLambdaError({ errorType, raw, memoryMb: usage.memoryMb || resolveMemoryMb(memoryMb) })
+        return normalizeRunResult({ ok: false, error: message, errorCode: code || out.FunctionError, durationMs: usage.durationMs, usage, logs })
       }
       return normalizeRunResult({ ok: true, result, durationMs: usage.durationMs, usage, logs })
     } catch (e) {

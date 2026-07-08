@@ -71,7 +71,8 @@ const parseContextHash = (copyContent) => {
 
 // Ensures the app folder has an up-to-date copy of freezr-context.md.
 // Returns { action: 'created'|'updated'|'uptodate'|'skipped', content?, hash? }.
-const ensureContextDoc = async (appFS) => {
+// Exported for the account Dev tab's "(re)Generate context file for LLMs" button.
+export const ensureContextDoc = async (appFS) => {
   if (!appFS || !appFS.writeToAppFiles) return { action: 'skipped', reason: 'no-appfs' }
 
   let sourceContent

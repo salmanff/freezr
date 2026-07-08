@@ -120,7 +120,7 @@ export async function startupSequence (app, VERSION) {
         fradminAdminFs = await dsManager.getOrInitUserAppFS('fradmin', 'info.freezr.admin', {})
       }
     } catch (err) {
-      flogger.error('checkFS error:', err?.message)
+      flogger.error('checkFS error - startupsequence:', err)
     }
 
     // Step 7: Get IP address

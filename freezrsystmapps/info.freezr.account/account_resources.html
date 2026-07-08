@@ -133,21 +133,76 @@ resources: {
     </div>
 
     <!-- ========================= CONNECTED ACCOUNTS ========================= -->
-    <div class="freezr-card" style="margin-top: 1rem;">
+    <!-- Connection list (full create/edit moved to dedicated pages /connections/new and /connections/edit) -->
+    <div id="connection_table" class="freezr-card" style="margin-top: 1rem;">
       <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
         <h3 style="margin: 0;">Connected Accounts</h3>
-        <a class="freezrButt" href="/connections/new" style="text-decoration: none; line-height: 1.6;">Connect Account</a>
+      </div>
+      <div> 
+        <a class="freezrButt" href="/connections/new" style="text-decoration: none; line-height: 1.6;">Connect a Gmail or Microsoft Account</a>
+        <button class="freezrButt" id="button_addnew_imap">Add IMAP Mailbox</button>
       </div>
       <p class="smallText" style="margin-top: 0.5rem;">
-        Authorize freezr to access external services on your behalf. One OAuth grant
-        per account; the underlying token can be used by multiple system apps
-        (mail today; calendar and contacts in a future release).
+        Authorize freezr to access external services on your behalf. OAuth accounts
+        (Gmail) use "Connect Account"; IMAP mailboxes (Yahoo, iCloud, Fastmail, self-hosted)
+        use "Add IMAP Mailbox" with an app password. The mail app works the same way for both.
       </p>
+      <div id="connectionGridDetails" style="margin-top: 0.5rem;"></div>
     </div>
 
-    <!-- Connection list (full create/edit moved to dedicated pages /connections/new and /connections/edit) -->
-    <div id="connection_table" class="freezr-card">
-      <div id="connectionGridDetails" style="margin-top: 0.5rem;"></div>
+    <!-- IMAP mailbox add overlay (app-password connection — provider 'imap') -->
+    <div id="imap_overlay" class="overlay" style="display: none;">
+      <div class="overlay-content">
+        <button class="overlay-close" id="imap_overlay_close">&times;</button>
+        <h3 id="imapFormTitle">Add IMAP Mailbox</h3>
+        <div style="max-width: 440px;">
+          <p class="smallText" style="margin-top: 0;">
+            Connect a mailbox over IMAP/SMTP using an <b>app password</b> (not your normal
+            login password). For Yahoo: Account Security &rarr; Generate app password.
+            Credentials are encrypted at rest.
+          </p>
+
+          <label class="texttop">Connection name</label>
+          <input type="text" class="input" id="imap_name" placeholder="e.g. yahooHome"/>
+          <p class="smallText">Letters, digits, underscore and dash only. Used by apps to refer to this mailbox.</p>
+
+          <label class="texttop">Email address</label>
+          <input type="email" class="input" id="imap_email" placeholder="me@yahoo.com"/>
+
+          <label class="texttop">App password</label>
+          <input type="password" class="input" id="imap_pass" placeholder="app password"/>
+
+          <label class="texttop">Provider preset</label>
+          <select class="input" id="imap_preset">
+            <option value="yahoo">Yahoo</option>
+            <option value="icloud">iCloud</option>
+            <option value="fastmail">Fastmail</option>
+            <option value="gmail">Gmail (IMAP)</option>
+            <option value="other">Other / custom</option>
+          </select>
+          <p class="smallText">Fills the server fields below. Pick "Other" to enter them manually.</p>
+
+          <label class="texttop">IMAP host</label>
+          <input type="text" class="input" id="imap_host" placeholder="imap.mail.yahoo.com"/>
+          <label class="texttop">IMAP port</label>
+          <input type="text" class="input" id="imap_port" placeholder="993" value="993"/>
+
+          <label class="texttop">SMTP host</label>
+          <input type="text" class="input" id="smtp_host" placeholder="smtp.mail.yahoo.com"/>
+          <label class="texttop">SMTP port</label>
+          <input type="text" class="input" id="smtp_port" placeholder="465" value="465"/>
+
+          <label class="texttop">Access</label>
+          <select class="input" id="imap_access">
+            <option value="readwrite">Read &amp; write (send, mark read, move, delete)</option>
+            <option value="read">Read only</option>
+          </select>
+
+          <div class="button-row" style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem;">
+            <button class="freezrButt" id="button_imapSave">Save</button>
+          </div>
+        </div>
+      </div>
     </div>
 
   </div>

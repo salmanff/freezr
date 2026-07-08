@@ -106,7 +106,11 @@ const renderHistoryEntry = (entry) => {
   const usageHtml = usageParts.length > 0
     ? `<div class="idx-entry-usage">${usageParts.join(' · ')}</div>`
     : ''
+  const promptHtml = entry.userPrompt
+    ? `<div class="idx-user-prompt" title="${escHtml(entry.userPrompt)}">${escHtml(entry.userPrompt)}</div>`
+    : ''
   return `<div class="idx-entry">
+    ${promptHtml}
     <div class="idx-entry-summary">${escHtml(label)}</div>
     ${detailHtml}
     <div class="idx-entry-meta">
@@ -167,7 +171,10 @@ const renderHistoryTab = (history) => {
         ? `<div class="idx-entry-usage">${usageParts.join(' · ')}</div>`
         : ''
 
-      const hasExpandableContent = hasFiles || usageHtml || detailHtml
+      const promptHtml = entry.userPrompt
+        ? `<div class="idx-user-prompt" title="${escHtml(entry.userPrompt)}">${escHtml(entry.userPrompt)}</div>`
+        : ''
+      const hasExpandableContent = hasFiles || usageHtml || detailHtml || promptHtml
       if (hasExpandableContent) {
         const extAttr = entry.action === 'external_change' ? ' data-external="1"' : ''
         const filesHtml = hasFiles
@@ -185,6 +192,7 @@ const renderHistoryTab = (history) => {
           </div>
           <div class="idx-group-children idx-group-collapsed">
             <div class="idx-entry">
+              ${promptHtml}
               ${detailHtml}
               ${filesHtml ? `<div class="idx-files-changed">${filesHtml}</div>` : ''}
               ${usageHtml}

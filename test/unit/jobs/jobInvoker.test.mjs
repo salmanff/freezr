@@ -78,6 +78,24 @@ describe('invokeJob — location branching', function () {
     expect(captured.baseUrl).to.equal(null)
   })
 
+  it('CLOUD is notRunnable when the callback URL is a localhost address (provably unreachable from the cloud)', async function () {
+    // The real-world trap: a dev server with serverless_callback_url=http://localhost:3000 burned
+    // one doomed Lambda invocation per schedule tick, each dying on its first freezr.* call with
+    // nothing written back anywhere. Must refuse BEFORE deploying/invoking, as a 'waiting' reason.
+    let invoked = false
+    const fakeRunner = { invoke: async () => { invoked = true; return { ok: true, result: {}, durationMs: 1, usage: {} } } }
+    for (const baseUrl of ['http://localhost:3000', 'https://127.0.0.1', 'http://[::1]:8080/x']) {
+      const out = await invokeJob({ ...base, hint: 'cloud', trustedJobsDb: trustedDb(false), resourcesDb: computeDb(true), localRunner: localRunner(), baseUrl, makeCloudRunner: () => fakeRunner })
+      expect(out.ok, baseUrl).to.be.false
+      expect(out.notRunnable, baseUrl).to.be.true
+      expect(out.error, baseUrl).to.match(/localhost address/)
+    }
+    expect(invoked).to.be.false // refused up front — no deploy, no invoke
+    // a NON-loopback host is untouched by the guard
+    const ok = await invokeJob({ ...base, hint: 'cloud', trustedJobsDb: trustedDb(false), resourcesDb: computeDb(true), localRunner: localRunner(), baseUrl: 'https://my.freezr.example', makeCloudRunner: () => fakeRunner })
+    expect(ok.ok, JSON.stringify(ok)).to.be.true
+  })
+
   it('CLOUD runs from the user-app source even when NOT admin-trusted (no users_jobs copy)', async function () {
     let captured
     const fakeRunner = { invoke: async (args) => { captured = args; return { ok: true, result: { cloud: true }, durationMs: 1, usage: {} } } }

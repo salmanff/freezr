@@ -93,7 +93,7 @@ export function createInternalApiClient ({ dsManager, freezrPrefs, freezrStatus,
   // Run a synthetic request through the in-process app; resolve with { statusCode, body, rawText }.
   // `deadline` (absolute ms) propagates a composition time budget: a job calling another job carries
   // the OUTERMOST job's deadline so the whole tree stays within the top job's maxRuntime.
-  const runThroughApp = (app, { method, fullPath, body, token, flogger, deadline }) => {
+  const runThroughApp = (app, { method, fullPath, body, token, flogger, deadline, job }) => {
     return new Promise((resolve, reject) => {
       let settled = false
       const session = {}
@@ -106,7 +106,14 @@ export function createInternalApiClient ({ dsManager, freezrPrefs, freezrStatus,
         body: body || {},
         headers,
         cookies: {},
-        session
+        session,
+        // TRUST MARKER — set ONLY here, by server code, on a req this file constructs.
+        // It can never arrive from a client: Express puts client input in headers/body/query,
+        // never as a top-level req property, and this synthetic req is dispatched through a
+        // private in-process app that no socket is ever bound to. Middleware may therefore
+        // treat it as proof that the caller is admin-trusted job code running on this machine
+        // (see features/connections/fs/middleware/fsContext.mjs). Do not derive it from input.
+        freezrInProcessJob: (job && typeof job === 'object') ? { ...job } : true
       }
       const res = makeRes(session, flogger)
       const finish = () => {
@@ -135,7 +142,7 @@ export function createInternalApiClient ({ dsManager, freezrPrefs, freezrStatus,
   // Throws on status >= 400 (mirrors what an HTTP client sees). Used by the selftest verb methods.
   const request = async ({ method, path, body = {}, token, ctx = {} }) => {
     const app = await getApp()
-    const captured = await runThroughApp(app, { method, fullPath: path, body, token, flogger: ctx.flogger })
+    const captured = await runThroughApp(app, { method, fullPath: path, body, token, flogger: ctx.flogger, job: ctx.job })
     if (captured.statusCode >= 400) {
       const err = new Error(captured.body?.error || captured.body?.message || ('API error ' + captured.statusCode))
       err.statusCode = captured.statusCode
@@ -150,7 +157,7 @@ export function createInternalApiClient ({ dsManager, freezrPrefs, freezrStatus,
   // faithful Response (json()/text()/body.getReader()) so the browser client's streaming reader works.
   const requestRaw = async ({ method, path, body = {}, token, ctx = {} }) => {
     const app = await getApp()
-    const captured = await runThroughApp(app, { method, fullPath: path, body, token, flogger: ctx.flogger, deadline: ctx.deadline })
+    const captured = await runThroughApp(app, { method, fullPath: path, body, token, flogger: ctx.flogger, deadline: ctx.deadline, job: ctx.job })
     const bodyText = (captured.rawText !== undefined && captured.rawText !== null)
       ? captured.rawText
       : (captured.body !== undefined ? safeStringify(captured.body) : '')

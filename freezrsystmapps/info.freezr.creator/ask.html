@@ -1,0 +1,114 @@
+<div class="ask-root">
+    <div class="ask-topbar">
+        <div class="ask-topbar-left">
+            <button id="askMenuToggle" class="ask-btn ask-btn-ghost ask-ask-btn" title="Your ask-apps" type="button">ask</button>
+            <h1 id="askMainTitle">... your apps</h1>
+            <span id="askTitleBox" class="ask-title-box ask-hidden"></span>
+        </div>
+        <div class="ask-topbar-actions">
+            <button id="askMsgTopBtn" class="ask-btn ask-btn-ghost ask-hidden" type="button" title="Messages shared with you">✉️ Messages</button>
+            <span id="askCost" class="ask-cost ask-hidden" title="Total LLM cost for this app"></span>
+        </div>
+    </div>
+
+    <div id="askHistory" class="ask-history ask-hidden">
+        <div class="ask-history-header">
+            <button id="askNewBtn" class="ask-btn ask-btn-ok" type="button">＋ New Ask</button>
+            <button id="askHistoryClose" class="ask-iconbtn" title="Close" aria-label="Close" type="button">✕</button>
+        </div>
+        <div id="askHistoryList" class="ask-history-list"><p class="ask-history-empty">No ask-apps yet.</p></div>
+    </div>
+
+    <!-- LANDING: one big prompt to start -->
+    <div id="askLanding" class="ask-landing">
+        <div class="ask-landing-inner">
+            <h2>What would you like to ask your apps?</h2>
+            <form id="askLandingForm" class="ask-landing-form">
+                <textarea id="askLandingInput" class="ask-grow" rows="3" placeholder="e.g. group my bookmarks by subject" aria-label="Your question"></textarea>
+                <div class="ask-compose-actions">
+                    <div class="ask-compose-tools">
+                        <button id="askLandingMic" class="ask-mic-btn ask-hidden" type="button" title="Hold to dictate." aria-label="Hold to dictate">🎤</button>
+                        <button id="askLandingWebToggle" class="ask-web-toggle" type="button" aria-pressed="false" title="Web search is OFF. Turn it on to let the assistant look things up (adds cost to every message).">🌐</button>
+                    </div>
+                    <button class="ask-btn ask-compose-send" type="submit">Ask</button>
+                </div>
+            </form>
+            <button id="askLandingSettingsToggle" class="ask-iconbtn ask-landing-settings-toggle" type="button">⚙️ Settings</button>
+
+            <!-- Model + preferences. Shown here on a new app; moves into the "Ask Settings" tab in the workspace. -->
+            <div id="askSettings" class="ask-settings ask-hidden">
+                <label for="askModelSelect">Model</label>
+                <select id="askModelSelect"><option value="">Default</option></select>
+                <label class="ask-check">
+                    <input type="checkbox" id="askConfirmApp" /> Ask me to confirm the app before building
+                </label>
+                <label for="askMaxProbes">Data checks the assistant may run per request</label>
+                <select id="askMaxProbes">
+                    <option value="0">0 — never look at data</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="5">5</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- WORKSPACE: two panels, shown after the first question -->
+    <div id="askPanels" class="ask-panels ask-hidden">
+        <div class="ask-left">
+            <h3 class="ask-chat-title">Chat</h3>
+            <div id="askChat" class="ask-chat"></div>
+
+            <div id="askControls" class="ask-controls">
+                <div id="askAppCard" class="ask-card ask-hidden">
+                    <h3>Which app holds this data?</h3>
+                    <div class="ask-approw">
+                        <select id="askAppSelect" aria-label="App to use"></select>
+                        <button id="askAddApp" class="ask-iconbtn" type="button" title="Add another app">＋</button>
+                        <button id="askBuildBtn" class="ask-btn" type="button">Build →</button>
+                    </div>
+                </div>
+
+                <div id="askPermCard" class="ask-card ask-hidden">
+                    <h3>Permissions needed</h3>
+                    <div id="askPermList"></div>
+                </div>
+            </div>
+
+            <form id="askForm" class="ask-ask">
+                <textarea id="askInput" class="ask-grow" rows="3" placeholder="Ask a follow-up or change…" aria-label="Your question"></textarea>
+                <div class="ask-compose-actions">
+                    <div class="ask-compose-tools">
+                        <button id="askMic" class="ask-mic-btn ask-hidden" type="button" title="Hold to dictate." aria-label="Hold to dictate">🎤</button>
+                        <button id="askWebToggle" class="ask-web-toggle" type="button" aria-pressed="false" title="Web search is OFF. Turn it on to let the assistant look things up (adds cost to every message).">🌐</button>
+                    </div>
+                    <button id="askSubmit" class="ask-btn ask-compose-send" type="submit">Send</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="ask-right">
+            <div class="ask-tabs" id="askTabs">
+                <button class="ask-tab active" id="askTabBtnAsk" data-tab="ask" type="button">Ask Settings</button>
+                <button class="ask-tab ask-hidden" id="askTabBtnApp" data-tab="app" type="button">App Settings</button>
+                <button class="ask-tab ask-hidden" id="askTabBtnLearn" data-tab="learn" type="button">Learnings</button>
+                <button class="ask-tab ask-hidden" id="askTabBtnShare" data-tab="share" type="button">Share</button>
+                <button class="ask-tab ask-hidden" id="askTabBtnInbox" data-tab="inbox" type="button">Messages</button>
+                <button class="ask-tab" id="askTabBtnLaunch" data-tab="launch" type="button">Launch</button>
+            </div>
+            <div class="ask-tab-panels">
+                <div class="ask-tab-panel" id="askTabAsk"></div>
+                <div class="ask-tab-panel ask-hidden" id="askTabApp"></div>
+                <div class="ask-tab-panel ask-hidden" id="askTabLearn"></div>
+                <div class="ask-tab-panel ask-hidden" id="askTabShare"></div>
+                <div class="ask-tab-panel ask-hidden" id="askTabInbox"></div>
+                <div class="ask-tab-panel ask-hidden" id="askTabLaunch">
+                    <div id="askActivity" class="ask-activity">
+                        <div id="askActivityEmpty" class="ask-activity-empty">Your answer page will appear here.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

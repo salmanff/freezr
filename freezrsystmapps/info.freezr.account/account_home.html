@@ -19,6 +19,7 @@ freezr Account Home
         <a id="publicEntry" href="/">Public Home</a>
         <a id="freezer_admin_butt" href="/admin/home">Admin</a>
         <a href="/account/settings">Account Settings</a>
+        <a href="/account/resourceusage">Usage</a>
         <a href="/account/contacts">Contacts</a>
         <a href="/account/logout">Log Out</a>
     </nav>
@@ -33,7 +34,10 @@ freezr Account Home
         <div id="errorBox" class="errorBox"></div>
 
         <div class="freezr-card freezr-hide-on-resource-error" id="app_list">
-            <a href="/creator" class="freezrButt" style="float: right;">Create An App</a>
+            <div style="float: right;">
+                <a href="/creator/ask" class="freezrButt">Ask your Apps</a>
+                <a href="/creator" class="freezrButt" style="margin-left: 0.5rem;">App Creator</a>
+            </div>
 
             <h2 style="margin-bottom: 1rem;">
                 {{#user_apps.length }}You have {{ user_apps.length }} installed apps. 

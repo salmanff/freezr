@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url'
 import { unzip, unzipSync } from 'fflate'
 
 // Import new modular helpers - use ES module imports for new .mjs files
-import { validAppName, isSystemApp, FREEZR_USER_FILES_DIR } from '../../../common/helpers/config.mjs'
+import { validAppName, isSystemApp, isAskAppName, FREEZR_USER_FILES_DIR } from '../../../common/helpers/config.mjs'
 import { startsWith, endsWith } from '../../../common/helpers/utils.mjs'
 
 // Utility function to ensure directory exists
@@ -491,6 +491,40 @@ const checkManifest = (manifest, appName, appVersion) => {
       message: `App name '${manifest.identifier}' is not allowed`,
       severity: 'error',
       appName: manifest.identifier
+    })
+  }
+
+  // Ask-app name <-> app_type consistency: a name in the reserved ask-app. namespace should
+  // declare app_type:'askapp', and vice versa. Non-fatal — the installer still infers app_type
+  // from the name — but flags an authoring mismatch. See freezr_askapps_plan_v1.md.
+  if (manifest.identifier) {
+    const nameIsAskApp = isAskAppName(manifest.identifier)
+    const typeIsAskApp = manifest.app_type === 'askapp'
+    if (nameIsAskApp && !typeIsAskApp) {
+      warnings.push({
+        code: 'manifest_askapp_name_without_type',
+        message: `App name '${manifest.identifier}' is in the ask-app namespace but manifest app_type is not 'askapp'`,
+        severity: 'warning',
+        appName: manifest.identifier
+      })
+    } else if (typeIsAskApp && !nameIsAskApp) {
+      warnings.push({
+        code: 'manifest_askapp_type_without_name',
+        message: `Manifest app_type is 'askapp' but app name '${manifest.identifier}' is not in the ask-app namespace`,
+        severity: 'warning',
+        appName: manifest.identifier
+      })
+    }
+  }
+
+  // Ask-apps should carry authorship (main_author) so shared/sent-back copies keep a version lineage.
+  // Advisory only — legacy or hand-authored ask-apps without it still install. See
+  // freezr_askapp_sharing_summary.md §3 (Manifest authorship schema).
+  if (manifest.app_type === 'askapp' && !(manifest.authorship && manifest.authorship.main_author)) {
+    warnings.push({
+      code: 'manifest_askapp_no_authorship',
+      message: 'Ask-app manifest has no authorship.main_author; version lineage across shares will be incomplete',
+      severity: 'warning'
     })
   }
 

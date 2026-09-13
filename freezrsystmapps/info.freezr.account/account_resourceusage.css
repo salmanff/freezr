@@ -1,0 +1,239 @@
+/* freezr — Resource Usage page (LLM + Storage tabs)
+   Tab chrome itself comes from account_home.css (.tab / .tablinks / .tabcontent),
+   which both the account and admin versions of this page already load. */
+
+.fz-usage-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.1rem;
+}
+.fz-usage-toolbar label {
+  font-size: 0.8rem;
+  color: var(--freezr-text-muted);
+  margin-right: 0.35rem;
+}
+.fz-usage-toolbar select {
+  font-size: 0.9rem;
+  padding: 0.35rem 0.5rem;
+  color: var(--freezr-text);
+  background: var(--freezr-card-bg);
+  border: 1px solid var(--freezr-border);
+  border-radius: var(--freezr-radius-sm);
+}
+
+/* ===== headline stats ===== */
+.fz-stat-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+.fz-stat {
+  background: var(--freezr-bg);
+  border: 1px solid var(--freezr-border);
+  border-radius: var(--freezr-radius-sm);
+  padding: 0.7rem 0.9rem;
+}
+.fz-stat-value {
+  font-size: 1.55rem;
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--freezr-text);
+  font-variant-numeric: tabular-nums;
+}
+.fz-stat-value.fz-accent { color: var(--freezr-accent); }
+.fz-stat-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--freezr-text-muted);
+  margin-top: 0.2rem;
+}
+.fz-stat-sub {
+  font-size: 0.78rem;
+  color: var(--freezr-text-muted);
+  margin-top: 0.15rem;
+}
+
+/* ===== section headings and notes ===== */
+.fz-section-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--freezr-text);
+  margin: 1.5rem 0 0.6rem;
+}
+.fz-note {
+  font-size: 0.8rem;
+  color: var(--freezr-text-muted);
+  margin: 0.15rem 0;
+}
+.fz-note-warn { color: #b45309; }
+.fz-user-label {
+  font-weight: 600;
+  color: var(--freezr-accent);
+  margin-bottom: 0.75rem;
+}
+
+/* ===== per-day bars ===== */
+.fz-daybars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 64px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.fz-daybar {
+  flex: 1 1 auto;
+  min-width: 4px;
+  min-height: 1px;
+  background: var(--freezr-accent);
+  opacity: 0.7;
+  border-radius: 2px 2px 0 0;
+  transition: opacity 0.15s;
+}
+.fz-daybar:hover { opacity: 1; }
+.fz-daybar.fz-daybar-empty {
+  background: var(--freezr-border);
+  opacity: 1;
+}
+.fz-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: var(--freezr-text-muted);
+  margin-top: 0.2rem;
+}
+
+/* ===== per-key cards ===== */
+.fz-keys {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+  gap: 0.75rem;
+}
+.fz-key {
+  border: 1px solid var(--freezr-border);
+  border-radius: var(--freezr-radius-sm);
+  background: var(--freezr-card-bg);
+  padding: 0.7rem 0.85rem;
+}
+.fz-key-name {
+  font-weight: 600;
+  color: var(--freezr-text);
+  overflow-wrap: anywhere;
+}
+.fz-key-provider {
+  font-size: 0.76rem;
+  color: var(--freezr-text-muted);
+}
+.fz-key-cost {
+  font-size: 1.15rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  margin-top: 0.3rem;
+}
+.fz-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: var(--freezr-border);
+  overflow: hidden;
+  margin-top: 0.45rem;
+}
+.fz-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--freezr-accent);
+}
+.fz-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.5rem;
+}
+.fz-chip {
+  font-size: 0.72rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: var(--freezr-bg);
+  border: 1px solid var(--freezr-border);
+  color: var(--freezr-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== tables (shared by both tabs) ===== */
+.fz-table-wrap { overflow-x: auto; }
+table.fz-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+table.fz-table th {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--freezr-text-muted);
+  text-align: right;
+  white-space: nowrap;
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid var(--freezr-border);
+}
+table.fz-table td {
+  padding: 0.45rem 0.5rem;
+  text-align: right;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--freezr-border);
+  font-variant-numeric: tabular-nums;
+  color: var(--freezr-text);
+}
+table.fz-table th.fz-l, table.fz-table td.fz-l {
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+table.fz-table tfoot td {
+  font-weight: 600;
+  border-bottom: none;
+  border-top: 1px solid var(--freezr-border);
+}
+tr.fz-clickable { cursor: pointer; }
+tr.fz-clickable:hover td { background: var(--freezr-bg); }
+.fz-caret {
+  display: inline-block;
+  width: 0.85em;
+  color: var(--freezr-text-muted);
+  font-size: 0.8em;
+}
+tr.fz-detail > td {
+  background: var(--freezr-bg);
+  text-align: left;
+  font-size: 0.83rem;
+  color: var(--freezr-text-muted);
+  padding: 0.4rem 0.75rem 0.55rem 1.5rem;
+}
+.fz-detail-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 0.12rem 0;
+}
+.fz-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+/* ===== empty / error states ===== */
+.fz-empty-state {
+  text-align: center;
+  color: var(--freezr-text-muted);
+  padding: 2.5rem 1rem;
+}
+.fz-empty-state .fz-empty-title {
+  font-weight: 600;
+  color: var(--freezr-text);
+  margin-bottom: 0.3rem;
+}
+.fz-pane-body { position: relative; min-height: 140px; }

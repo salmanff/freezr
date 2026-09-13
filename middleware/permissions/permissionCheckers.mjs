@@ -101,8 +101,9 @@ export const tokenUserHasFullAppApiRights = (req, res, next) => {
   // TODO - HANDLE PERMISSIONS BETTER
   if (tokenInfo.app_name === targetApp // target app is the same as the requestor app
     || (tokenInfo.app_name === 'info.freezr.account' && targetApp !== 'info.freezr.admin') // account has right to get non admin files
+    || (tokenInfo.app_name === 'info.freezr.creator' && targetApp !== 'info.freezr.admin') // creator builds/manages apps (incl. ask-apps) so may read their manifest + permission status
     // Add other app to app permissions here
-    ) { 
+    ) {
 
     res.locals.freezr.permGiven = true
     next()
@@ -160,6 +161,38 @@ export const isLoggedInAccountAppRequest = (req, res, next) => {
 
   res.locals.freezr.permGiven = true
   // Validation passed, continue to next middleware
+  next()
+}
+
+/**
+ * Like isLoggedInAccountAppRequest but ALSO accepting the built-in connections
+ * app. Used only by the connection-management endpoints (connection_disconnect,
+ * connection_set_live): /connections/edit runs as info.freezr.connections and is
+ * the natural place to manage a connection, but its token failed the
+ * account-app-only check — the long-standing reason Disconnect 403'd from that
+ * page. Same logged-in + session-match rules as the account variant.
+ */
+export const isLoggedInConnectionMgmtRequest = (req, res, next) => {
+  const tokenInfo = res.locals?.freezr?.tokenInfo
+  if (!tokenInfo) {
+    return sendFailure(res, 'Token info not found', 'permissionCheckers.isLoggedInConnectionMgmtRequest', 401)
+  }
+  if (!tokenInfo.logged_in) {
+    return sendFailure(res, 'Token is not for a logged-in user', 'permissionCheckers.isLoggedInConnectionMgmtRequest', 401)
+  }
+  const ALLOWED = ['info.freezr.account', 'info.freezr.creator', 'info.freezr.connections']
+  if (!ALLOWED.includes(tokenInfo.app_name)) {
+    return sendFailure(res, 'Request must be from the account, creator or connections app', 'permissionCheckers.isLoggedInConnectionMgmtRequest', 403)
+  }
+  const loggedInUserId = req.session?.logged_in_user_id
+  if (!loggedInUserId) {
+    return sendFailure(res, 'User not logged in', 'permissionCheckers.isLoggedInConnectionMgmtRequest', 401)
+  }
+  if (tokenInfo.requestor_id !== loggedInUserId) {
+    console.warn('❌ auth error - user ID mismatch', { tokenInfo, loggedInUserId })
+    return sendFailure(res, new Error('auth error - user ID mismatch'), 'permissionCheckers.isLoggedInConnectionMgmtRequest', 403)
+  }
+  res.locals.freezr.permGiven = true
   next()
 }
 

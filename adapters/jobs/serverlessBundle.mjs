@@ -46,14 +46,15 @@ const jobHandler = job.handler || job.default
 
 export const handler = async (event) => {
   if (typeof jobHandler !== 'function') throw new Error('job does not export a handler function')
-  const { baseUrl, token, params = {}, appName } = event || {}
+  const { baseUrl, token, params = {}, appName, userId = null } = event || {}
   // baseUrl/token are NOT required: a job that never calls freezr.* (e.g. fetches an external URL
   // and returns a result) runs fine without a callback URL. Only freezr.* calls need them — the
   // transport surfaces a clear error if they're used without a URL.
   // serverAddress stays '' so the client emits RELATIVE paths ('/ceps/...'); baseUrl lives only
   // in the transport (which prepends it once). Setting both would double the URL.
+  // userId rides in freezrMeta so job code using freezrMeta.userId (and messages.send) works.
   const transport = makeHttpTransport({ baseUrl, token })
-  const freezr = buildFreezrClient({ transport, freezrMeta: { appName, appToken: token }, sources: SOURCES })
+  const freezr = buildFreezrClient({ transport, freezrMeta: { appName, appToken: token, userId }, sources: SOURCES })
   return await jobHandler(freezr, params)
 }
 `

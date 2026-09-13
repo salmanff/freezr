@@ -28,6 +28,12 @@
       "script_files": ["calendar.js"],
       "page_title": "Calendar (Connections)"
     },
+    "messaging": {
+      "html_file": "messaging.html",
+      "css_files": ["/app/info.freezr.public/public/freezr_style.css", "messaging.css"],
+      "script_files": ["messaging.js"],
+      "page_title": "Messaging (Connections)"
+    },
     "new": {
       "html_file": "new.html",
       "css_files": ["/app/info.freezr.public/public/freezr_style.css"],
@@ -60,6 +66,13 @@
       "name": "calendar_readwrite",
       "type": "use_calendar",
       "description": "Read and write events on your connected calendars.",
+      "connection_names": ["*"],
+      "scopes": ["read", "write"]
+    },
+    {
+      "name": "messaging_readwrite",
+      "type": "use_messaging",
+      "description": "Read and send messages (and mark them read) via your connected messaging accounts.",
       "connection_names": ["*"],
       "scopes": ["read", "write"]
     }

@@ -34,7 +34,10 @@ export const getAdminPageManifest = (params, freezrStatus, freezrPrefs) => {
       page_url: 'home.html',
       app_name: 'info.freezr.admin',
       script_files: [],
-      modules: []
+      modules: [],
+      initial_query_func: function () {
+        return freezrPrefs // for {{freezrVersion}} in home.html
+      }
     },
 
     list_users: {
@@ -127,6 +130,18 @@ export const getAdminPageManifest = (params, freezrStatus, freezrPrefs) => {
       modules: []
     },
 
+    sockets: {
+      page_title: 'Messaging Sockets (freezr Admin)',
+      css_files: [
+        '/app/info.freezr.public/public/freezr_style.css',
+        '/app/info.freezr.account/account_home.css'
+      ],
+      page_url: 'sockets.html',
+      app_name: 'info.freezr.admin',
+      script_files: ['sockets.js'],
+      modules: []
+    },
+
     register: {
       page_title: 'Register User (freezr Admin)',
       css_files: [
@@ -186,7 +201,8 @@ export const getAdminPageManifest = (params, freezrStatus, freezrPrefs) => {
       page_title: 'Resource Usage (freezr Admin)',
       css_files: [
         '/app/info.freezr.public/public/freezr_style.css',
-        '/app/info.freezr.account/account_home.css'
+        '/app/info.freezr.account/account_home.css',
+        '/app/info.freezr.account/account_resourceusage.css'
       ],
       page_url: 'resourceusage.html',
       app_name: 'info.freezr.admin',

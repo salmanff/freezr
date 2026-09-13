@@ -13,6 +13,7 @@
 //     The identity excludes node_modules, so the check is cheap regardless of dependency size.
 
 import { createHash } from 'node:crypto'
+import { unzipSync } from 'fflate'
 import { looksLikeZip, looksLikeJobSource } from '../../../adapters/jobs/serverlessBundle.mjs'
 
 const isTextStub = (s) => typeof s === 'string' && s.trimStart()[0] === '<' // HTML/blank error stub
@@ -38,12 +39,31 @@ export async function loadJobCodeFromAppFS (appFS, jobName) {
 }
 
 /**
- * The job's identity inputs for the deploy hash: its source + dependency manifest (index.mjs +
- * package.json + lockfile TEXT). Deliberately NOT the installed node_modules tree — a dep change is
- * reflected in package.json/lockfile, so this stays cheap. Missing/stub parts contribute ''.
+ * The job's identity inputs for the trust/deploy hash. Preferred source: the per-job bundle
+ * (jobs/<name>.zip) → a sorted listing of EVERY file's content digest, excluding node_modules
+ * (a dep change still shows in the bundled package.json/lockfile entries, so this stays cheap to
+ * compare while the installed tree stays out of it). Covering the whole folder is what makes
+ * SIBLING modules (./reconcile.js, …) count: editing ANY job file changes the identity, so the
+ * admin-trust gate and stale-deploy detection can't be sidestepped by a change outside index.mjs.
+ * Entry CONTENTS are hashed (not the zip bytes, which vary per rebuild), so identical code always
+ * yields the identical identity. Fallback when there's no usable bundle: the legacy
+ * index.mjs + package.json + lockfile text concat (Tier-1 single-file jobs have no siblings).
  * @returns {Promise<string>}
  */
 export async function loadJobIdentitySource (appFS, jobName) {
+  try {
+    const zip = await appFS.readAppFile('jobs/' + jobName + '.zip', { doNotToString: true })
+    if (looksLikeZip(zip)) {
+      const entries = unzipSync(zip instanceof Uint8Array ? zip : new Uint8Array(zip))
+      const lines = []
+      for (const [rel, bytes] of Object.entries(entries)) {
+        if (rel.endsWith('/') || rel.startsWith('__MACOSX')) continue
+        if (rel.startsWith('node_modules/') || rel.includes('/node_modules/')) continue
+        lines.push(rel + ':' + createHash('sha256').update(bytes).digest('hex'))
+      }
+      if (lines.length) return lines.sort().join('\n')
+    }
+  } catch (e) { /* missing/corrupt bundle → legacy text identity below */ }
   const read = async (p) => {
     try { const c = await appFS.readAppFile(p, {}); return (typeof c === 'string' && !isTextStub(c)) ? c : '' } catch (e) { return '' }
   }
@@ -56,9 +76,10 @@ export async function loadJobIdentitySource (appFS, jobName) {
 }
 
 /**
- * A stable content identity of a job's CODE (index.mjs + package.json/lockfile text — deterministic,
- * not the zip bytes which aren't). Used by admin-trust to detect when a re-installed job's code has
- * changed so the trust can be disabled until re-reviewed. Returns a hex hash, or null if no code.
+ * A stable content identity of a job's CODE (every bundle file except node_modules; legacy text
+ * fallback for single-file jobs — see loadJobIdentitySource). Used by admin-trust to detect when a
+ * re-installed job's code has changed so the trust can be disabled until re-reviewed. Returns a hex
+ * hash, or null if no code.
  */
 export async function jobCodeIdentity (appFS, jobName) {
   const src = await loadJobIdentitySource(appFS, jobName)

@@ -7,8 +7,8 @@ const EDIT_BUT_MSG = "Update Permission Parameters"
 // (freezr_mail_phase1.md §2.9). Both default to off/empty; only relevant if the admin
 // opts in to accept partner requests. Users on this freezr always use whatever credentials
 // they pick at /connections/new — they don't need an admin-side consumer config row.
-const PARAM_LIST = ['type','name','key','secret','enabled','redirecturi','federation_enabled','partner_redirect_uris']
-const PARAM_OPTIONALS = ['secret','enabled','federation_enabled','partner_redirect_uris']
+const PARAM_LIST = ['type','name','key','secret','appToken','enabled','redirecturi','federation_enabled','partner_redirect_uris']
+const PARAM_OPTIONALS = ['secret','appToken','enabled','federation_enabled','partner_redirect_uris']
 const SUCCESS_MESSAGE = "sucess_write=";
 const UNPLANNED_MESSAGE = "sucess_write=update_unplanned";
 
@@ -109,7 +109,7 @@ var makeOauth = function () {
     return;
   }
   if (!oa_params.key || !oa_params.redirecturi) {
-    showError('Client ID and Redirect URI are required. See freezr_own_google_oauth_setup.md for how to obtain them from Google.');
+    showError('Client ID and Redirect URI are required. See "mail freezr_own_oauth_setup.md" for how to obtain them from Google (Part A) or Microsoft (Part B).');
     return;
   }
 

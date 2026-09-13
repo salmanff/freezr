@@ -135,6 +135,21 @@ export const createOauthApiRoutes = ({ dsManager, freezrPrefs, freezrStatus }) =
   )
   
   /**
+   * POST /oauth/validate_state
+   * Same as GET validate_state below, but takes state/code/accessToken in the
+   * JSON body. Microsoft Entra auth codes are ~2-3KB, which can push a GET
+   * request's headers past proxy/server limits (431 Request Header Fields Too
+   * Large), so the callback page POSTs instead. GET remains for compatibility.
+   */
+  router.post('/validate_state',
+    setupGuard,
+    addOauthDb,
+    addCacheManager,
+    (req, res, next) => { req.params.dowhat = 'validate_state'; next() },
+    oauthApiController.publicApiActions
+  )
+
+  /**
    * GET /oauth/:dowhat
    * Public OAuth operations
    * - get_new_state: Start OAuth flow, returns redirect URL

@@ -7,6 +7,8 @@
     { "value": "upload_pages", "label": "Upload Pages" },
     { "value": "use_llm", "label": "Use LLM" },
     { "value": "use_mail", "label": "Use Mail (Connections)" },
+    { "value": "use_messaging", "label": "Use Messaging (Connections)" },
+    { "value": "socket_connect", "label": "Server-held Socket (admin-admitted)" },
     { "value": "external_scripts", "label": "External Scripts" },
     { "value": "external_fetch", "label": "External Fetch" },
     { "value": "unsafe_eval", "label": "Unsafe Eval" },

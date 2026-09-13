@@ -117,12 +117,24 @@ export class TestAuthHelper {
   }
 
   /**
-   * Get cookie header string for requests
+   * Get cookie header string for requests.
+   *
+   * freezr issues ONE cookie name (`app_token_<userId>`), path-scoped per app, so a real browser
+   * sends the app's own token on each per-app path. This flat cookie jar can't hold more than one
+   * value under that name, so we resolve the app-token cookie to the requested app's stored token
+   * (from the per-app appTokens map). Non-app cookies (e.g. the session cookie) pass through.
+   * @param {string} app - App whose token to send (defaults to the active app)
    * @returns {string} Cookie header value
    */
-  getCookieHeader() {
+  getCookieHeader(app = null) {
+    const appName = app || this.appName
+    const appTokenName = this.userId ? `app_token_${this.userId}` : null
+    const appToken = (this.userId && appName) ? (this.appTokens[this.userId]?.[appName] || null) : null
     return Object.entries(this.cookies)
-      .map(([name, value]) => `${name}=${value}`)
+      .map(([name, value]) => {
+        if (appTokenName && name === appTokenName && appToken) return `${name}=${appToken}`
+        return `${name}=${value}`
+      })
       .join('; ')
   }
 
@@ -668,16 +680,18 @@ export class TestAuthHelper {
    * This is required before making account API calls
    */
   async getAccountToken() {
-    // Visit account home to get the account app token
+    // Visit account home to get the account app token. Store it under the account app key (not the
+    // active app) so later account-guarded calls can resolve the right token via {app: 'info.freezr.account'}.
+    const ACCOUNT_APP = 'info.freezr.account'
     const response = await fetch(`${this.serverUrl}/account/home`, {
       method: 'GET',
       headers: {
-        'Cookie': this.getCookieHeader()
+        'Cookie': this.getCookieHeader(ACCOUNT_APP)
       },
       redirect: 'manual'
     })
-    this.parseCookies(response.headers)
-    
+    this.parseCookies(response.headers, ACCOUNT_APP)
+
     // Follow redirect if needed
     if (response.headers.get('location')) {
       const redirectUrl = response.headers.get('location')
@@ -686,15 +700,15 @@ export class TestAuthHelper {
         const redirectResponse = await fetch(fullUrl, {
           method: 'GET',
           headers: {
-            'Cookie': this.getCookieHeader()
+            'Cookie': this.getCookieHeader(ACCOUNT_APP)
           },
           redirect: 'manual'
         })
-        this.parseCookies(redirectResponse.headers)
+        this.parseCookies(redirectResponse.headers, ACCOUNT_APP)
       }
     }
-    
-    return this.cookies[`app_token_${this.userId}`]
+
+    return this.appTokens[this.userId]?.[ACCOUNT_APP] || this.cookies[`app_token_${this.userId}`]
   }
 
   /**
@@ -814,21 +828,22 @@ export class TestAuthHelper {
    * Get headers for authenticated API requests
    * @returns {object} Headers object with Authorization and Cookie
    */
-  getAuthHeaders() {
-    const token = this.getCurrentAppToken()
-    
+  getAuthHeaders(app = null) {
+    const appName = app || this.appName
+    const token = (this.userId && appName) ? (this.appTokens[this.userId]?.[appName] || null) : this.getCurrentAppToken()
+
     if (!token) {
       console.warn('\n⚠️  Warning: No app token available for this user/app combination!')
       console.warn(`   User: ${this.userId || 'none'}`)
-      console.warn(`   App: ${this.appName || 'none'}`)
+      console.warn(`   App: ${appName || 'none'}`)
       console.warn(`   Available tokens:`, JSON.stringify(this.appTokens, null, 2))
       console.warn('   MAKE SURE THAT YOU ARE RUNNING npm run devtest\n')
     }
-    
+
     return {
       'Content-Type': 'application/json',
       'Authorization': token ? `Bearer ${token}` : '',
-      'Cookie': this.getCookieHeader()
+      'Cookie': this.getCookieHeader(appName)
     }
   }
 
@@ -849,16 +864,16 @@ export class TestAuthHelper {
    * @param {string} endpoint - API endpoint (e.g., '/ceps/ping')
    * @returns {Promise<object>} Response with status and data
    */
-  async get(endpoint) {
+  async get(endpoint, opts = {}) {
     const url = `${this.serverUrl}${endpoint}`
     const response = await fetch(url, {
       method: 'GET',
-      headers: this.getAuthHeaders()
+      headers: this.getAuthHeaders(opts.app)
     })
-    
-    this.parseCookies(response.headers)
+
+    this.parseCookies(response.headers, opts.app)
     const data = await this.parseResponseBody(response)
-    
+
     return { status: response.status, ok: response.ok, data }
   }
 
@@ -868,19 +883,19 @@ export class TestAuthHelper {
    * @param {object} body - Request body
    * @returns {Promise<object>} Response with status and data
    */
-  async post(endpoint, body = {}) {
+  async post(endpoint, body = {}, opts = {}) {
     const url = `${this.serverUrl}${endpoint}`
-    const headers = this.getAuthHeaders()
-    
+    const headers = this.getAuthHeaders(opts.app)
+
     const response = await fetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(body)
     })
-    
-    this.parseCookies(response.headers)
+
+    this.parseCookies(response.headers, opts.app)
     const data = await this.parseResponseBody(response)
-    
+
     return { status: response.status, ok: response.ok, data }
   }
 
@@ -890,17 +905,17 @@ export class TestAuthHelper {
    * @param {object} body - Request body
    * @returns {Promise<object>} Response with status and data
    */
-  async put(endpoint, body = {}) {
+  async put(endpoint, body = {}, opts = {}) {
     const url = `${this.serverUrl}${endpoint}`
     const response = await fetch(url, {
       method: 'PUT',
-      headers: this.getAuthHeaders(),
+      headers: this.getAuthHeaders(opts.app),
       body: JSON.stringify(body)
     })
-    
-    this.parseCookies(response.headers)
+
+    this.parseCookies(response.headers, opts.app)
     const data = await this.parseResponseBody(response)
-    
+
     return { status: response.status, ok: response.ok, data }
   }
 
@@ -909,16 +924,16 @@ export class TestAuthHelper {
    * @param {string} endpoint - API endpoint
    * @returns {Promise<object>} Response with status and data
    */
-  async delete(endpoint) {
+  async delete(endpoint, opts = {}) {
     const url = `${this.serverUrl}${endpoint}`
     const response = await fetch(url, {
       method: 'DELETE',
-      headers: this.getAuthHeaders()
+      headers: this.getAuthHeaders(opts.app)
     })
-    
-    this.parseCookies(response.headers)
+
+    this.parseCookies(response.headers, opts.app)
     const data = await this.parseResponseBody(response)
-    
+
     return { status: response.status, ok: response.ok, data }
   }
 

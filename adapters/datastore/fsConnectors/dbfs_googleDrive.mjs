@@ -259,7 +259,10 @@ googleDriveFS.prototype.stat = function (file, callback) {
     if (!exists) {
       return callback(new Error('file does not exist'))
     } else {
-      if (fileInfo && fileInfo.other && fileInfo.other.mimeType) fileInfo.type = (fileInfo.other.mimeType === 'application/vnd.google-apps.folder' ? 'folder' : 'file')
+      // 'dir' matches the stat contract every other connector follows (see dbfs_local
+      // and dbfs_dropbox) and what the tree walkers test for; this used to say 'folder',
+      // which made every consumer misclassify Drive folders as files.
+      if (fileInfo && fileInfo.other && fileInfo.other.mimeType) fileInfo.type = (fileInfo.other.mimeType === 'application/vnd.google-apps.folder' ? 'dir' : 'file')
       if (fileInfo && fileInfo.other && fileInfo.other.createdTime) fileInfo.birthtimeMs = new Date(fileInfo.other.createdTime).getTime()
       if (fileInfo && fileInfo.other && fileInfo.other.modifiedTime) fileInfo.mtimeMs = new Date(fileInfo.other.modifiedTime).getTime()
       if (fileInfo && fileInfo.other && fileInfo.other.viewedByMeTime) fileInfo.atimeMs = new Date(fileInfo.other.viewedByMeTime).getTime()

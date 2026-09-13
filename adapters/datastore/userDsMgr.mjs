@@ -21,6 +21,21 @@ const __dirname = path.dirname(__filename)
 
 const ROOT_DIR = removeLastPathElement(__dirname, 2) + pathSep
 const DB_CONNECTORS_DIR = './dbConnectors/'
+
+// Security: guard against path traversal in caller-supplied file paths (`endpath`).
+// The file-serving/reading methods below build an on-disk path by concatenating a fixed
+// base (userRootFolder/<owner>/files|apps/<app>) with the request-supplied `endpath`.
+// `path.normalize` alone collapses `..` but does NOT confine the result, so a crafted
+// `endpath` (e.g. `../../../etc/passwd`, or its percent-encoded form once the router has
+// decoded it) could escape the app's directory. This returns true ONLY when the resolved
+// target stays inside `${ROOT_DIR}${baseRelPath}`. Fails closed on non-strings / null bytes.
+const endpathIsConfined = (baseRelPath, endpath) => {
+  if (typeof endpath !== 'string' || endpath.indexOf('\0') >= 0) return false
+  const baseAbs = path.resolve(ROOT_DIR + baseRelPath)
+  const targetAbs = path.resolve(ROOT_DIR + baseRelPath + path.sep + endpath)
+  return targetAbs === baseAbs || targetAbs.startsWith(baseAbs + path.sep)
+}
+
 const FS_ENV_FILE_DIR = path.normalize(ROOT_DIR + 'node_modules' + pathSep + 'nedb-asyncfs' + pathSep + 'env' + pathSep)
 
 // Create a require function for dynamic imports
@@ -56,6 +71,11 @@ function USER_DS (owner, env) {
 
   this.owner = owner
   this.appcoll = {}
+  // In-flight table inits, keyed by appTableName: concurrent getorInitDb callers
+  // for the same table await the SAME init instead of each starting their own
+  // (which used to overwrite the shared ds.db slot mid-flight). Entries are
+  // deleted as soon as the init settles.
+  this.appcollInit = {}
   this.dbPersistenceManager = {
     timer: setTimeout(function () { persistOldFilesNow(self) }, DB_PERSISTANCE_IDLE_TIME_THRESHOLD),
     lastSave: new Date().getTime(),
@@ -95,21 +115,39 @@ function USER_DS (owner, env) {
 
     this.assertNotMigrationLocked(OAC.app_name || (OAC.app_table ? OAC.app_table.split('.').slice(0, 3).join('.') : ''), options)
   
-    if (this.appcoll[appTableName(OAC)] && this.appcoll[appTableName(OAC)].query) {
-      if (this.appcoll[appTableName(OAC)].query && typeof this.appcoll[appTableName(OAC)].query !== 'function') {
-        console.warn('🔴 SNBH - got a db with no query for ' + appTableName(OAC), typeof this.appcoll[appTableName(OAC)].db.query)
+    const tableName = appTableName(OAC)
+
+    if (this.appcoll[tableName] && this.appcoll[tableName].query) {
+      if (this.appcoll[tableName].query && typeof this.appcoll[tableName].query !== 'function') {
+        console.warn('🔴 SNBH - got a db with no query for ' + tableName, typeof this.appcoll[tableName].db.query)
       }
-      // onsole.log('ds_manager returning app coll from mem for ', appTableName(OAC))
-      return this.appcoll[appTableName(OAC)]
-    } else {
-      // onsole.log('getorInitDb need to re-init db ', appTableName(OAC))
+      // onsole.log('ds_manager returning app coll from mem for ', tableName)
+      return this.appcoll[tableName]
+    }
+
+    // An init is already running for this table - join it rather than start a
+    // second one. initOacDB is async and only wires ds.query at the very END, so
+    // the fast path above stays false for the whole init; without this every
+    // concurrent request for the table (a burst of app polls just after startup
+    // is the usual case) started its own initOacDB, and each one reassigned
+    // ds.db. The auto-promisified *_async wrappers read that shared ds.db slot at
+    // call time, so one Datastore got loadDatabase()d twice (its resetIndexes()
+    // wiping data already loaded) while another was left orphaned and unloaded.
+    if (this.appcollInit[tableName]) return await this.appcollInit[tableName]
+
+    // onsole.log('getorInitDb need to re-init db ', tableName)
+    const initPromise = (async () => {
       try {
         return await this.initOacDB(OAC, options)
       } catch (err) {
         if (isStorageAccessError(err)) this.recordStorageError(err)
         throw err
+      } finally {
+        delete this.appcollInit[tableName]
       }
-    }
+    })()
+    this.appcollInit[tableName] = initPromise
+    return await initPromise
   }
 
   // Remember the most recent "can't access your storage" failure (bad/expired credentials) so it
@@ -149,7 +187,17 @@ function USER_DS (owner, env) {
     }
   
     const ds = this.appcoll[appTableName(OAC)]
-  
+
+    // A failed init must NOT leave its half-wired ds cached. getorInitDb's fast
+    // path only checks for ds.query, but ds.db is assigned long before that, and a
+    // cached ds.db whose underlying store never loaded is what turns one failed
+    // init into "every later request for this table hangs forever". Dropping the
+    // entry means the next request retries the init instead.
+    const failInit = (err) => {
+      delete userDs.appcoll[appTableName(OAC)]
+      throw err
+    }
+
     // CREATE APPTABLE CACHE using UserCache
     // noCache: skip cache for temp managers during startup to avoid polluting
     // the singleton CacheManager with stale/negative entries
@@ -238,7 +286,7 @@ function USER_DS (owner, env) {
       ds.db = new DB_CREATOR({ dbParams, fsParams, extraCreds }, OAC)
     } catch (e) {
       console.warn('initoacdb creator error', { dbParams, e })
-      throw e
+      failInit(e)
     }
   
     // 1. Auto-promisify ds.db functions if async versions don't exist (BEFORE using them)
@@ -263,11 +311,26 @@ function USER_DS (owner, env) {
       await ds.db.initDB_async()
     } catch (err) {
       if (dbParams.type === 'nedb' && err.code === 'ENOENT') {
-        // should be okay hopefully as db has not been einited yet
+        // Benign: the table has no file yet (cloud fs connectors report a missing
+        // object as ENOENT), so an empty, writable table is the right outcome.
+        // BUT nedb-asyncfs skips executor.processBuffer() on ANY loadDatabase
+        // error, so the executor is stuck at ready=false and every later
+        // find/insert would be parked in executor.buffer and never call back -
+        // the awaiting request hangs for the life of the process, holding its
+        // socket. Release the buffer so the table behaves as what it is: empty.
+        if (ds.db.releaseExecutorBuffer) ds.db.releaseExecutorBuffer()
       } else {
         console.warn('🔴 initDB Err ', ds.owner, { msg: err.message, code: err.code, name: err.name, statusCode: err.statusCode })
-        throw err
+        failInit(err)
       }
+    }
+
+    // Belt and braces for every other way a load can fail (corrupt datafile,
+    // duplicate _id, read error): refuse to hand back or cache a store that
+    // cannot execute. Failing loudly here costs one 500 and a retry on the next
+    // request; caching it costs every future request for this table.
+    if (dbParams.type === 'nedb' && ds.db.executorIsReady && !ds.db.executorIsReady()) {
+      failInit(new Error('nedb store for ' + appTableName(OAC) + ' did not load (executor never became ready) - not caching it'))
     }
     
     // Initialize cache immediately if cacheAll or cacheRecent is enabled
@@ -816,18 +879,40 @@ function USER_DS (owner, env) {
       }
 
 
-      // Helper to determine if file is cacheable (text-based) -> 
+      // Helper to determine if file is cacheable (text-based) ->
       const isCacheableFile = (filepath) => {
         const ext = filepath.split('.').pop()?.toLowerCase()
         if (process.env.NODE_ENV === 'development') return false
         return ['js', 'css', 'html', 'htm', 'json', 'txt', 'xml', 'svg', 'mjs', 'fsx'].includes(ext)
       }
-  
+
+      // READ APP DIR - list files under the app folder via the CONNECTOR (the authoritative backend, NOT
+      // the per-instance local disk cache, which is incomplete on cloud hosts like Azure). Cloud
+      // connectors (azure/aws/…) return a FLAT, recursive list of relative file paths; the local
+      // connector returns one level. Mirrors readUserDir. Callers that need a full recursive list should
+      // only rely on this for cloud backends (see creatorApiController listAppFilePaths).
+      ds.readAppDir = async function (endpath = '', options = {}) {
+        const base = isSystemApp ? ('freezrsystmapps/' + this.appName) : (userRootFolder + '/' + this.owner + '/apps/' + this.appName)
+        const pathToRead = base + (endpath ? ('/' + endpath) : '')
+        try {
+          const files = await ds.fs.readdir_async(pathToRead, options || null)
+          return files || []
+        } catch (err) {
+          if (err.code === 'ENOENT' || err.message?.includes('does not exist') || err.message?.includes('no such file')) return []
+          throw err
+        }
+      }
+
       ds.sendAppFile = function (endpath, res, options) {
         // onsole.log('sendAppFile', { endpath, options })
         const isSystemApp = config.isSystemApp(this.appName)
         const partialPath = isSystemApp ? ('freezrsystmapps/' + this.appName + '/' + endpath) : (userRootFolder + '/' + this.owner + '/apps/' + appName + '/' + endpath)
-        // onsole.log('🔍 sendAppFile - ', { partialPath })        
+        // onsole.log('🔍 sendAppFile - ', { partialPath })
+
+        // Path-traversal guard: `endpath` must stay within this app's directory.
+        if (!endpathIsConfined(isSystemApp ? ('freezrsystmapps/' + this.appName) : (userRootFolder + '/' + this.owner + '/apps/' + appName), endpath)) {
+          return sendFailure(res, 'file not found!', 'sendAppFile', 404)
+        }
         // Helper to track local file copy (using userCache, not CacheManager directly)
         const trackLocalFileCopy = (size = 0) => {
           try {
@@ -943,7 +1028,12 @@ function USER_DS (owner, env) {
       ds.sendPublicAppFile = function (endpath, res, options) {
         const isSystemApp = config.isSystemApp(this.appName)
         const partialPath = isSystemApp ? ('freezrsystmapps/' + this.appName + '/' + endpath) : (userRootFolder + '/' + this.owner + '/apps/' + appName + '/' + endpath)
-        
+
+        // Path-traversal guard: `endpath` must stay within this app's directory.
+        if (!endpathIsConfined(isSystemApp ? ('freezrsystmapps/' + this.appName) : (userRootFolder + '/' + this.owner + '/apps/' + appName), endpath)) {
+          return sendFailure(res, 'file not found!', 'sendPublicAppFile', 404)
+        }
+
         // Helper to track local file copy (using userCache, not CacheManager directly)
         const trackLocalFileCopy = (size = 0) => {
           try {
@@ -1084,7 +1174,12 @@ function USER_DS (owner, env) {
         
         options = options || {}
         const pathToRead = userRootFolder + '/' + this.owner + '/files/' + this.appName + '/' + endpath
-  
+
+        // Path-traversal guard: `endpath` must stay within this app's files directory.
+        if (!endpathIsConfined(userRootFolder + '/' + this.owner + '/files/' + this.appName, endpath)) {
+          throw new Error('file path not allowed')
+        }
+
         const localpath = path.normalize(ROOT_DIR + pathToRead)
         if (!options.nocache && fs.existsSync(localpath)) {
           try {
@@ -1248,6 +1343,11 @@ function USER_DS (owner, env) {
         const partialPath = (userRootFolder + '/' + this.owner + '/files/' + this.appName + '/' + endpath)
         // onsole.log('sendUserFile', { partialPath })
 
+        // Path-traversal guard: `endpath` must stay within this app's files directory.
+        if (!endpathIsConfined(userRootFolder + '/' + this.owner + '/files/' + this.appName, endpath)) {
+          return sendFailure(res, 'file not found!', 'sendUserFile', 404)
+        }
+
         if (endpath.slice(-3) === '.js') res.setHeader('content-type', 'application/javascript')
         if (endpath.slice(-4) === '.css') res.setHeader('content-type', 'text/css')
 
@@ -1336,6 +1436,11 @@ function USER_DS (owner, env) {
         const partialPath = (userRootFolder + '/' + this.owner + '/files/' + this.appName + '/' + endpath)
         const returnBuffer = options.returnBuffer // For binary files like zips
 
+        // Path-traversal guard: `endpath` must stay within this app's files directory.
+        if (!endpathIsConfined(userRootFolder + '/' + this.owner + '/files/' + this.appName, endpath)) {
+          throw new Error('file path not allowed')
+        }
+
         // Check cache first (for cacheable files) - skip cache for buffer requests
         if (!returnBuffer && ds.cache && isCacheableFile(endpath)) {
           const cached = ds.cache.getUserFile(endpath)
@@ -1419,7 +1524,27 @@ function USER_DS (owner, env) {
           throw e
         }
       }
-  
+
+      // DELETE ONE APP FILE — from the authoritative backend AND the local cache. Deleting only the local
+      // copy (as the creator controller used to) leaves the cloud blob in place, so the file "reappears".
+      // Mirrors deleteUserFile. See freezr_askapp_sharing_summary.md (Azure file-visibility fix).
+      ds.deleteAppFile = async function (endpath) {
+        const pathToDelete = userRootFolder + '/' + this.owner + '/apps/' + this.appName + '/' + endpath
+        try { const localPath = ROOT_DIR + pathToDelete; if (fs.existsSync(localPath)) await fs.promises.unlink(localPath) } catch (e) { /* best-effort local */ }
+        if (ds.cache) { ds.cache.deleteAppFile(endpath); ds.cache.setAppFileModTime(endpath) }
+        if (this.fsParams.type !== 'local') await this.fs.unlink_async(pathToDelete)
+        return { success: true }
+      }
+
+      // DELETE AN APP SUBFOLDER (recursively) — backend + local cache.
+      ds.deleteAppFolder = async function (endpath) {
+        const pathToDelete = userRootFolder + '/' + this.owner + '/apps/' + this.appName + '/' + endpath
+        try { const localPath = ROOT_DIR + pathToDelete; if (fs.existsSync(localPath)) await fs.promises.rm(localPath, { recursive: true, force: true }) } catch (e) { /* best-effort local */ }
+        if (ds.cache && ds.cache.invalidateAll) ds.cache.invalidateAll() // coarse: no prefix-scoped file-cache invalidation
+        if (this.fsParams.type !== 'local') await this.fs.removeFolder_async(pathToDelete)
+        return { success: true }
+      }
+
       // WRITE TO APP FILES - invalidate cache and update fileModTime
       ds.writeToAppFiles = async function (endpath, content, options = {}) {
         const pathToWrite = userRootFolder + '/' + this.owner + '/apps/' + this.appName + '/' + endpath

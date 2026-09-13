@@ -47,7 +47,7 @@
 //
 // Uses native fetch (via fetchWithRetry). No googleapis SDK dependency on this path.
 
-import { runConcurrent, fetchWithRetry } from './_shared.mjs'
+import { runConcurrent, fetchWithRetry } from '../_shared.mjs'
 
 const GMAIL_BASE = 'https://gmail.googleapis.com/gmail/v1/users/me'
 

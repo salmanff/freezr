@@ -1,4 +1,5 @@
-<!-- Admin Resource Usage - same content as account_resourceusage.html, uses account app's JS/CSS -->
+<!-- Admin Resource Usage - same content as account_resourceusage.html, uses the account app's JS/CSS.
+     Add ?user=username to the URL to view another user's usage. -->
 <div class="freezr-page">
   <nav class="freezr-nav" id="adminFunctions">
     <span class="freezr-nav-title">Resource Usage</span>
@@ -12,10 +13,36 @@
     <div id="errorBox" class="errorBox"></div>
 
     <div class="freezr-card" id="resource_usage_card">
-      <h3>Storage Usage by App</h3>
-      <p id="resource_usage_intro">View storage usage. Use <code>?user=username</code> in the URL to view another user's usage.</p>
-      <div id="resource_usage_user_label" style="display: none; margin-bottom: 0.5rem; font-weight: 600; color: var(--freezr-accent);"></div>
-      <div id="app_list" style="margin-top: 1rem; position: relative; min-height: 60px;"></div>
+      <div id="resource_usage_user_label" class="fz-user-label" style="display: none;"></div>
+
+      <div class="tab">
+        <button class="tablinks" id="button_tabs_llm" type="button">AI &amp; LLM Costs</button>
+        <button class="tablinks" id="button_tabs_storage" type="button">Storage</button>
+      </div>
+
+      <div id="tab_llm" class="tabcontent">
+        <h3>AI &amp; LLM Costs</h3>
+        <div class="fz-usage-toolbar">
+          <p class="fz-note" id="metered_usage_intro" style="max-width: 46rem;">
+            Tokens and estimated cost of LLM calls, tallied by app, API key and day. Add <code>?user=username</code> to the URL to view another user's usage.
+          </p>
+          <div>
+            <label for="usage_range">Period</label>
+            <select id="usage_range">
+              <option value="30" selected>Last 30 days</option>
+              <option value="90">Last 90 days</option>
+              <option value="month">This month</option>
+            </select>
+          </div>
+        </div>
+        <div id="metered_usage" class="fz-pane-body"></div>
+      </div>
+
+      <div id="tab_storage" class="tabcontent">
+        <h3>Storage Usage by App</h3>
+        <p class="fz-note">Disk used by each app's files and database tables. Click a row to see its tables. Add <code>?user=username</code> to the URL to view another user's usage.</p>
+        <div id="app_list" class="fz-pane-body"></div>
+      </div>
     </div>
 
   </div>

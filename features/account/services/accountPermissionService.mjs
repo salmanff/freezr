@@ -249,7 +249,7 @@ export const acceptNamedPermissions = async (permName, requestorApp, locals, ext
     // a record that the per-service context middleware would later read as "covers
     // nothing" (or worse, in pre-fix codepaths, as "covers everything"). Wildcard
     // is ['*']. Same fail-closed contract for all three.
-    const CONNECTION_SCOPED_TYPES = ['use_mail', 'use_contacts', 'use_calendar']
+    const CONNECTION_SCOPED_TYPES = ['use_mail', 'use_contacts', 'use_calendar', 'use_messaging', 'use_file_sys']
     if (CONNECTION_SCOPED_TYPES.includes(permission.type)) {
       const merged = (updateData.connection_names !== undefined)
         ? updateData.connection_names

@@ -5,7 +5,7 @@ import { fetchAppHistory, updateHistoryEntry, addHistoryEntry } from '../history
 import { fetchFolderTree } from '../fileTree.js'
 import { renderManifestEditor, loadManifestForApp } from './manifestRenderer.js'
 import { calculateProjectCost, calculateEntryCost, formatCost, formatTokens } from '../priceService.js'
-import { escHtml, loadChatDraft } from '../utils.js'
+import { escHtml, loadChatDraft, loadWebSearchPref, saveWebSearchPref } from '../utils.js'
 import { sendChatMessage, detectLargeFiles } from '../chatService.js'
 import { syncProjectOnOpen } from '../projectSync.js'
 
@@ -175,6 +175,11 @@ export const loadApp = async (appName, setState) => {
       // Restore any unsent prompt persisted for this app (survives full shutdown).
       // Don't clobber something already typed in this session.
       if (!next.chat.draftMessage) next.chat.draftMessage = loadChatDraft(appName)
+      // Web search is sticky per app once switched on (see utils.js) — restore it, but never
+      // restore the uncapped override, which is a one-shot "search more" for a single message.
+      next.chat.webSearch = loadWebSearchPref(appName)
+      next.chat.webUncapped = false
+      next.chat.webPrompt = null
       calculateAndStoreProjectCost(next, history)
       next.loading.active = false
       next.loading.text = ''
@@ -708,6 +713,72 @@ const bindPublishEvents = (container, state, setState, appName) => {
   })
 }
 
+// Paste-ready instructions for an AI assistant holding an inspection token
+// (freezr_creator_selfcheck_plan_v1.md Part A). Tokens are short-lived and read-only.
+const inspectPasteText = (r, appName) => {
+  const base = freezrMeta.serverAddress || ''
+  const lines = [
+    'You can inspect my freezr app "' + appName + '" (read-only) until ' + new Date(r.expiresAt).toLocaleString() + ':',
+    '- Fetch its source files with: GET ' + base + '/creator/inspect/' + appName + '/<file>?inspectToken=' + r.filesToken,
+    '  Start with index.html, index.js and manifest.json, then any files they reference.'
+  ]
+  if (r.dataToken) {
+    lines.push('- Query its data (read-only) with: POST ' + base + '/ceps/query/' + appName + '.<collection> using header "Authorization: Bearer ' + r.dataToken + '" and JSON body {"count": 5}')
+  }
+  return lines.join('\n')
+}
+
+const bindInspectTokenEvents = (container, state, setState, appName) => {
+  const createBtn = container.querySelector('[data-action="create-inspection-token"]')
+  if (createBtn) {
+    createBtn.onclick = async () => {
+      clearError()
+      const includeData = !!container.querySelector('#inspectIncludeData')?.checked
+      setState((next) => {
+        if (!next.project.appSettings) next.project.appSettings = {}
+        next.project.appSettings.inspectBusy = true
+        next.project.appSettings.inspectIncludeData = includeData
+        return next
+      }, { sourcePanel: 'project' })
+      try {
+        const result = await freezr.apiRequest('POST', '/creatorapi/create_inspection_token', {
+          app_name: appName,
+          include_data: includeData
+        })
+        if (!result || result.error) throw new Error(result?.error || 'Could not create inspection token.')
+        setState((next) => {
+          if (!next.project.appSettings) next.project.appSettings = {}
+          next.project.appSettings.inspectBusy = false
+          next.project.appSettings.inspectResult = result
+          return next
+        }, { sourcePanel: 'project' })
+      } catch (error) {
+        setState((next) => {
+          if (!next.project.appSettings) next.project.appSettings = {}
+          next.project.appSettings.inspectBusy = false
+          return next
+        }, { sourcePanel: 'project' })
+        showError(error?.message || 'Could not create inspection token.')
+      }
+    }
+  }
+
+  const copyBtn = container.querySelector('[data-action="copy-inspection-token"]')
+  if (copyBtn) {
+    copyBtn.onclick = async () => {
+      const block = container.querySelector('#inspectTokenBlock')
+      if (!block) return
+      try {
+        await navigator.clipboard.writeText(block.textContent)
+        copyBtn.textContent = 'Copied!'
+        setTimeout(() => { copyBtn.textContent = 'Copy for AI' }, 2000)
+      } catch (e) {
+        showError('Could not copy — select the text manually.')
+      }
+    }
+  }
+}
+
 const bindRenameEvents = (container, state, setState) => {
   const renameBtn = container.querySelector('[data-action="rename-app"]')
   const renameInput = container.querySelector('#renameAppInput')
@@ -1019,6 +1090,23 @@ export const renderProjectPanel = ({ container, state, getState, setState }) => 
                 </div>
               ` : (publishFetched ? '<div class="version-list"><label>No published versions yet.</label></div>' : '')}
             </div>
+            <div class="app-settings-row inspect-section">
+              <label>AI Access</label>
+              <div class="app-settings-warning">The assistant can read this app's own files — that is what it is building. Your <strong>data</strong> is never included: it has to ask in the chat, and you approve each request.</div>
+              <div class="app-settings-warning" style="margin-top:6px;">Use the button below only to hand a token to a separate AI tool (e.g. Claude Code) running against this server.</div>
+              <label class="llm-checkbox-label">
+                <input id="inspectIncludeData" type="checkbox" ${appSettings.inspectIncludeData ? 'checked' : ''} ${appSettings.inspectBusy ? 'disabled' : ''}>
+                <span>Include read-only data access in that token</span>
+              </label>
+              <div class="panel-inline-row" style="gap:8px; margin-top:4px;">
+                <button class="panel-cta panel-cta-sm" data-action="create-inspection-token" ${appSettings.inspectBusy ? 'disabled' : ''}>${appSettings.inspectBusy ? 'Creating...' : 'Token for an external AI tool'}</button>
+                ${appSettings.inspectResult ? '<button class="panel-cta panel-cta-sm" data-action="copy-inspection-token">Copy</button>' : ''}
+              </div>
+              ${appSettings.inspectResult ? `
+                <div class="app-settings-status">Expires ${escHtml(new Date(appSettings.inspectResult.expiresAt).toLocaleTimeString())}. Paste this to your AI tool:</div>
+                <pre id="inspectTokenBlock" style="white-space:pre-wrap; word-break:break-all; font-size:11px; border:1px solid currentColor; border-radius:4px; padding:6px; opacity:0.85;">${escHtml(inspectPasteText(appSettings.inspectResult, appName))}</pre>
+              ` : ''}
+            </div>
             <div class="app-settings-row delete-section">
               <label>Danger Zone</label>
               <div class="app-settings-warning">These actions are irreversible.</div>
@@ -1091,6 +1179,7 @@ export const renderProjectPanel = ({ container, state, getState, setState }) => 
 
     bindRenameEvents(container, state, setState)
     bindPublishEvents(container, state, setState, appName)
+    bindInspectTokenEvents(container, state, setState, appName)
     bindDeleteEvents(container, state, setState, getState)
 
     if (settingsExpanded && !publishFetched && !appSettings.publishLoading) {
@@ -1099,6 +1188,10 @@ export const renderProjectPanel = ({ container, state, getState, setState }) => 
 
     return
   }
+
+  // The description below is auto-sent as the first chat message (the app build), so the web
+  // choice is made here, before the app has a name. Parked under the no-app key until then.
+  const newAppWeb = loadWebSearchPref(null)
 
   container.innerHTML = `
     <h2 class="welcome-title">Create or Choose an App</h2>
@@ -1112,6 +1205,14 @@ export const renderProjectPanel = ({ container, state, getState, setState }) => 
       <textarea id="projectNewAppDescription" class="welcome-textarea" placeholder="e.g. A simple todo list app with categories and due dates..." rows="4">${escHtml(project.newAppDescription || '')}</textarea>
 
       <div class="welcome-create-btn-wrap">
+        <button type="button"
+          class="chat-web-toggle${newAppWeb ? ' chat-web-toggle-on' : ''}"
+          data-action="toggle-new-app-web"
+          aria-pressed="${newAppWeb ? 'true' : 'false'}"
+          title="${newAppWeb
+            ? 'Web search is ON — the assistant can look things up while building. Adds cost to every message.'
+            : 'Web search is OFF. Turn it on if building this app needs current info or third-party API docs (adds cost to every message).'}"
+          >🌐${newAppWeb ? ' Web on' : ''}</button>
         <button class="panel-cta welcome-create-btn" data-action="create-app"> Create App </button>
       </div>
     </section>
@@ -1141,12 +1242,16 @@ export const renderProjectPanel = ({ container, state, getState, setState }) => 
 
     <section class="panel-section">
       <h3>Project Settings</h3>
+      ${renderLlmSettings(state)}
+      <div class="welcome-field-hint">Tip: building apps works best with a top-tier model (e.g. Opus) — smaller models struggle with multi-file builds.</div>
       <label class="theme-switch" for="themeToggle">
         <input id="themeToggle" type="checkbox" ${isDark ? 'checked' : ''}>
         <span style="display:inline-block">Dark mode</span>
       </label>
     </section>
   `
+
+  bindLlmSettingsEvents(container, state, setState)
 
   const recentAppSelect = container.querySelector('#projectRecentAppSelect')
   if (recentAppSelect) {
@@ -1166,6 +1271,17 @@ export const renderProjectPanel = ({ container, state, getState, setState }) => 
 
   const input = container.querySelector('#projectNewAppText')
   const descInput = container.querySelector('#projectNewAppDescription')
+
+  const newAppWebBtn = container.querySelector('[data-action="toggle-new-app-web"]')
+  if (newAppWebBtn) {
+    newAppWebBtn.onclick = () => {
+      const turningOn = !loadWebSearchPref(null)
+      saveWebSearchPref(null, turningOn)
+      newAppWebBtn.setAttribute('aria-pressed', turningOn ? 'true' : 'false')
+      newAppWebBtn.classList.toggle('chat-web-toggle-on', turningOn)
+      newAppWebBtn.textContent = turningOn ? '🌐 Web on' : '🌐'
+    }
+  }
   const createButton = container.querySelector('[data-action="create-app"]')
 
   if (input) {
@@ -1244,9 +1360,18 @@ export const renderProjectPanel = ({ container, state, getState, setState }) => 
 
       setUrlAppParam(result.appName)
 
+      // Carry the create-form web choice onto the real app name, so the auto-sent description
+      // (the app build itself) runs with it and it stays sticky for the conversation after.
+      const newAppWeb = loadWebSearchPref(null)
+      saveWebSearchPref(result.appName, newAppWeb)
+
       setState((next) => {
         if (!next.loading) next.loading = {}
         next.appName = result.appName
+        if (!next.chat) next.chat = {}
+        next.chat.webSearch = newAppWeb
+        next.chat.webUncapped = false
+        next.chat.webPrompt = null
         next.project.mode = 'app'
         next.project.lastUpdate = history.length > 0 ? history[0] : null
         next.project.newAppDescription = ''

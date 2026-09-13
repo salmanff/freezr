@@ -16,12 +16,14 @@ import * as dropbox from './dropbox.mjs'
 import * as googleDrive from './googleDrive.mjs'
 import * as google from './google.mjs'
 import * as microsoft from './microsoft.mjs'
+import * as slack from './slack.mjs'
 
 export const OAUTH_PROVIDERS = {
   dropbox,
   googleDrive,
   google,
-  microsoft
+  microsoft,
+  slack
 }
 
 /**

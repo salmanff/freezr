@@ -71,6 +71,68 @@ freezr.initPageScripts = async function () {
   document.getElementById('imap_preset').onchange = function () { applyImapPreset(this.value) }
   document.getElementById('button_imapSave').onclick = saveImap
 
+  // Slack token-paste connections (provider 'slack') — same direct-write pattern
+  // as IMAP: no OAuth flow, the user brings a token from their own Slack app.
+  const slackOverlay = document.getElementById('slacktoken_overlay')
+  const slackOverlayClose = document.getElementById('slacktoken_overlay_close')
+  if (slackOverlayClose) slackOverlayClose.onclick = function () { if (slackOverlay) slackOverlay.style.display = 'none' }
+  if (slackOverlay) slackOverlay.onclick = function (e) { if (e.target === slackOverlay) slackOverlay.style.display = 'none' }
+  document.getElementById('button_addnew_slacktoken').onclick = function () {
+    clearSlackTokenForm()
+    if (slackOverlay) {
+      slackOverlay.style.display = 'flex'
+      setTimeout(function () { slackOverlay.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, 50)
+    }
+  }
+  document.getElementById('button_slacktokenSave').onclick = saveSlackToken
+
+  // Claude Code (local subscription) — an LLM resource with NO key: the credential is the
+  // machine's logged-in `claude` CLI. Enable flow is an attestation, not a key form. The card
+  // only appears when the server says this user is eligible (admin + master pref).
+  const claudeLocalOverlay = document.getElementById('claudelocal_overlay')
+  const claudeLocalClose = document.getElementById('claudelocal_overlay_close')
+  if (claudeLocalClose) claudeLocalClose.onclick = function () { if (claudeLocalOverlay) claudeLocalOverlay.style.display = 'none' }
+  if (claudeLocalOverlay) claudeLocalOverlay.onclick = function (e) { if (e.target === claudeLocalOverlay) claudeLocalOverlay.style.display = 'none' }
+  document.getElementById('button_enable_claudelocal').onclick = function () {
+    document.getElementById('claudelocal_binary').value = claudeLocalState.binaryPath || ''
+    if (claudeLocalOverlay) {
+      claudeLocalOverlay.style.display = 'flex'
+      setTimeout(function () { claudeLocalOverlay.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, 50)
+    }
+  }
+  document.getElementById('button_claudelocalSave').onclick = saveClaudeLocal
+
+  // OpenAI Codex (local subscription) — same localCli pattern with the codex CLI
+  const codexLocalOverlay = document.getElementById('codexlocal_overlay')
+  const codexLocalClose = document.getElementById('codexlocal_overlay_close')
+  if (codexLocalClose) codexLocalClose.onclick = function () { if (codexLocalOverlay) codexLocalOverlay.style.display = 'none' }
+  if (codexLocalOverlay) codexLocalOverlay.onclick = function (e) { if (e.target === codexLocalOverlay) codexLocalOverlay.style.display = 'none' }
+  document.getElementById('button_enable_codexlocal').onclick = function () {
+    document.getElementById('codexlocal_binary').value = localCliState.codexBinaryPath || ''
+    if (codexLocalOverlay) {
+      codexLocalOverlay.style.display = 'flex'
+      setTimeout(function () { codexLocalOverlay.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, 50)
+    }
+  }
+  document.getElementById('button_codexlocalSave').onclick = saveCodexLocal
+
+  // File stores (services ['fs']) — the local-folder variant is admin-only and the card
+  // only appears when the server says this user is eligible (admin + local-fs server).
+  const fileStoreOverlay = document.getElementById('filestore_overlay')
+  const fileStoreClose = document.getElementById('filestore_overlay_close')
+  if (fileStoreClose) fileStoreClose.onclick = function () { if (fileStoreOverlay) fileStoreOverlay.style.display = 'none' }
+  if (fileStoreOverlay) fileStoreOverlay.onclick = function (e) { if (e.target === fileStoreOverlay) fileStoreOverlay.style.display = 'none' }
+  document.getElementById('button_addnew_filestore').onclick = function () {
+    document.getElementById('filestore_name').value = ''
+    document.getElementById('filestore_path').value = ''
+    document.getElementById('filestore_access').value = 'read'
+    if (fileStoreOverlay) {
+      fileStoreOverlay.style.display = 'flex'
+      setTimeout(function () { fileStoreOverlay.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, 50)
+    }
+  }
+  document.getElementById('button_filestoreSave').onclick = saveFileStore
+
   // Load all resources in a single query (per the doc note: prefer simple queries + filter client-side).
   try {
     const results = await freezr.query(TABLE_NAME) || []
@@ -79,7 +141,10 @@ freezr.initPageScripts = async function () {
     state.compute = results.filter(r => r && r.type === 'compute')
 
     // Auto-set default LLM if there are LLM resources but none is marked default.
-    const llms = state.resources.filter(r => r.type === 'llm' && r.key)
+    // localCli resources (Claude Code / Codex — no key) count as usable AND as default
+    // holders here: filtering on `key` alone once made this "repair" mark an API key
+    // default while a local connector already held it, leaving TWO defaults.
+    const llms = state.resources.filter(r => r.type === 'llm' && (r.key || r.localCli))
     if (llms.length > 0 && !llms.some(r => r.default)) {
       llms[0].default = true
       try {
@@ -98,6 +163,321 @@ freezr.initPageScripts = async function () {
 
   // Handle OAuth callback success + focus deep links after the initial render.
   handleUrlParams()
+
+  // Non-blocking: the ClaudeLocal card stays hidden unless the server reports eligibility.
+  loadClaudeLocalStatus()
+
+  // Non-blocking: the File Stores card stays hidden unless the server reports eligibility.
+  loadFileStoreStatus()
+}
+
+/* =====================================================================
+ *  File stores (connection records with services ['fs'])
+ *  Local-folder stores are admin-only, on local-fs servers, over localhost —
+ *  the server enforces all of that at use time (fsContext.mjs localFsGate);
+ *  this UI mirrors the gates so the card only shows where it can work.
+ * =================================================================== */
+
+const fileStoreState = { enabled: false, isAdmin: false, systemFsIsLocal: false, onLocalhost: false }
+
+const loadFileStoreStatus = async function () {
+  try {
+    const resp = await freezr.apiRequest('GET', '/feps/connections/fs/local_status')
+    Object.assign(fileStoreState, resp || {})
+  } catch (e) {
+    return // endpoint unavailable — leave the card hidden
+  }
+  if (!fileStoreState.isAdmin || !fileStoreState.systemFsIsLocal) return
+  redrawFileStoreCard()
+}
+
+const redrawFileStoreCard = function () {
+  const card = document.getElementById('filestore_card')
+  const statusEl = document.getElementById('filestore_status')
+  const addButt = document.getElementById('button_addnew_filestore')
+  if (!card || !statusEl || !addButt) return
+  if (!fileStoreState.isAdmin || !fileStoreState.systemFsIsLocal) { card.style.display = 'none'; return }
+
+  card.style.display = 'block'
+  addButt.style.display = 'none'
+  const fsStores = state.connections.filter(c => Array.isArray(c.services) && c.services.includes('fs'))
+
+  if (!fileStoreState.enabled) {
+    statusEl.innerHTML = 'Share a local folder with apps you authorize (browse / read, optionally write) — ' +
+      'admin users on localhost only. To make this available, first turn on "local file-store access" in ' +
+      '<a href="/admin/prefs">Admin Preferences</a>.'
+  } else {
+    statusEl.innerHTML = (fsStores.length > 0
+      ? 'Your file stores appear in the Connected Accounts list below. Apps get access only when you grant their <code>use_file_sys</code> permission naming a store.'
+      : 'No file stores yet. Add a local folder that authorized apps may browse and read — apps get access only when you grant their <code>use_file_sys</code> permission.') +
+      (fileStoreState.onLocalhost ? '' : ' <b>Note:</b> you are not browsing over localhost right now — local stores only answer requests made on <code>localhost</code>.')
+    addButt.style.display = 'inline-block'
+  }
+}
+
+const saveFileStore = async function () {
+  const connectionName = document.getElementById('filestore_name').value.trim()
+  const rootPath = document.getElementById('filestore_path').value.trim()
+  const access = document.getElementById('filestore_access').value === 'readwrite' ? 'readwrite' : 'read'
+
+  if (!connectionName) { showWarning('Store name is required'); return }
+  if (!CONN_NAME_RX.test(connectionName)) { showWarning('Store name: letters, digits, underscore and dash only'); return }
+  if (state.connections.find(c => c.connectionName === connectionName)) { showWarning('A connection named "' + connectionName + '" already exists'); return }
+  if (!rootPath) { showWarning('Folder path is required'); return }
+  if (!rootPath.startsWith('/')) { showWarning('Folder path must be absolute (start with /)'); return }
+
+  try {
+    showLoading(true)
+    // Server-side validation: exists, is a directory, does not overlap the freezr tree.
+    // Also returns the realpath, which is what gets stored (symlink-free root).
+    const check = await freezr.apiRequest('GET', '/feps/connections/fs/local_status?path=' + encodeURIComponent(rootPath))
+    if (!check || check.pathValid !== true) {
+      showLoading(false)
+      showWarning((check && check.pathError) || 'That folder could not be validated on the server')
+      return
+    }
+    const record = {
+      type: 'connection',
+      provider: 'localfs',
+      connectionName,
+      account_email: null,
+      services: ['fs'],
+      access: { fs: access },
+      status: 'ok',
+      fsParams: { type: 'local', rootPath: check.pathReal }
+    }
+    const result = await freezr.create(TABLE_NAME, record)
+    if (!result || result.error) throw new Error(result?.error || 'Error creating file store')
+    state.connections.push({ _id: result._id, ...record })
+    showLoading(false)
+    const overlay = document.getElementById('filestore_overlay')
+    if (overlay) overlay.style.display = 'none'
+    redrawConnectionList()
+    redrawFileStoreCard()
+    showSuccess('Added file store "' + connectionName + '" for ' + check.pathReal + '. Grant apps access via their use_file_sys permission on each app\'s settings page.')
+  } catch (e) {
+    showLoading(false)
+    showWarning(e.message || 'Error saving file store')
+  }
+}
+
+const removeFileStore = async function (doc) {
+  if (!confirm('Remove the file store "' + (doc.connectionName || '') + '"? Apps granted access will no longer be able to use it. No files are deleted.')) return
+  try {
+    showLoading(true)
+    await freezr.delete(TABLE_NAME, doc._id, {})
+    state.connections = state.connections.filter(c => c._id !== doc._id)
+    redrawConnectionList()
+    redrawFileStoreCard()
+    showSuccess('Removed file store ' + (doc.connectionName || ''))
+  } catch (err) {
+    showWarning(err?.message || 'Error removing file store')
+  } finally {
+    showLoading(false)
+  }
+}
+
+/* =====================================================================
+ *  Local CLI connectors (owner's subscription, no API key):
+ *  ClaudeLocal (claude CLI) and CodexLocal (codex CLI)
+ * =================================================================== */
+
+const localCliState = { enabled: false, isAdmin: false, allowedInAllApps: false, binaryFound: false, binaryPath: null, codexBinaryFound: false, codexBinaryPath: null }
+
+const getLocalCliResource = function (provider) {
+  return state.resources.find(r => r.type === 'llm' && r.localCli && r.provider === provider)
+}
+
+const getClaudeLocalResource = function () { return getLocalCliResource('ClaudeLocal') }
+const getCodexLocalResource = function () { return getLocalCliResource('CodexLocal') }
+
+const loadClaudeLocalStatus = async function () {
+  try {
+    const resp = await freezr.apiRequest('GET', '/acctapi/getLocalLlmCliStatus')
+    Object.assign(localCliState, resp || {})
+  } catch (e) {
+    return // endpoint unavailable — leave the cards hidden
+  }
+  // Non-admins never see the cards: the connectors are admin-only by policy (the server
+  // enforces this at use time regardless of what the UI shows).
+  if (!localCliState.isAdmin) return
+  redrawClaudeLocalCard()
+  redrawCodexLocalCard()
+}
+
+// Shared card renderer for the two local-CLI connectors — same states, different wording bits.
+const redrawLocalCliCard = function (opts) {
+  const card = document.getElementById(opts.cardId)
+  const statusEl = document.getElementById(opts.statusId)
+  const enableButt = document.getElementById(opts.buttonId)
+  if (!card || !statusEl || !enableButt) return
+  if (!localCliState.isAdmin) { card.style.display = 'none'; return }
+
+  // Keep the enable-overlay disclosure honest: if SHOW_LOCAL_AGENT_IN_APPS is already set on
+  // this server, the creator-only restriction is NOT in force and saying otherwise would
+  // mislead someone into thinking they are protected.
+  const scopeNote = document.getElementById(opts.provider === 'ClaudeLocal' ? 'claudelocal_scope_note' : 'codexlocal_scope_note')
+  if (scopeNote && localCliState.allowedInAllApps) {
+    scopeNote.innerHTML = '<b>Which apps can use this:</b> <b>ANY app on this server</b>. The ' +
+      '<code>SHOW_LOCAL_AGENT_IN_APPS</code> environment variable is set, which lifts the default ' +
+      'restriction that would otherwise limit these connectors to the Creator app. Apps handling ' +
+      'other people\'s content (mail, messages) will be able to spend your subscription, and for ' +
+      'Codex that content reaches an agent. Unset that variable to restore the default.'
+    scopeNote.style.borderLeftColor = '#c62828'
+    scopeNote.style.background = '#fef2f2'
+  }
+
+  card.style.display = 'block'
+  enableButt.style.display = 'none'
+  const existing = getLocalCliResource(opts.provider)
+
+  if (!localCliState.enabled) {
+    statusEl.innerHTML = 'Use your own ' + opts.subscriptionName + ' (via the <code>' + opts.cli + '</code> CLI logged in ' +
+      'on this server) instead of a metered API key. To make this available, first turn on "local CLI LLM connectors" in ' +
+      '<a href="/admin/prefs">Admin Preferences</a>.'
+  } else if (existing) {
+    const scopeNote = localCliState.allowedInAllApps
+      ? '<br/><b>Note:</b> <code>SHOW_LOCAL_AGENT_IN_APPS</code> is set, so <b>any</b> app may use this. That is at your own risk — see the warning above.'
+      : '<br/><b>Only the Creator app can use this.</b> Other apps will not see it, because these connectors spend your own subscription and (for Codex) run an agent that untrusted app content could try to steer. A developer who accepts that risk can set the <code>SHOW_LOCAL_AGENT_IN_APPS=true</code> environment variable on the server.'
+    statusEl.innerHTML = 'Enabled — appears in your LLM keys list above as <b>' + (existing.name || opts.displayName) +
+      '</b>. Calls run through <code>' + (existing.local?.binaryPath || opts.cli) + '</code> and cost $0 ' +
+      '(they draw on your subscription\'s usage limits). Remove it from the list above to disable.' + scopeNote
+  } else if (!opts.binaryFound) {
+    statusEl.innerHTML = 'No <code>' + opts.cli + '</code> CLI was found on this server. Install it (' + opts.installHint +
+      '), log in with your subscription (' + opts.loginHint + '), then reload this page. If it is installed somewhere ' +
+      'unusual, you can still enable it and enter the binary path by hand.'
+    enableButt.style.display = 'inline-block'
+  } else {
+    statusEl.innerHTML = 'A <code>' + opts.cli + '</code> CLI was found at <code>' + opts.binaryPath + '</code>. ' +
+      'Use your own ' + opts.subscriptionName + ' for LLM calls instead of a metered API key — admin users only.'
+    enableButt.style.display = 'inline-block'
+  }
+}
+
+const redrawClaudeLocalCard = function () {
+  redrawLocalCliCard({
+    provider: 'ClaudeLocal',
+    cardId: 'claudelocal_card',
+    statusId: 'claudelocal_status',
+    buttonId: 'button_enable_claudelocal',
+    cli: 'claude',
+    displayName: 'Claude Code (local)',
+    subscriptionName: 'Claude subscription',
+    installHint: '<code>curl -fsSL https://claude.ai/install.sh | bash</code>',
+    loginHint: 'run <code>claude</code> once in a terminal',
+    binaryFound: localCliState.binaryFound,
+    binaryPath: localCliState.binaryPath
+  })
+}
+
+const redrawCodexLocalCard = function () {
+  redrawLocalCliCard({
+    provider: 'CodexLocal',
+    cardId: 'codexlocal_card',
+    statusId: 'codexlocal_status',
+    buttonId: 'button_enable_codexlocal',
+    cli: 'codex',
+    displayName: 'Codex (local)',
+    subscriptionName: 'ChatGPT subscription',
+    installHint: '<code>npm i -g @openai/codex</code>',
+    loginHint: 'run <code>codex login</code> in a terminal',
+    binaryFound: localCliState.codexBinaryFound,
+    binaryPath: localCliState.codexBinaryPath
+  })
+}
+
+// Shared enable flow: writes the localCli resource record with the attestation. The record
+// carries NO key — the server-side gate (llmContext.mjs) is what makes it usable.
+const saveLocalCli = async function (opts) {
+  const binaryPath = document.getElementById(opts.binaryInputId).value.trim()
+  const attOwner = document.getElementById(opts.attOwnerId).checked
+  const attPersonal = document.getElementById(opts.attPersonalId).checked
+  const attTerms = document.getElementById(opts.attTermsId).checked
+  const isDefault = document.getElementById(opts.defaultId).checked
+
+  if (!binaryPath) { showWarning('Enter the path to the ' + opts.cli + ' CLI binary'); return }
+  if (!(new RegExp('(^|/)' + opts.cli + '$')).test(binaryPath)) { showWarning('The binary path must point to a file named "' + opts.cli + '"'); return }
+  if (!attOwner || !attPersonal || !attTerms) { showWarning('All three confirmations are required to enable this connector'); return }
+  if (getLocalCliResource(opts.provider)) { showWarning(opts.displayName + ' is already enabled — remove it from the LLM list first to re-configure'); return }
+
+  try {
+    showLoading(true)
+    if (isDefault) {
+      for (const res of state.resources) {
+        if (res.default) {
+          await freezr.updateFields(TABLE_NAME, res._id, { default: false })
+          res.default = false
+        }
+      }
+    }
+    const params = {
+      type: 'llm',
+      name: opts.displayName,
+      provider: opts.provider,
+      localCli: true,
+      local: { binaryPath },
+      attestation: {
+        acceptedAt: new Date().toISOString(),
+        serverOwner: true,
+        personalUseOnly: true,
+        termsAcknowledged: true
+      },
+      default: isDefault
+    }
+    const result = await freezr.create(TABLE_NAME, params)
+    if (!result || result.error) throw new Error(result?.error || 'Error enabling ' + opts.displayName)
+    state.resources.push({ _id: result._id, ...params })
+    showLoading(false)
+    const overlay = document.getElementById(opts.overlayId)
+    if (overlay) overlay.style.display = 'none'
+    redrawList()
+    redrawClaudeLocalCard()
+    redrawCodexLocalCard()
+    showSuccess(opts.displayName + ' enabled. Test it with a small request from an app — if the CLI is not logged in, the call will say so.')
+  } catch (e) {
+    showLoading(false)
+    showWarning(e.message || ('Error enabling ' + opts.displayName))
+  }
+}
+
+const saveClaudeLocal = () => saveLocalCli({
+  provider: 'ClaudeLocal',
+  displayName: 'Claude Code (local)',
+  cli: 'claude',
+  binaryInputId: 'claudelocal_binary',
+  attOwnerId: 'claudelocal_att_owner',
+  attPersonalId: 'claudelocal_att_personal',
+  attTermsId: 'claudelocal_att_terms',
+  defaultId: 'claudelocal_default',
+  overlayId: 'claudelocal_overlay'
+})
+
+const saveCodexLocal = () => saveLocalCli({
+  provider: 'CodexLocal',
+  displayName: 'Codex (local)',
+  cli: 'codex',
+  binaryInputId: 'codexlocal_binary',
+  attOwnerId: 'codexlocal_att_owner',
+  attPersonalId: 'codexlocal_att_personal',
+  attTermsId: 'codexlocal_att_terms',
+  defaultId: 'codexlocal_default',
+  overlayId: 'codexlocal_overlay'
+})
+
+const removeLocalCli = async function (doc) {
+  if (!confirm('Disable ' + (doc.name || 'this local connector') + '? Apps will no longer be able to use it.')) return
+  try {
+    showLoading(true)
+    await freezr.delete(TABLE_NAME, doc._id, {})
+    state.resources = state.resources.filter(r => r._id !== doc._id)
+    showLoading(false)
+    redrawList()
+    redrawClaudeLocalCard()
+    redrawCodexLocalCard()
+  } catch (err) {
+    showLoading(false)
+    showWarning(err?.message || 'Error removing local connector')
+  }
 }
 
 /* =====================================================================
@@ -255,8 +635,13 @@ const redrawList = function () {
 
     const details = document.createElement('div')
     details.style.cssText = 'font-size: 0.85em; color: #64748b; margin-top: 0.25rem;'
-    const maskedKey = (typeof doc.key === 'string' && doc.key) ? '***' + doc.key.slice(-4) : '***'
-    details.innerText = doc.provider + ' · ' + maskedKey
+    if (doc.localCli) {
+      // local-CLI resource: no key to mask — the credential is the machine's claude login
+      details.innerText = doc.provider + ' · local subscription (no API key)'
+    } else {
+      const maskedKey = (typeof doc.key === 'string' && doc.key) ? '***' + doc.key.slice(-4) : '***'
+      details.innerText = doc.provider + ' · ' + maskedKey
+    }
     info.appendChild(details)
 
     row.appendChild(info)
@@ -272,11 +657,20 @@ const redrawList = function () {
       actions.appendChild(defaultBtn)
     }
 
-    const editBtn = document.createElement('span')
-    editBtn.className = 'smallTextButt'
-    editBtn.innerText = 'Edit'
-    editBtn.onclick = function () { openEditForm(doc) }
-    actions.appendChild(editBtn)
+    if (doc.localCli) {
+      // the key edit form makes no sense here — offer removal only
+      const removeBtn = document.createElement('span')
+      removeBtn.className = 'smallTextButt'
+      removeBtn.innerText = 'Remove'
+      removeBtn.onclick = function () { removeLocalCli(doc) }
+      actions.appendChild(removeBtn)
+    } else {
+      const editBtn = document.createElement('span')
+      editBtn.className = 'smallTextButt'
+      editBtn.innerText = 'Edit'
+      editBtn.onclick = function () { openEditForm(doc) }
+      actions.appendChild(editBtn)
+    }
 
     row.appendChild(actions)
     llmTable.appendChild(row)
@@ -568,6 +962,104 @@ const saveImap = async function () {
     showWarning(e.message || 'Error saving IMAP mailbox')
   }
 }
+/* =====================================================================
+ *  Slack token-paste connections — provider 'slack', services ['messaging']
+ *  Same direct-write pattern as IMAP: written straight to the resources table
+ *  (the server encrypts the oauth blob at rest — resourceCrypto.mjs). Lets Slack
+ *  be used without the OAuth flow, via the User OAuth Token (xoxp) that
+ *  "Install to Workspace" shows on the app's OAuth & Permissions page.
+ *
+ *  This lives here rather than on /connections/new because that page runs as
+ *  info.freezr.connections, which has no write access to this table.
+ *
+ *  Slack user tokens don't expire (unless the app enables rotation), so a
+ *  far-future expiry keeps the shared token-refresh path from ever firing.
+ * =================================================================== */
+
+const SLACK_TOKEN_NON_EXPIRING_MS = 100 * 365 * 24 * 60 * 60 * 1000 // ~100 years
+
+const clearSlackTokenForm = function () {
+  document.getElementById('slacktoken_name').value = ''
+  document.getElementById('slacktoken_token').value = ''
+  document.getElementById('slacktoken_access').value = 'readwrite'
+  document.getElementById('slacktoken_live').checked = true
+}
+
+const saveSlackToken = async function () {
+  const connectionName = document.getElementById('slacktoken_name').value.trim()
+  const token = document.getElementById('slacktoken_token').value.trim()
+  const access = document.getElementById('slacktoken_access').value === 'read' ? 'read' : 'readwrite'
+
+  if (!connectionName) { showWarning('Connection name is required'); return }
+  if (!CONN_NAME_RX.test(connectionName)) { showWarning('Connection name: letters, digits, underscore and dash only'); return }
+  if (state.connections.find(c => c.connectionName === connectionName)) { showWarning('A connection named "' + connectionName + '" already exists'); return }
+  if (!token) { showWarning('Token is required'); return }
+  if (!token.startsWith('xoxp-')) {
+    showWarning(token.startsWith('xoxb-')
+      ? 'That is a Bot token (xoxb). Use the User OAuth Token (xoxp) — a bot only sees channels it was invited to, and cannot mark messages read.'
+      : 'That does not look like a Slack User OAuth Token — it should start with xoxp-.')
+    return
+  }
+
+  const record = {
+    type: 'connection',
+    provider: 'slack',
+    connectionName,
+    account_email: null,
+    services: ['messaging'],
+    access: { messaging: access },
+    status: 'ok',
+    refresh_lock_at: null,
+    sync_bodies: false,
+    sync_attachments: false,
+    oauth: {
+      accessToken: token,
+      refreshToken: null,
+      expiry: Date.now() + SLACK_TOKEN_NON_EXPIRING_MS,
+      oauthConfigName: 'manual-token'
+    }
+  }
+
+  const wantLive = document.getElementById('slacktoken_live').checked
+
+  try {
+    showLoading(true)
+    const result = await freezr.create(TABLE_NAME, record)
+    if (!result || result.error) throw new Error(result?.error || 'Error creating connection')
+    const localRow = {
+      _id: result._id, type: 'connection', provider: 'slack', connectionName,
+      account_email: null, services: ['messaging'], access: { messaging: access }, status: 'ok', live: false
+    }
+
+    // Live-updates opt-in as part of creation (user request: don't make it a
+    // separate step people forget). Goes through the same endpoint as the
+    // toggle; a failure here (dead token, sockets machinery down) keeps the
+    // connection but says so — the user can retry from the Edit page.
+    let liveNote = ''
+    if (wantLive) {
+      try {
+        const liveResp = await freezr.apiRequest('POST', '/acctapi/connection_set_live', { resource_id: result._id, live: true })
+        if (liveResp && liveResp.error) throw new Error(liveResp.error)
+        localRow.live = true
+        liveNote = ' Live updates are on (they feed apps once the admin has sockets running).'
+      } catch (le) {
+        liveNote = ' Connection saved, but live updates could not be enabled: ' + (le?.message || le) + ' — retry from its Edit page.'
+      }
+    }
+
+    // Mirror the stored shape locally minus the secrets (never keep the token in page state).
+    state.connections.push(localRow)
+    showLoading(false)
+    const overlay = document.getElementById('slacktoken_overlay')
+    if (overlay) overlay.style.display = 'none'
+    redrawConnectionList()
+    showSuccess('Added Slack workspace "' + connectionName + '".' + liveNote + ' Open it at /connections/messaging.')
+  } catch (e) {
+    showLoading(false)
+    showWarning(e.message || 'Error saving Slack connection')
+  }
+}
+
 // This file now only handles the LIST view + Disconnect action + URL-param banners.
 
 const disconnectConnection = async function (doc) {
@@ -643,7 +1135,10 @@ const redrawConnectionList = function () {
       ? services.map(s => s + ' (' + (access[s] === 'readwrite' ? 'read+write' : 'read') + ')').join(', ')
       : 'no services enabled'
     const emailText = doc.account_email ? (doc.account_email + ' · ') : ''
-    details.innerText = emailText + servicesText
+    // Local file stores: show the folder they expose (local fsParams are stored in
+    // plaintext — they hold no secret; cloud store credentials stay encrypted).
+    const pathText = (doc.fsParams && doc.fsParams.rootPath) ? (doc.fsParams.rootPath + ' · ') : ''
+    details.innerText = emailText + pathText + servicesText
     info.appendChild(details)
 
     row.appendChild(info)
@@ -675,19 +1170,64 @@ const redrawConnectionList = function () {
       openCal.innerText = 'Open Calendar'
       actions.appendChild(openCal)
     }
+    if (services.includes('messaging')) {
+      const openMessaging = document.createElement('a')
+      openMessaging.className = 'smallTextButt'
+      openMessaging.href = '/connections/messaging'
+      openMessaging.innerText = 'Open Messaging'
+      actions.appendChild(openMessaging)
 
-    const editLink = document.createElement('a')
-    editLink.className = 'smallTextButt'
-    editLink.innerText = (status === 'token_expired') ? 'Reconnect' : 'Edit'
-    editLink.href = '/connections/edit?name=' + encodeURIComponent(doc.connectionName || '')
-    actions.appendChild(editLink)
+      // Live-updates opt-in (Tier-2 socket permission): user-level toggle that
+      // registers/unregisters this connection for server-side socket routing.
+      // Note it grants nothing alone — the admin must also have enabled sockets.
+      const liveBtn = document.createElement('span')
+      liveBtn.className = 'smallTextButt'
+      liveBtn.innerText = doc.live ? 'Live updates: ON' : 'Live updates: off'
+      liveBtn.style.color = doc.live ? '#059669' : '#6b7280'
+      liveBtn.title = doc.live
+        ? 'The server routes real-time activity for this connection (if the admin has sockets enabled). Click to turn off.'
+        : 'Let the server track real-time activity for this connection so apps can sync efficiently. Needs admin-enabled sockets to take effect.'
+      liveBtn.onclick = async function () {
+        try {
+          showLoading(true)
+          const resp = await freezr.apiRequest('POST', '/acctapi/connection_set_live', { resource_id: doc._id, live: !doc.live })
+          if (resp && resp.error) throw new Error(resp.error)
+          doc.live = !doc.live
+          redrawConnectionList()
+          showSuccess('Live updates ' + (doc.live ? 'enabled' : 'disabled') + ' for ' + (doc.connectionName || 'connection') + '.')
+        } catch (err) {
+          showWarning(err?.message || 'Could not change live updates')
+        } finally {
+          showLoading(false)
+        }
+      }
+      actions.appendChild(liveBtn)
+    }
 
-    const disconnectBtn = document.createElement('span')
-    disconnectBtn.className = 'smallTextButt'
-    disconnectBtn.style.color = '#dc2626'
-    disconnectBtn.innerText = 'Disconnect'
-    disconnectBtn.onclick = function () { disconnectConnection(doc) }
-    actions.appendChild(disconnectBtn)
+    // File stores are managed right here (no /connections/edit page for them, no
+    // token to revoke): a plain Remove instead of Edit/Disconnect.
+    const isFileStore = services.includes('fs')
+    if (isFileStore) {
+      const removeBtn = document.createElement('span')
+      removeBtn.className = 'smallTextButt'
+      removeBtn.style.color = '#dc2626'
+      removeBtn.innerText = 'Remove'
+      removeBtn.onclick = function () { removeFileStore(doc) }
+      actions.appendChild(removeBtn)
+    } else {
+      const editLink = document.createElement('a')
+      editLink.className = 'smallTextButt'
+      editLink.innerText = (status === 'token_expired') ? 'Reconnect' : 'Edit'
+      editLink.href = '/connections/edit?name=' + encodeURIComponent(doc.connectionName || '')
+      actions.appendChild(editLink)
+
+      const disconnectBtn = document.createElement('span')
+      disconnectBtn.className = 'smallTextButt'
+      disconnectBtn.style.color = '#dc2626'
+      disconnectBtn.innerText = 'Disconnect'
+      disconnectBtn.onclick = function () { disconnectConnection(doc) }
+      actions.appendChild(disconnectBtn)
+    }
 
     row.appendChild(actions)
     connectionTable.appendChild(row)

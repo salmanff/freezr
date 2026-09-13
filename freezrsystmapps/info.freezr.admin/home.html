@@ -7,6 +7,10 @@
   </nav>
 
   <div class="freezr-content">
+    {{#freezrVersion}}
+    <p style="color: var(--freezr-text-muted); font-size: 13px; margin-bottom: 1rem; text-align: right;">freezr version {{freezrVersion}}</p>
+    {{/freezrVersion}}
+
     <div class="freezr-card">
       <h3 style="margin-bottom: 1rem;">User Management</h3>
       <div class="admin-buttons">
@@ -22,6 +26,7 @@
         <a href="/admin/prefs" class="admin-btn">System Preferences</a>
         <a href="/admin/cache_prefs" class="admin-btn">Cache Preferences</a>
         <a href="/account/logviewer" class="admin-btn">Review Visit Logs</a>
+        <a href="/admin/resourceusage" class="admin-btn">Storage &amp; LLM Usage</a>
         <a href="/admin/addlocalmicroservice" class="admin-btn">Add a Local Microservice</a>
       </div>
     </div>

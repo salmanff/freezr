@@ -6,9 +6,13 @@
 // As older requests age out, the count drops and throttling eases.
 //
 // Two-phase approach:
-//   1. Under THROTTLE_START: full speed, no delay
-//   2. THROTTLE_START to MAX: increasing delay per request (graceful for sequential backups)
-//   3. Over MAX: hard reject with 429
+//   1. Under throttleStart (90% of max): full speed, no delay
+//   2. throttleStart to max: increasing delay per request (graceful for sequential backups)
+//   3. At max: hard reject with 429 (rejected requests are NOT counted, so a
+//      client that keeps retrying still recovers as older requests age out)
+//
+// The max is admin-configurable via the apiRateLimitPerUserMinute preference
+// (admin/prefs page); when unset, API_RATE_LIMIT.MAX_REQUESTS_PER_USER applies.
 //
 // setTimeout delays do NOT block the Node.js event loop — other users are unaffected.
 // Per-server (in-memory) — correct for freezr's single-instance architecture.
@@ -31,12 +35,22 @@ const cleanupTimer = setInterval(() => {
 if (cleanupTimer.unref) cleanupTimer.unref()
 
 /**
+ * Resolve the effective per-user max from admin prefs, falling back to the constant.
+ */
+const maxRequestsFromPrefs = (freezrPrefs) => {
+  const prefLimit = freezrPrefs?.apiRateLimitPerUserMinute
+  if (Number.isInteger(prefLimit) && prefLimit > 0) return prefLimit
+  return API_RATE_LIMIT.MAX_REQUESTS_PER_USER
+}
+
+/**
  * Count recent requests and determine action.
  * Returns { action: 'allow' | 'throttle' | 'reject', delayMs, retryAfterMs }
  */
-const checkUserRate = (userId) => {
+const checkUserRate = (userId, maxRequests) => {
   const now = Date.now()
   const cutoff = now - API_RATE_LIMIT.WINDOW_MS
+  const throttleStart = Math.floor(maxRequests * 0.9)
 
   let timestamps = userRequests.get(userId)
   if (!timestamps) {
@@ -49,24 +63,25 @@ const checkUserRate = (userId) => {
     timestamps.shift()
   }
 
-  // Record this request
-  timestamps.push(now)
-  const count = timestamps.length
-
-  if (count <= API_RATE_LIMIT.THROTTLE_START) {
-    return { action: 'allow' }
-  }
-
-  if (count > API_RATE_LIMIT.MAX_REQUESTS_PER_USER) {
-    // Estimate when the oldest throttle-zone request will age out
-    const oldestRelevant = timestamps[count - API_RATE_LIMIT.MAX_REQUESTS_PER_USER]
+  if (timestamps.length >= maxRequests) {
+    // Reject without recording — keeps the array bounded at maxRequests and
+    // lets a retrying client back in as soon as older requests age out
+    const oldestRelevant = timestamps[timestamps.length - maxRequests]
     const retryAfterMs = oldestRelevant ? (oldestRelevant - cutoff) : API_RATE_LIMIT.WINDOW_MS
     return { action: 'reject', retryAfterMs: Math.max(retryAfterMs, 1000) }
   }
 
+  // Record this request
+  timestamps.push(now)
+  const count = timestamps.length
+
+  if (count <= throttleStart) {
+    return { action: 'allow' }
+  }
+
   // Throttle zone: linearly increasing delay from ~0ms to ~1000ms
-  const throttleRange = API_RATE_LIMIT.MAX_REQUESTS_PER_USER - API_RATE_LIMIT.THROTTLE_START
-  const progress = (count - API_RATE_LIMIT.THROTTLE_START) / throttleRange
+  const throttleRange = maxRequests - throttleStart
+  const progress = (count - throttleStart) / throttleRange
   const delayMs = Math.round(progress * 1000)
   return { action: 'throttle', delayMs }
 }
@@ -76,18 +91,19 @@ const checkUserRate = (userId) => {
  * Must be placed after token validation middleware (needs res.locals.freezr.tokenInfo).
  */
 export const apiRateLimit = (req, res, next) => {
+  if (process.env.NODE_ENV === 'development') {
+    return next()
+  }
+
   const userId = res.locals.freezr?.tokenInfo?.requestor_id
   if (!userId) {
     return next()
   }
 
-  const result = checkUserRate(userId)
+  const maxRequests = maxRequestsFromPrefs(res.locals.freezr?.freezrPrefs)
+  const result = checkUserRate(userId, maxRequests)
 
   if (result.action === 'allow') {
-    return next()
-  }
-
-  if (process.env.NODE_ENV === 'development') {
     return next()
   }
 

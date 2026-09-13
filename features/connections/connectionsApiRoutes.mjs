@@ -30,7 +30,9 @@ const PERMS_APP_TABLE = 'info.freezr.account.permissions'
 const KNOWN_CONNECTION_PERMS = [
   { permType: 'use_mail', service: 'mail' },
   { permType: 'use_contacts', service: 'contacts' },
-  { permType: 'use_calendar', service: 'calendar' }
+  { permType: 'use_calendar', service: 'calendar' },
+  { permType: 'use_messaging', service: 'messaging' },
+  { permType: 'use_file_sys', service: 'fs' }
 ]
 
 export const createConnectionsApiRoutes = ({ dsManager, freezrPrefs }) => {
@@ -104,7 +106,8 @@ export const createConnectionsApiRoutes = ({ dsManager, freezrPrefs }) => {
         account_email: c.account_email,
         services: c.services,
         access: c.access,
-        status: c.status || 'ok'
+        status: c.status || 'ok',
+        live: c.live === true // messaging live-updates opt-in (socket routing)
       }))
 
       return sendApiSuccess(res, { accounts: out })

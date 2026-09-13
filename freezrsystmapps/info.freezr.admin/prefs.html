@@ -78,12 +78,32 @@
           <input type="checkbox" name="scheduler_disabled" id="schedulerDisabledId" value="scheduler_disabled" {{#scheduler_disabled}}checked{{/scheduler_disabled}} style="margin-top: 0.25rem;"/>
           <span>Pause scheduled jobs on this server. Scheduled jobs run by default; check this to stop all scheduled runs (takes effect immediately; on-demand and app-invoked jobs are unaffected).</span>
         </label>
+        <label style="display: flex; align-items: flex-start; gap: 0.75rem; cursor: pointer; margin-top: 1rem;">
+          <input type="checkbox" name="sockets_enabled" id="socketsEnabledId" value="sockets_enabled" {{#sockets_enabled}}checked{{/sockets_enabled}} style="margin-top: 0.25rem;"/>
+          <span>Enable messaging sockets (live updates). Lets this server hold persistent outbound connections to messaging providers (e.g. Slack) so apps can sync efficiently. Off by default. This is the master switch only — each provider also needs an enabled admission on the <a href="/admin/sockets">Sockets page</a> and its credential, and each user opts their connection in on Account Resources.</span>
+        </label>
+        <label style="display: flex; align-items: flex-start; gap: 0.75rem; cursor: pointer; margin-top: 1rem;">
+          <input type="checkbox" name="local_llm_cli_enabled" id="localLlmCliEnabledId" value="local_llm_cli_enabled" {{#local_llm_cli_enabled}}checked{{/local_llm_cli_enabled}} style="margin-top: 0.25rem;"/>
+          <span>Enable local CLI LLM connectors (Claude Code / OpenAI Codex). Lets <b>admin users only</b> route LLM calls through this machine's logged-in <code>claude</code> or <code>codex</code> CLI, using the owner's own Claude / ChatGPT subscription instead of a metered API key. Off by default. Master switch only — the admin must also complete the enable step on their Account Resources page, and a logged-in CLI must be installed on this server. Intended solely for a self-hosted server whose owner is the subscription holder (Anthropic's terms do not allow offering subscription access to other users; OpenAI recommends API keys for automation).</span>
+        </label>
+        <label style="display: flex; align-items: flex-start; gap: 0.75rem; cursor: pointer; margin-top: 1rem;">
+          <input type="checkbox" name="local_fs_access_enabled" id="localFsAccessEnabledId" value="local_fs_access_enabled" {{#local_fs_access_enabled}}checked{{/local_fs_access_enabled}} style="margin-top: 0.25rem;"/>
+          <span>Enable local file-store access. Lets <b>admin users only</b> add a local folder as a file store on Account Resources and grant apps scoped access to it (browse / read, optionally write). Off by default. Only works on servers whose own file system is local, and only for requests arriving on <code>localhost</code>; the folder may never overlap the freezr installation directory. Cloud file stores (e.g. Dropbox) are unaffected by this switch.</span>
+        </label>
         <div style="margin-top: 1rem;">
           <label class="texttop">Serverless callback URL</label>
           <input type="text" class="input" id="serverlessCallbackUrlId" name="serverless_callback_url" value="{{serverless_callback_url}}" placeholder="https://my.freezr.example" style="max-width: 420px;"/>
           <p class="smallText">Public base URL a serverless (Lambda) job calls back to reach this server's API. Must be reachable from the internet (not localhost). Optional — jobs that don't call the freezr API run without it.</p>
           <p class="smallText" id="serverlessCallbackUrlNote" style="display:none;"></p>
         </div>
+      </div>
+
+      <!-- API Rate Limit -->
+      <div class="freezr-card">
+        <h3 style="margin-bottom: 1rem;">API Rate Limit</h3>
+        <label class="texttop">Maximum API requests per user per minute</label>
+        <input class="input" id="apiRateLimitPerUserMinute" name="apiRateLimitPerUserMinute" {{#apiRateLimitPerUserMinute}}value="{{apiRateLimitPerUserMinute}}"{{/apiRateLimitPerUserMinute}} placeholder="1000 (default)" style="max-width: 200px;"/>
+        <p class="smallText">Requests beyond this rate are rejected with a "too many requests" error until older requests age out. Requests are gently slowed from 90% of the limit. Leave blank to use the default (1000). Minimum 30.</p>
       </div>
 
       <!-- Admin Confirmation -->

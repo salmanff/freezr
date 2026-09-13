@@ -46,6 +46,7 @@ export const listAllUserApps = async (userDS, options = {}) => {
       const processedResults = results.map(app => {
         const processedApp = {
           app_name: app.app_name,
+          app_type: app.app_type || null, // 'askapp' for ask-apps (see freezr_askapps_plan_v1.md); null for ordinary apps
           removed: app.removed,
           served_url: app.served_url,
           _date_modified: app._date_modified,
@@ -298,6 +299,7 @@ export const getStructuredAppListForUser = async (appListDb, userId) => {
         
         return {
           app_name: app.app_name,
+          app_type: app.app_type || null, // 'askapp' for ask-apps (see freezr_askapps_plan_v1.md); null for ordinary apps
           removed: app.removed,
           served_url: app.served_url,
           _date_modified: app._date_modified,
@@ -360,9 +362,21 @@ export const getAppResources = async (userDS) => {
  * @param {string} queryName - Name of the query function
  * @returns {Function|null} Query function or null if not found
  */
+// Home-page variant of listAllUserApps that hides ask-apps — they are managed from the ask-app
+// builder (/creator/ask), not the account home grid. See freezr_askapps_plan_v1.md.
+export const listAllUserAppsNoAskApps = async (userDS, options) => {
+  const result = await listAllUserApps(userDS, options)
+  const notAskApp = (a) => !a || a.app_type !== 'askapp'
+  return {
+    user_apps: (result.user_apps || []).filter(notAskApp),
+    removed_apps: (result.removed_apps || []).filter(notAskApp)
+  }
+}
+
 export const getQueryFunction = (queryName) => {
   const queryFunctions = {
     listAllUserApps,
+    listAllUserAppsNoAskApps,
     getAccountSettings,
     getServerlessSettings,
     getReauthorizeData,

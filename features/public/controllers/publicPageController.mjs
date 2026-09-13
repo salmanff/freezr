@@ -1048,8 +1048,19 @@ export const createPublicPageController = () => {
       }
 
       try {
-        // Build public ID from the path (remove leading slash)
-        const publicId = req.path.startsWith('/') ? req.path.substring(1) : req.path
+        // Build public ID from the path (remove leading slash). req.path keeps
+        // percent-encoding while stored publicids hold the literal characters,
+        // so decode first — see the same note in prepUserDSsForPublicFiles.
+        const rawPublicId = req.path.startsWith('/') ? req.path.substring(1) : req.path
+        let publicId = rawPublicId
+        try {
+          publicId = decodeURIComponent(rawPublicId)
+        } catch (e) {
+          // malformed escape sequence — fall back to the raw path
+        }
+        if (publicId !== rawPublicId && !(await publicRecordsDb.read_by_id(publicId))) {
+          publicId = rawPublicId
+        }
 
         // Render using shared helper
         return renderPublicObjectPage(req, res, publicId, { redirectOnError: true })

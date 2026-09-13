@@ -75,6 +75,126 @@ resources: {
       <div id="llmGridDetails" style="margin-top: 0.5rem;"></div>
     </div>
 
+    <!-- ============ CLAUDE CODE (LOCAL SUBSCRIPTION) — admin-only, shown when eligible ============ -->
+    <div class="freezr-card" id="claudelocal_card" style="display: none; margin-top: 1rem;">
+      <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
+        <h3 style="margin: 0;">Claude Code (local subscription)</h3>
+        <button class="freezrButt" id="button_enable_claudelocal" style="display: none;">Enable&hellip;</button>
+      </div>
+      <p class="smallText" style="margin-top: 0.5rem;" id="claudelocal_status"></p>
+    </div>
+
+    <!-- ClaudeLocal enable overlay (attestation instead of an API key) -->
+    <div id="claudelocal_overlay" class="overlay" style="display: none;">
+      <div class="overlay-content">
+        <button class="overlay-close" id="claudelocal_overlay_close">&times;</button>
+        <h3>Enable Claude Code (local subscription)</h3>
+        <div style="max-width: 500px;">
+          <p class="smallText" style="margin-top: 0;">
+            Routes LLM calls through the <code>claude</code> command-line tool installed and logged in
+            <b>on this server</b>, so they use your own Claude subscription instead of a metered API key.
+            freezr never reads or stores your Claude credentials &mdash; it only runs the binary below and
+            reads its output. Usage counts against your subscription's normal limits (the same pool as
+            your interactive Claude Code use), and calls report a cost of $0.
+          </p>
+
+          <p class="smallText" id="claudelocal_scope_note" style="margin-top:0.75rem; padding:0.6rem 0.75rem; border-left:3px solid #b45309; background:#fffbeb;">
+            <b>Which apps can use this:</b> by default, <b>only the Creator app</b> &mdash; the one you
+            build apps with. Other apps will not see it as an option, even after you enable it here.
+            Two reasons: these calls spend <i>your own</i> Claude subscription rather than a metered API key, and
+            the provider's terms cover a subscription holder's own personal and development use, not serving other people from it. Your server administrator can lift this by setting the
+            <code>SHOW_LOCAL_AGENT_IN_APPS=true</code> environment variable &mdash; at their own risk.
+          </p>
+
+          <label class="texttop">Claude CLI binary path</label>
+          <input type="text" class="input" id="claudelocal_binary" placeholder="/Users/you/.local/bin/claude"/>
+          <p class="smallText">Detected automatically where possible. Must be a file named <code>claude</code>.</p>
+
+          <label style="display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; margin: 0.75rem 0 0 0;">
+            <input type="checkbox" id="claudelocal_att_owner" style="margin-top: 0.25rem;"/>
+            <span class="smallText">I administer this server, and the Claude subscription logged in on this machine is my own.</span>
+          </label>
+          <label style="display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; margin: 0.5rem 0 0 0;">
+            <input type="checkbox" id="claudelocal_att_personal" style="margin-top: 0.25rem;"/>
+            <span class="smallText">I will use this for my own personal use only, and will not offer it as a service to other users (Anthropic's terms prohibit offering subscription access to third parties).</span>
+          </label>
+          <label style="display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; margin: 0.5rem 0 0 0;">
+            <input type="checkbox" id="claudelocal_att_terms" style="margin-top: 0.25rem;"/>
+            <span class="smallText">I have read <a href="https://support.claude.com/en/articles/15036540" target="_blank" rel="noopener">Anthropic's policy on using the Claude Agent SDK / Claude Code with a subscription</a>, and I accept responsibility for my use of it.</span>
+          </label>
+
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin: 1rem 0;">
+            <input type="checkbox" class="freezer_largeCheckBox" id="claudelocal_default"/>
+            <span>Set as default LLM</span>
+          </label>
+
+          <div class="button-row" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <button class="freezrButt" id="button_claudelocalSave">Enable</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ OPENAI CODEX (LOCAL CHATGPT SUBSCRIPTION) — admin-only, shown when eligible ============ -->
+    <div class="freezr-card" id="codexlocal_card" style="display: none; margin-top: 1rem;">
+      <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
+        <h3 style="margin: 0;">OpenAI Codex (local subscription)</h3>
+        <button class="freezrButt" id="button_enable_codexlocal" style="display: none;">Enable&hellip;</button>
+      </div>
+      <p class="smallText" style="margin-top: 0.5rem;" id="codexlocal_status"></p>
+    </div>
+
+    <!-- CodexLocal enable overlay (attestation instead of an API key) -->
+    <div id="codexlocal_overlay" class="overlay" style="display: none;">
+      <div class="overlay-content">
+        <button class="overlay-close" id="codexlocal_overlay_close">&times;</button>
+        <h3>Enable OpenAI Codex (local subscription)</h3>
+        <div style="max-width: 500px;">
+          <p class="smallText" style="margin-top: 0;">
+            Routes LLM calls through the <code>codex</code> command-line tool installed and logged in
+            <b>on this server</b> (signed in with your ChatGPT account), so they use your ChatGPT
+            subscription instead of a metered API key. freezr never reads or stores your OpenAI
+            credentials &mdash; it only runs the binary below and reads its output. Usage counts
+            against your plan's Codex limits, and calls report a cost of $0.
+          </p>
+
+          <p class="smallText" id="codexlocal_scope_note" style="margin-top:0.75rem; padding:0.6rem 0.75rem; border-left:3px solid #b45309; background:#fffbeb;">
+            <b>Which apps can use this:</b> by default, <b>only the Creator app</b> &mdash; the one you
+            build apps with. Other apps will not see it as an option, even after you enable it here.
+            Two reasons: these calls spend <i>your own</i> ChatGPT subscription rather than a metered API key, and
+            Codex runs an <b>agent</b>: command execution is switched off, but no single setting has been proven to remove every action it could take, so it should not be fed untrusted content such as other people's emails or messages. Your server administrator can lift this by setting the
+            <code>SHOW_LOCAL_AGENT_IN_APPS=true</code> environment variable &mdash; at their own risk.
+          </p>
+
+          <label class="texttop">Codex CLI binary path</label>
+          <input type="text" class="input" id="codexlocal_binary" placeholder="/Users/you/.local/bin/codex"/>
+          <p class="smallText">Detected automatically where possible. Must be a file named <code>codex</code>.</p>
+
+          <label style="display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; margin: 0.75rem 0 0 0;">
+            <input type="checkbox" id="codexlocal_att_owner" style="margin-top: 0.25rem;"/>
+            <span class="smallText">I administer this server, and the ChatGPT subscription logged in on this machine is my own.</span>
+          </label>
+          <label style="display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; margin: 0.5rem 0 0 0;">
+            <input type="checkbox" id="codexlocal_att_personal" style="margin-top: 0.25rem;"/>
+            <span class="smallText">I will use this for my own personal use only, and will not offer it as a service to other users.</span>
+          </label>
+          <label style="display: flex; align-items: flex-start; gap: 0.5rem; cursor: pointer; margin: 0.5rem 0 0 0;">
+            <input type="checkbox" id="codexlocal_att_terms" style="margin-top: 0.25rem;"/>
+            <span class="smallText">I understand this is governed by <a href="https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan" target="_blank" rel="noopener">OpenAI's terms for using Codex with a ChatGPT plan</a> (OpenAI recommends API keys for automation), and I accept responsibility for my use of it.</span>
+          </label>
+
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; margin: 1rem 0;">
+            <input type="checkbox" class="freezer_largeCheckBox" id="codexlocal_default"/>
+            <span>Set as default LLM</span>
+          </label>
+
+          <div class="button-row" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <button class="freezrButt" id="button_codexlocalSave">Enable</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ========================= COMPUTE PROVIDERS (SERVERLESS) ========================= -->
     <div class="freezr-card" style="margin-top: 1rem;">
       <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
@@ -138,16 +258,64 @@ resources: {
       <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
         <h3 style="margin: 0;">Connected Accounts</h3>
       </div>
-      <div> 
-        <a class="freezrButt" href="/connections/new" style="text-decoration: none; line-height: 1.6;">Connect a Gmail or Microsoft Account</a>
+      <div>
+        <a class="freezrButt" href="/connections/new" style="text-decoration: none; line-height: 1.6;">Connect a Gmail, Microsoft or Slack Account</a>
         <button class="freezrButt" id="button_addnew_imap">Add IMAP Mailbox</button>
+        <button class="freezrButt" id="button_addnew_slacktoken">Add Slack (paste token)</button>
       </div>
       <p class="smallText" style="margin-top: 0.5rem;">
         Authorize freezr to access external services on your behalf. OAuth accounts
         (Gmail) use "Connect Account"; IMAP mailboxes (Yahoo, iCloud, Fastmail, self-hosted)
         use "Add IMAP Mailbox" with an app password. The mail app works the same way for both.
+        Slack workspaces can also be added directly with a User OAuth Token — useful when
+        the OAuth flow isn't set up (e.g. localhost without https).
       </p>
       <div id="connectionGridDetails" style="margin-top: 0.5rem;"></div>
+    </div>
+
+    <!-- ============ FILE STORES — local folder is admin-only, shown when eligible ============ -->
+    <div class="freezr-card" id="filestore_card" style="display: none; margin-top: 1rem;">
+      <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
+        <h3 style="margin: 0;">File Stores</h3>
+        <button class="freezrButt" id="button_addnew_filestore" style="display: none;">Add Local Folder</button>
+      </div>
+      <p class="smallText" style="margin-top: 0.5rem;" id="filestore_status"></p>
+    </div>
+
+    <!-- Local folder file-store overlay -->
+    <div id="filestore_overlay" class="overlay" style="display: none;">
+      <div class="overlay-content">
+        <button class="overlay-close" id="filestore_overlay_close">&times;</button>
+        <h3>Add a Local Folder as a File Store</h3>
+        <div style="max-width: 460px;">
+          <p class="smallText" style="margin-top: 0;">
+            Lets apps you explicitly authorize (via the <code>use_file_sys</code> permission)
+            browse and read the files in one folder on this server's machine — for example to
+            send documents to an AI app for analysis. Apps see <b>everything</b> inside the
+            folder, so pick the narrowest folder that works. The folder may not overlap the
+            freezr installation directory, and access only works for admin users on
+            <code>localhost</code>.
+          </p>
+
+          <label class="texttop">Store name</label>
+          <input type="text" class="input" id="filestore_name" placeholder="e.g. home-documents"/>
+          <p class="smallText">Letters, digits, underscore and dash only. Apps refer to the store by this name.</p>
+
+          <label class="texttop">Folder path (absolute)</label>
+          <input type="text" class="input" id="filestore_path" placeholder="/Users/you/Documents/ai-inbox"/>
+
+          <label class="texttop">Access</label>
+          <select class="input" id="filestore_access">
+            <option value="read">Read only (browse + read)</option>
+            <option value="readwrite">Read &amp; write (browse, read, write, delete files)</option>
+          </select>
+          <p class="smallText">This is the store's ceiling — each app's grant can be narrowed further, and write access additionally requires the app's permission to carry the write scope.</p>
+
+          <div class="button-row" style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem;">
+            <button class="freezrButt" id="button_filestoreSave">Add File Store</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- IMAP mailbox add overlay (app-password connection — provider 'imap') -->
@@ -200,6 +368,50 @@ resources: {
 
           <div class="button-row" style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem;">
             <button class="freezrButt" id="button_imapSave">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Slack token-paste overlay (messaging connection — provider 'slack', no OAuth flow) -->
+    <div id="slacktoken_overlay" class="overlay" style="display: none;">
+      <div class="overlay-content">
+        <button class="overlay-close" id="slacktoken_overlay_close">&times;</button>
+        <h3>Add Slack Workspace (token)</h3>
+        <div style="max-width: 440px;">
+          <p class="smallText" style="margin-top: 0;">
+            Paste a <b>User OAuth Token</b> (<code>xoxp-…</code>) from your Slack app:
+            api.slack.com/apps &rarr; your app &rarr; OAuth &amp; Permissions &rarr;
+            <i>Install to Workspace</i>. Add the user-token scopes there first
+            (channels/groups/im/mpim <code>:read</code> + <code>:history</code>,
+            <code>users:read</code>, and <code>chat:write</code> + the <code>*:write</code>
+            scopes for sending / mark-read). The token is encrypted at rest.
+          </p>
+
+          <label class="texttop">Connection name</label>
+          <input type="text" class="input" id="slacktoken_name" placeholder="e.g. slackWork"/>
+          <p class="smallText">Letters, digits, underscore and dash only. Used by apps to refer to this workspace.</p>
+
+          <label class="texttop">User OAuth Token</label>
+          <input type="password" class="input" id="slacktoken_token" placeholder="xoxp-…"/>
+
+          <label class="texttop">Access</label>
+          <select class="input" id="slacktoken_access">
+            <option value="readwrite">Read &amp; write (send, mark read)</option>
+            <option value="read">Read only</option>
+          </select>
+
+          <label style="display: flex; align-items: flex-start; gap: 0.5rem; margin-top: 0.75rem; cursor: pointer;">
+            <input type="checkbox" id="slacktoken_live" checked style="margin-top: 0.25rem;"/>
+            <span>
+              <b>Live updates</b> — let the server track real-time activity for this
+              connection so apps can sync efficiently.
+              <span class="smallText" style="display:block; margin: 0.25rem 0 0 0;">Only takes effect once this server's admin has enabled messaging sockets. You can change this later on the connection's Edit page.</span>
+            </span>
+          </label>
+
+          <div class="button-row" style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem;">
+            <button class="freezrButt" id="button_slacktokenSave">Save</button>
           </div>
         </div>
       </div>

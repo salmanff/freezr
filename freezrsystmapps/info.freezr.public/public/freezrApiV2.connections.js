@@ -3,16 +3,18 @@
 //
 // Attaches `freezr.connections` to the global `freezr` object created by
 // freezrApiV2.js (core). Loaded only when the app's manifest declares a
-// use_mail / use_contacts / use_calendar permission (see
+// use_mail / use_contacts / use_calendar / use_messaging permission (see
 // common/helpers/sdkAddons.mjs + adapters/rendering/pageLoader.mjs).
 //
-// Surfaces three sibling namespaces:
+// Surfaces four sibling namespaces:
 //   freezr.connections.mail
 //   freezr.connections.contacts
 //   freezr.connections.calendar
-// All three share the same connection records and OAuth grants — a single
-// Gmail connect can light up all three depending on the access map the user
-// approved at /account/resources (see freezr_mail_plan_v1.md Part 4).
+//   freezr.connections.messaging
+// All share the same connection records and OAuth grants — a single Gmail
+// connect can light up mail/contacts/calendar depending on the access map the
+// user approved at /account/resources (see freezr_mail_plan_v1.md Part 4);
+// messaging comes from its own providers (Slack first).
 
 /* global freezr, freezrMeta */
 
@@ -749,7 +751,261 @@ if (typeof freezr === 'undefined') {
     handleTokenExpired (resOrErr) { return freezr.connections.mail.handleTokenExpired(resOrErr) }
   }
 
-  // Cross-service convenience: the handler is identical for all three services
+  // ============================================
+  // freezr.connections.messaging
+  // ============================================
+  //
+  // Per-connection messaging API (Slack first), gated by use_messaging. Same
+  // token_expired error shape as mail; reuse `freezr.connections.handleTokenExpired`.
+  //
+  // Cross-provider model notes:
+  //   - Conversations replace mail's folders: { id, name, type: 'channel' |
+  //     'private_channel' | 'group_dm' | 'dm', isArchived, topic, purpose,
+  //     memberCount, counterpartUserId }. DMs have name: null — resolve the
+  //     counterpartUserId via getUsers.
+  //   - Messages: { id, conversationId, threadParentId, sender: { id, type },
+  //     sentAt (ms), text (raw provider markup), replyCount, edited, subtype,
+  //     reactions, files }. `id` is the provider's message id (Slack: the ts
+  //     string) — pass it back verbatim to getThread / markRead / send threadId.
+
+  freezr.connections.messaging = {
+    /**
+     * List the user's connected messaging accounts visible to this app.
+     * Backed by GET /feps/connections/accounts — filter rows client-side on
+     * `account.services.includes('messaging')`.
+     */
+    async listAccounts (options = {}) {
+      const url = (options.host || '') + '/feps/connections/accounts'
+      const writeOptions = options.appToken ? { appToken: options.appToken } : {}
+      return await freezr.apiRequest('GET', url, null, writeOptions)
+    },
+
+    /**
+     * List conversations on one connection, paginated.
+     * @param {Object}   args
+     * @param {string}   args.connectionName   Required.
+     * @param {number}   [args.limit=100]      1..200.
+     * @param {string}   [args.cursor]         Opaque cursor from a prior call.
+     * @param {string[]|string} [args.types]   Subset of ['channel','private_channel','group_dm','dm'].
+     * @param {boolean}  [args.includeArchived]
+     * @returns { success, connectionName, conversations, nextCursor }
+     */
+    async listConversations ({ connectionName, limit, cursor, types, includeArchived } = {}, options = {}) {
+      if (!connectionName) throw new Error('listConversations: connectionName is required')
+      const params = []
+      if (limit !== undefined) params.push('limit=' + encodeURIComponent(limit))
+      if (cursor) params.push('cursor=' + encodeURIComponent(cursor))
+      if (types) params.push('types=' + encodeURIComponent(Array.isArray(types) ? types.join(',') : types))
+      if (includeArchived) params.push('includeArchived=true')
+      const url = (options.host || '') + '/feps/connections/messaging/' +
+        encodeURIComponent(connectionName) + '/conversations' +
+        (params.length ? ('?' + params.join('&')) : '')
+      const writeOptions = options.appToken ? { appToken: options.appToken } : {}
+      return await freezr.apiRequest('GET', url, null, writeOptions)
+    },
+
+    /**
+     * Fetch messages from one conversation, NEWEST FIRST, paginated (the cursor
+     * pages older). Returns { success, connectionName, conversationId, messages, nextCursor }.
+     * @param {Object}  args
+     * @param {string}  args.connectionName
+     * @param {string}  args.conversationId
+     * @param {number}  [args.limit=25]     1..200.
+     * @param {string}  [args.cursor]       Opaque cursor — pass back to get OLDER messages.
+     * @param {string}  [args.oldest]       Message id — only messages after this.
+     * @param {string}  [args.latest]       Message id — only messages before this.
+     */
+    async getMessages ({ connectionName, conversationId, limit, cursor, oldest, latest } = {}, options = {}) {
+      if (!connectionName) throw new Error('getMessages: connectionName is required')
+      if (!conversationId) throw new Error('getMessages: conversationId is required')
+      const params = []
+      if (limit !== undefined) params.push('limit=' + encodeURIComponent(limit))
+      if (cursor) params.push('cursor=' + encodeURIComponent(cursor))
+      if (oldest) params.push('oldest=' + encodeURIComponent(oldest))
+      if (latest) params.push('latest=' + encodeURIComponent(latest))
+      const url = (options.host || '') + '/feps/connections/messaging/' +
+        encodeURIComponent(connectionName) + '/conversations/' +
+        encodeURIComponent(conversationId) + '/messages' +
+        (params.length ? ('?' + params.join('&')) : '')
+      const writeOptions = options.appToken ? { appToken: options.appToken } : {}
+      return await freezr.apiRequest('GET', url, null, writeOptions)
+    },
+
+    /**
+     * Fetch a thread (parent message + replies, oldest first), paginated.
+     * `threadId` is the parent message's id.
+     * Returns { success, connectionName, conversationId, threadId, messages, nextCursor }.
+     */
+    async getThread ({ connectionName, conversationId, threadId, limit, cursor } = {}, options = {}) {
+      if (!connectionName) throw new Error('getThread: connectionName is required')
+      if (!conversationId) throw new Error('getThread: conversationId is required')
+      if (!threadId) throw new Error('getThread: threadId is required')
+      const params = []
+      if (limit !== undefined) params.push('limit=' + encodeURIComponent(limit))
+      if (cursor) params.push('cursor=' + encodeURIComponent(cursor))
+      const url = (options.host || '') + '/feps/connections/messaging/' +
+        encodeURIComponent(connectionName) + '/conversations/' +
+        encodeURIComponent(conversationId) + '/threads/' + encodeURIComponent(threadId) +
+        (params.length ? ('?' + params.join('&')) : '')
+      const writeOptions = options.appToken ? { appToken: options.appToken } : {}
+      return await freezr.apiRequest('GET', url, null, writeOptions)
+    },
+
+    /**
+     * Incremental sync for ONE conversation (unlike mail's per-connection
+     * getNewer — messaging providers have no cross-conversation delta API).
+     * First call without lastToken seeds and returns { messages: [], nextToken }.
+     * Returns { success, connectionName, conversationId, messages, nextToken, expired }.
+     */
+    async getNewer ({ connectionName, conversationId, lastToken, limit } = {}, options = {}) {
+      if (!connectionName) throw new Error('getNewer: connectionName is required')
+      if (!conversationId) throw new Error('getNewer: conversationId is required')
+      const params = []
+      if (lastToken) params.push('lastToken=' + encodeURIComponent(lastToken))
+      if (limit !== undefined) params.push('limit=' + encodeURIComponent(limit))
+      const url = (options.host || '') + '/feps/connections/messaging/' +
+        encodeURIComponent(connectionName) + '/conversations/' +
+        encodeURIComponent(conversationId) + '/newer' +
+        (params.length ? ('?' + params.join('&')) : '')
+      const writeOptions = options.appToken ? { appToken: options.appToken } : {}
+      return await freezr.apiRequest('GET', url, null, writeOptions)
+    },
+
+    /**
+     * List one conversation's member ids.
+     * Mainly for group DMs, whose provider `name` is a machine string
+     * ("mpdm-a--b--c-1") — resolve these ids via getUsers to build a real label.
+     * Returns { success, connectionName, conversationId, memberIds, nextCursor }.
+     */
+    async getConversationMembers ({ connectionName, conversationId, limit, cursor } = {}, options = {}) {
+      if (!connectionName) throw new Error('getConversationMembers: connectionName is required')
+      if (!conversationId) throw new Error('getConversationMembers: conversationId is required')
+      const params = []
+      if (limit !== undefined) params.push('limit=' + encodeURIComponent(limit))
+      if (cursor) params.push('cursor=' + encodeURIComponent(cursor))
+      const url = (options.host || '') + '/feps/connections/messaging/' +
+        encodeURIComponent(connectionName) + '/conversations/' +
+        encodeURIComponent(conversationId) + '/members' +
+        (params.length ? ('?' + params.join('&')) : '')
+      const writeOptions = options.appToken ? { appToken: options.appToken } : {}
+      return await freezr.apiRequest('GET', url, null, writeOptions)
+    },
+
+    /**
+     * The connected account's own identity — `profile.userId` is what lets a
+     * client tell the user's own messages from everyone else's.
+     * Returns { success, connectionName, profile }.
+     */
+    async getProfile ({ connectionName } = {}, options = {}) {
+      if (!connectionName) throw new Error('getProfile: connectionName is required')
+      const url = (options.host || '') + '/feps/connections/messaging/' +
+        encodeURIComponent(connectionName) + '/profile'
+      const writeOptions = options.appToken ? { appToken: options.appToken } : {}
+      return await freezr.apiRequest('GET', url, null, writeOptions)
+    },
+
+    /**
+     * The socket-fed activity index: which conversations changed after `since`
+     * (ms), with per-conversation edited/deleted message-id lists ({id, at}).
+     * No message content — follow up with getMessages/getNewer per changed
+     * conversation. Requires the server's admin to have enabled live sockets
+     * AND this connection to have live updates turned on (/account/resources);
+     * otherwise the index is simply empty.
+     *
+     * Read `complete` before trusting the answer: false means a socket gap,
+     * the retention horizon, or an overflowed change list covers your window —
+     * do a wider getNewer sweep instead. `gapSince` non-null = socket down now.
+     * Returns { success, connectionName, since, changes, gapSince, complete, retentionMs }.
+     */
+    async getChanges ({ connectionName, since } = {}, options = {}) {
+      if (!connectionName) throw new Error('getChanges: connectionName is required')
+      const params = []
+      if (since !== undefined) params.push('since=' + encodeURIComponent(since))
+      const url = (options.host || '') + '/feps/connections/messaging/' +
+        encodeURIComponent(connectionName) + '/changes' +
+        (params.length ? ('?' + params.join('&')) : '')
+      const writeOptions = options.appToken ? { appToken: options.appToken } : {}
+      return await freezr.apiRequest('GET', url, null, writeOptions)
+    },
+
+    /**
+     * List workspace users (paged), or batch-resolve ids by passing `ids`
+     * (array or CSV, max 100 — no paging in that mode). Use to resolve
+     * message sender ids and DM counterpartUserIds to names.
+     * Returns { success, connectionName, users, nextCursor }.
+     */
+    async getUsers ({ connectionName, limit, cursor, ids } = {}, options = {}) {
+      if (!connectionName) throw new Error('getUsers: connectionName is required')
+      const params = []
+      if (ids) params.push('ids=' + encodeURIComponent(Array.isArray(ids) ? ids.join(',') : ids))
+      if (limit !== undefined) params.push('limit=' + encodeURIComponent(limit))
+      if (cursor) params.push('cursor=' + encodeURIComponent(cursor))
+      const url = (options.host || '') + '/feps/connections/messaging/' +
+        encodeURIComponent(connectionName) + '/users' +
+        (params.length ? ('?' + params.join('&')) : '')
+      const writeOptions = options.appToken ? { appToken: options.appToken } : {}
+      return await freezr.apiRequest('GET', url, null, writeOptions)
+    },
+
+    // ============================================
+    // Writes — require granted scope 'write' AND connection access.messaging === 'readwrite'
+    // ============================================
+
+    /**
+     * Send a message as the connected user. Pass `threadId` (a parent message
+     * id) to reply in-thread. Returns { success, connectionName, messageId,
+     * conversationId, threadParentId }.
+     */
+    async sendMessage ({ connectionName, conversationId, text, threadId } = {}, options = {}) {
+      if (!connectionName) throw new Error('sendMessage: connectionName is required')
+      if (!conversationId) throw new Error('sendMessage: conversationId is required')
+      if (!text) throw new Error('sendMessage: text is required')
+      const url = (options.host || '') + '/feps/connections/messaging/' +
+        encodeURIComponent(connectionName) + '/conversations/' +
+        encodeURIComponent(conversationId) + '/send'
+      const writeOptions = options.appToken ? { appToken: options.appToken } : {}
+      return await freezr.apiRequest('POST', url, { text, threadId }, writeOptions)
+    },
+
+    /**
+     * Move the read cursor in a conversation to message id `ts` — providers
+     * model read state per-conversation, so this marks everything at or
+     * before that message as read. Returns { success, connectionName, conversationId, ts }.
+     */
+    async markRead ({ connectionName, conversationId, ts } = {}, options = {}) {
+      if (!connectionName) throw new Error('markRead: connectionName is required')
+      if (!conversationId) throw new Error('markRead: conversationId is required')
+      if (!ts) throw new Error('markRead: ts (message id) is required')
+      const url = (options.host || '') + '/feps/connections/messaging/' +
+        encodeURIComponent(connectionName) + '/conversations/' +
+        encodeURIComponent(conversationId) + '/markread'
+      const writeOptions = options.appToken ? { appToken: options.appToken } : {}
+      return await freezr.apiRequest('POST', url, { ts }, writeOptions)
+    },
+
+    /**
+     * Delete one message.
+     *
+     * Providers generally only allow deleting the user's OWN messages —
+     * someone else's throws with `err.data.providerError` set (e.g. Slack's
+     * `cant_delete_message`), so bulk callers can count skips rather than
+     * aborting. Returns { success, connectionName, conversationId, messageId }.
+     */
+    async deleteMessage ({ connectionName, conversationId, messageId } = {}, options = {}) {
+      if (!connectionName) throw new Error('deleteMessage: connectionName is required')
+      if (!conversationId) throw new Error('deleteMessage: conversationId is required')
+      if (!messageId) throw new Error('deleteMessage: messageId is required')
+      const url = (options.host || '') + '/feps/connections/messaging/' +
+        encodeURIComponent(connectionName) + '/conversations/' +
+        encodeURIComponent(conversationId) + '/messages/' + encodeURIComponent(messageId)
+      const writeOptions = options.appToken ? { appToken: options.appToken } : {}
+      return await freezr.apiRequest('DELETE', url, null, writeOptions)
+    },
+
+    handleTokenExpired (resOrErr) { return freezr.connections.mail.handleTokenExpired(resOrErr) }
+  }
+
+  // Cross-service convenience: the handler is identical for all services
   // (same server payload), so expose it once at the umbrella too.
   freezr.connections.handleTokenExpired = (resOrErr) => freezr.connections.mail.handleTokenExpired(resOrErr)
 }

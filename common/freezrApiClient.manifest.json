@@ -7,7 +7,7 @@
       "key": "connections",
       "file": "freezrApiV2.connections.js",
       "attaches": "freezr.connections",
-      "permissionTypes": ["use_mail", "use_contacts", "use_calendar"],
+      "permissionTypes": ["use_mail", "use_contacts", "use_calendar", "use_messaging"],
       "loadInJobClient": true
     },
     {

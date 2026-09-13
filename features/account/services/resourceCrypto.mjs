@@ -73,6 +73,14 @@ export const encryptResourceSensitiveFields = (record) => {
     if (out.oauth && typeof out.oauth === 'object') out = { ...out, oauth: encryptParams(out.oauth) }
     if (out.imap && typeof out.imap === 'object') out = { ...out, imap: encryptParams(out.imap) }
     if (out.smtp && typeof out.smtp === 'object') out = { ...out, smtp: encryptParams(out.smtp) }
+    // File-store connections (services ['fs']) carry their connector params in fsParams.
+    // Cloud fsParams hold credentials (dropbox tokens, aws keys) — encrypted as a whole.
+    // Local fsParams ({ type: 'local', rootPath }) hold no secret and stay plaintext so
+    // the resources page can display the path; an already-encrypted blob has no .type
+    // and falls into encryptParams, which passes __enc through untouched (idempotent).
+    if (out.fsParams && typeof out.fsParams === 'object' && out.fsParams.type !== 'local') {
+      out = { ...out, fsParams: encryptParams(out.fsParams) }
+    }
     return out
   }
 
@@ -117,6 +125,8 @@ export const decryptResourceSensitiveFields = (record) => {
     if (out.oauth && typeof out.oauth === 'object') out = { ...out, oauth: decryptParams(out.oauth) }
     if (out.imap && typeof out.imap === 'object') out = { ...out, imap: decryptParams(out.imap) }
     if (out.smtp && typeof out.smtp === 'object') out = { ...out, smtp: decryptParams(out.smtp) }
+    // decryptParams passes plaintext (local) fsParams through untouched.
+    if (out.fsParams && typeof out.fsParams === 'object') out = { ...out, fsParams: decryptParams(out.fsParams) }
     return out
   }
 

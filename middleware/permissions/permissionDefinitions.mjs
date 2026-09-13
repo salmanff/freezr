@@ -88,6 +88,38 @@ export const PERMISSION_FIELD_EXCEPTIONS_BY_TYPE = {
     // 'calendar' in their services[] array. Missing/empty denies; ['*'] grants all.
     { field: 'connection_names', type: 'array', required: false },
     { field: 'scopes', type: 'array', required: false }
+  ],
+  use_messaging: [
+    // Same shape as use_mail. connection_names matches connection records that have
+    // 'messaging' in their services[] array. Missing/empty denies; ['*'] grants all.
+    { field: 'connection_names', type: 'array', required: false },
+    { field: 'scopes', type: 'array', required: false }
+  ],
+  use_file_sys: [
+    // Same shape as use_mail. connection_names matches connection records that have
+    // 'fs' in their services[] array (file-store resources: a local folder, or later a
+    // cloud drive). Missing/empty denies (fail-closed); ['*'] grants all fs stores.
+    // scopes: ['read'] (default if missing — list/stat/read) or ['read', 'write']
+    // (adds file write and file delete). Enforced by fsContext.mjs + fsRoutes.mjs.
+    { field: 'connection_names', type: 'array', required: false },
+    { field: 'scopes', type: 'array', required: false }
+  ],
+  socket_connect: [
+    // App-declared server-held sockets (VOCABULARY REGISTERED; execution not yet
+    // built). domains: the external hosts the server may hold a socket to on the
+    // app's behalf — missing/empty denies (fail-closed, same convention as
+    // connection_names; no wildcard). Granting is necessary but NOT sufficient:
+    // the admin must also admit the (app, domain) pair on /admin/sockets, else
+    // the capability ping reports blocked_by 'socket_not_admitted'.
+    { field: 'domains', type: 'array', required: false },
+    { field: 'scopes', type: 'array', required: false }
+  ],
+  // Delegation carries which of the user's OTHER apps to borrow access from (delegate_app) and which
+  // of that app's permissions (delegate_permission, by name). The tables/scope come from that
+  // referenced permission — never duplicated here. See freezr_askapps_plan_v1.md.
+  delegate: [
+    { field: 'delegate_app', type: 'string', required: true },
+    { field: 'delegate_permission', type: 'string', required: true }
   ]
 }
 /**
@@ -152,6 +184,16 @@ export const PERMISSION_DEFINITIONS = [
     description: 'Allow app to upload/serve pages',
     requiredFields: []
   },
+  {
+    type: 'delegate',
+    category: 'Sharing',
+    // Bob-only delegation: lets THIS app reuse the data access the user has already granted to ANOTHER
+    // of their apps, by referencing that app's permission by name. The app sees exactly what that
+    // permission covers — the underlying grant is re-checked on every read — so it can never exceed what
+    // the user already has. e.g. an ask-app reusing the read access another user shared with VC Tracker.
+    description: "Let this app reuse data access you've already granted to another of your apps (it references that app's permission by name).",
+    requiredFields: ['delegate_app', 'delegate_permission']
+  },
   // App Capabilities
   {
     type: 'external_scripts',
@@ -174,7 +216,12 @@ export const PERMISSION_DEFINITIONS = [
   {
     type: 'use_llm',
     category: 'App Capabilities',
-    description: 'Allow app to use the user\'s LLM API keys to make AI requests.',
+    // Names web access and speech explicitly because both send the user's own content to a
+    // third party under this one grant and there is no separate permission for either yet:
+    // web searches carry prompt-derived queries out, and transcribe() uploads recorded audio.
+    // A description that says only "AI requests" does not describe that. See TODO.md — the
+    // per-app cost/scope constraints on this permission are still to be built.
+    description: 'Allow app to use the user\'s LLM API keys to make AI requests, which may include web searches and sending audio for speech recognition.',
     requiredFields: []
   },
   {
@@ -203,6 +250,32 @@ export const PERMISSION_DEFINITIONS = [
     category: 'App Capabilities',
     description: "Allow app to read (and optionally write) the user's connected calendars.",
     // connection_names and scopes mirror use_mail; see PERMISSION_FIELD_EXCEPTIONS_BY_TYPE.
+    requiredFields: []
+  },
+  {
+    type: 'use_messaging',
+    category: 'App Capabilities',
+    description: "Allow app to read (and optionally write) the user's connected messaging accounts (e.g. Slack).",
+    // connection_names and scopes mirror use_mail; see PERMISSION_FIELD_EXCEPTIONS_BY_TYPE.
+    requiredFields: []
+  },
+  {
+    type: 'use_file_sys',
+    category: 'App Capabilities',
+    // File-store access rides on connection records with services ['fs'] — a named local
+    // folder (admins on localhost servers only; see fsContext.mjs) or, later, a cloud
+    // drive (Dropbox etc.). The grant names which stores via connection_names and how
+    // deep via scopes — same fail-closed contract as use_mail.
+    description: "Allow app to browse and read (and optionally write) files on the user's connected file stores (e.g. a shared local folder or a cloud drive).",
+    requiredFields: []
+  },
+  {
+    type: 'socket_connect',
+    category: 'App Capabilities',
+    description: 'Allow the server to hold a persistent connection (socket) to a named external service on your behalf, delivering its data to this app. Also requires explicit admin admission on this server.',
+    // domains declared in PERMISSION_FIELD_EXCEPTIONS_BY_TYPE (fail-closed).
+    // Execution (the governed pipe) is not yet built — grants surface
+    // blocked_by 'socket_not_admitted' until it is.
     requiredFields: []
   },
   {

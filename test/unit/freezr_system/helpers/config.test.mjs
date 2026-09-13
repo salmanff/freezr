@@ -7,6 +7,9 @@ import {
   SYSTEM_APPS,
   isSystemApp,
   validAppName,
+  ASK_APP_PREFIX,
+  isAskAppName,
+  askAppSlug,
   userIdIsValid,
   userIdFromUserInput,
   validFilename,
@@ -121,6 +124,40 @@ describe('Config Module - Validation Functions', () => {
     it('should handle length limits', () => {
       const longName = 'a'.repeat(MAX_USER_NAME_LEN + 1);
       expect(validAppName(longName)).to.be.false;
+    });
+
+    it('should ACCEPT ask-app names — a ask-app is a normal, valid app', () => {
+      // The ask-app. namespace is deliberately shaped to satisfy validAppName so ask-apps flow
+      // through the normal install/update pipeline. The reservation is enforced elsewhere
+      // (the user-facing create flow), not here.
+      expect(validAppName('ask-app.top-artists.k4x2')).to.be.true;
+      expect(validAppName('ask-app.foo.bar')).to.be.true;
+    });
+  });
+
+  describe('ask-app naming', () => {
+    it('isAskAppName is a flag recognising the reserved prefix only', () => {
+      expect(isAskAppName('ask-app.foo.bar')).to.be.true;
+      expect(isAskAppName('com.example.app')).to.be.false;
+      expect(isAskAppName('ask-app')).to.be.false; // prefix includes the dot
+      expect(isAskAppName(null)).to.be.false;
+      expect(isAskAppName(undefined)).to.be.false;
+      expect(ASK_APP_PREFIX).to.equal('ask-app.');
+    });
+
+    it('a generated ask-app name is both an ask-app name and a valid app name', () => {
+      const name = 'ask-app.' + askAppSlug('Top Funds Q3') + '.ab12';
+      expect(isAskAppName(name)).to.be.true;
+      expect(validAppName(name)).to.be.true;
+    });
+
+    it('askAppSlug turns free text into a safe middle segment', () => {
+      expect(askAppSlug('Show my Top Artists!')).to.equal('show-my-top-artists');
+      expect(askAppSlug('  spaced   out  ')).to.equal('spaced-out');
+      expect(askAppSlug('a_b_c')).to.equal('a-b-c');
+      expect(askAppSlug('!!!')).to.equal('app');       // never empty
+      expect(askAppSlug('')).to.equal('app');
+      expect(askAppSlug(null)).to.equal('app');
     });
   });
 

@@ -7,13 +7,16 @@
 // 3. Controllers (request handling) - from ./controllers/*.mjs
 
 import { Router } from 'express'
-import { createSetupGuard, createGetAppTokenInfoFromheaderForApi } from '../../middleware/auth/basicAuth.mjs'
-import { createaddOwnerPermsDb, addRightsToTable } from '../../middleware/permissions/permissionContext.mjs'
+import { createSetupGuard, createGetAppTokenInfoFromheaderForApi, rejectWritesForReadOnlyTokens } from '../../middleware/auth/basicAuth.mjs'
+import { createaddOwnerPermsDb, addRightsToTable, createResolveRequestorDelegates } from '../../middleware/permissions/permissionContext.mjs'
 import { createCepsApiController } from './controllers/cepsfepsApiController.mjs'
 import { currentAppPermissions } from '../../middleware/permissions/permissionHandlers.mjs'
 import { createAddUserContactsDb, createAddMessageDb } from '../account/middleware/accountContext.mjs'
 import { createAddPublicRecordsDB } from '../public/middleware/publicContext.mjs'
 import { createAddAppTableFromBodyAndCheckTokenOwner, addDataOwnerToContext, addRequestorAsDataOwner, createAddAppTableDbAndFsIfNeedbe, createAddStorageLimits, createAddValidationDbs, createAddUserPrefs, createAddMessageContextFromBody } from './middleware/appContext.mjs'
+import { createAddAppCapabilities } from './services/appCapabilityService.mjs'
+import { getAppTokenFromHeaderAndDoMinimalChecks } from '../../middleware/tokens/tokenHandler.mjs'
+import { APP_TOKEN_OAC } from '../../common/helpers/config.mjs'
 import { sendFailure } from '../../adapters/http/responses.mjs'
 import { apiRateLimit } from '../../middleware/auth/apiRateLimiter.mjs'
 
@@ -39,6 +42,8 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
   // getAppTokenInfo - gets token for API requests and sets res.locals.freezr.tokenInfo
   const getAppTokenInfo = createGetAppTokenInfoFromheaderForApi(dsManager, freezrPrefs, freezrStatus)
   const addOwnerPermDBs = createaddOwnerPermsDb(dsManager, freezrPrefs, freezrStatus)
+  // Cross-user read delegation (read routes only — never write). See createResolveRequestorDelegates.
+  const resolveRequestorDelegates = createResolveRequestorDelegates(dsManager, freezrPrefs, freezrStatus)
   const addOwnerAppTable = createAddAppTableDbAndFsIfNeedbe(dsManager, freezrPrefs, freezrStatus)
   const addStorageLimits = createAddStorageLimits(dsManager, freezrPrefs)
   const addPublicRecordsDB = createAddPublicRecordsDB(dsManager, freezrPrefs, freezrStatus)
@@ -48,6 +53,7 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
   const addValidationDBs = createAddValidationDbs(dsManager, freezrPrefs, freezrStatus)
   const addUserPrefs = createAddUserPrefs(dsManager, freezrPrefs)
   const addMessageContextFromBody = createAddMessageContextFromBody(dsManager, freezrPrefs, freezrStatus)
+  const addAppCapabilities = createAddAppCapabilities(dsManager, freezrPrefs)
 
   // ===== CREATE CONTROLLERS =====
   const cepsApiController = createCepsApiController({ dsManager, freezrPrefs, freezrStatus })
@@ -68,16 +74,33 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * - server_type: 'info.freezr'
    * - server_version: string
    * - storageLimits: object (if logged in)
+   * - app_name / permissions / capabilities: when the caller is identified as an app via a
+   *   valid Bearer app token — the app's permission grants annotated with { usable, blocked_by }
+   *   plus a coarse user-capability summary (llm keys / compute credential / connections).
+   *   See appCapabilityService.mjs.
    */
-    // Run Bearer-token validation only when no session cookie exists but an
-    // Authorization header is supplied -- so native clients (iOS, curl) get
-    // storageLimits while anonymous callers still get a clean logged_in:false.
-    const pingOptionalBearer = (req, res, next) => {
-      if (req.session?.logged_in_user_id) return next()
-      if (!req.headers.authorization || !req.headers.authorization.startsWith('Bearer ')) return next()
-      return getAppTokenInfo(req, res, next)
+    // Bearer-token handling:
+    // - no session + Bearer  → validate strictly (native clients get 401 on a bad token, as before)
+    // - session + Bearer     → identify the app SOFTLY so the ping can report its permissions +
+    //                          capabilities; an invalid/mismatched token never fails the ping,
+    //                          it just falls back to the plain session response.
+    // - neither              → clean logged_in:false.
+    const pingOptionalBearer = async (req, res, next) => {
+      const hasBearer = req.headers.authorization && req.headers.authorization.startsWith('Bearer ')
+      if (!hasBearer) return next()
+      if (!req.session?.logged_in_user_id) return getAppTokenInfo(req, res, next)
+      try {
+        const tokenDb = dsManager.getDB(APP_TOKEN_OAC)
+        const tokenInfo = await getAppTokenFromHeaderAndDoMinimalChecks(tokenDb, req.session, req.headers, req.cookies)
+        // Only bind the token to the ping when it belongs to the session's user.
+        if (tokenInfo && tokenInfo.requestor_id === req.session.logged_in_user_id) {
+          if (!res.locals.freezr) res.locals.freezr = {}
+          res.locals.freezr.tokenInfo = tokenInfo
+        }
+      } catch (e) { /* soft — ping falls back to session-only info */ }
+      return next()
     }
-    router.get('/ping', setupGuard, pingOptionalBearer, addStorageLimits, cepsApiController.ping)
+    router.get('/ping', setupGuard, pingOptionalBearer, addStorageLimits, addAppCapabilities, cepsApiController.ping)
 
   /**
    * POST /ceps/write/:app_table
@@ -91,7 +114,10 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * - _id: string (record ID)
    * - success: boolean
    */
-  router.post('/write/:app_table', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, cepsApiController.writeorUpsertRecord)
+  // CEPS has no cross-owner writes (only the wrapped /feps routes do, via _entity + owner_id), so
+  // the data owner is pinned to the requestor here. This also means a record data field that
+  // happens to be named owner / owner_id is stored as plain data, never read as a control param.
+  router.post('/write/:app_table', setupGuard, getAppTokenInfo, rejectWritesForReadOnlyTokens, apiRateLimit, addRequestorAsDataOwner, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, cepsApiController.writeorUpsertRecord)
 
   /**
    * GET /ceps/read/:app_table/:data_object_id
@@ -100,7 +126,7 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * Returns:
    * - Record object
    */
-  router.get('/read/:app_table/:data_object_id', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, cepsApiController.readRecordById)
+  router.get('/read/:app_table/:data_object_id', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, resolveRequestorDelegates, addRightsToTable, addOwnerAppTable, cepsApiController.readRecordById)
 
   /**
    * GET /ceps/query/:app_table
@@ -115,7 +141,7 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * Returns:
    * - Array of matching records
    */
-  router.get('/query/:app_table', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, cepsApiController.dbQuery)
+  router.get('/query/:app_table', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, resolveRequestorDelegates, addRightsToTable, addOwnerAppTable, cepsApiController.dbQuery)
 
   /**
    * POST /ceps/query/:app_table
@@ -130,7 +156,7 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * Returns:
    * - Array of matching records
    */
-  router.post('/query/:app_table', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, cepsApiController.dbQuery)
+  router.post('/query/:app_table', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, resolveRequestorDelegates, addRightsToTable, addOwnerAppTable, cepsApiController.dbQuery)
   
 
 
@@ -147,7 +173,8 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * - nModified: number
    * - success: boolean
    */
-  router.put('/update/:app_table/:data_object_id', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, cepsApiController.updateRecord)
+  // Owner pinned to requestor — same reasoning as POST /ceps/write above.
+  router.put('/update/:app_table/:data_object_id', setupGuard, getAppTokenInfo, rejectWritesForReadOnlyTokens, apiRateLimit, addRequestorAsDataOwner, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, cepsApiController.updateRecord)
 
   /**
    * DELETE /ceps/delete/:app_table/:data_object_id
@@ -156,8 +183,8 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * Returns:
    * - success: boolean
    */
-  router.delete('/delete/:app_table/:data_object_id', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, addPublicRecordsDB, cepsApiController.deleteRecords)
-  router.delete('/delete/:app_table/:data_object_start/*', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, addPublicRecordsDB, cepsApiController.deleteRecords)
+  router.delete('/delete/:app_table/:data_object_id', setupGuard, getAppTokenInfo, rejectWritesForReadOnlyTokens, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, addPublicRecordsDB, cepsApiController.deleteRecords)
+  router.delete('/delete/:app_table/:data_object_start/*', setupGuard, getAppTokenInfo, rejectWritesForReadOnlyTokens, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, addPublicRecordsDB, cepsApiController.deleteRecords)
 
   /**
    * GET /ceps/perms/get
@@ -210,7 +237,7 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * - requestor_host: string
    * - expiration: number
    */
-  router.post('/perms/validationtoken/:action', setupGuard, getAppTokenInfo, apiRateLimit, addValidationDBs, cepsApiController.CEPSValidator)
+  router.post('/perms/validationtoken/:action', setupGuard, getAppTokenInfo, rejectWritesForReadOnlyTokens, apiRateLimit, addValidationDBs, cepsApiController.CEPSValidator)
 
   /**
    * POST /ceps/perms/share_records
@@ -228,7 +255,7 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * - success: boolean
    * - recordsToChange: Array of affected records
    */
-  router.post('/perms/share_records', setupGuard, getAppTokenInfo, apiRateLimit, addPublicRecordsDB, addUserContactsDb, addAppTableFromBodyAndCheckTokenOwner, addRequestorAsDataOwner, addOwnerPermDBs, addUserPrefs, cepsApiController.shareRecords)
+  router.post('/perms/share_records', setupGuard, getAppTokenInfo, rejectWritesForReadOnlyTokens, apiRateLimit, addPublicRecordsDB, addUserContactsDb, addAppTableFromBodyAndCheckTokenOwner, addRequestorAsDataOwner, addOwnerPermDBs, addUserPrefs, cepsApiController.shareRecords)
 
   // ===== MESSAGING ROUTES =====
   // Split into authenticated (initiate, mark_read) and unauthenticated (transmit, verify) tracks.
@@ -240,13 +267,25 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * Initiate a message to recipients (authenticated - requires Bearer token)
    * Sender's app calls this on sender's PDS. The PDS then handles transmit/verify with recipient PDS.
    */
-  router.post('/message/initiate', setupGuard, (req, res, next) => { req.params.action = 'initiate'; next() }, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addUserContactsDb, addMessageDb, addAppTableFromBodyAndCheckTokenOwner, cepsApiController.messageActions)
+  router.post('/message/initiate', setupGuard, (req, res, next) => { req.params.action = 'initiate'; next() }, getAppTokenInfo, rejectWritesForReadOnlyTokens, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addUserContactsDb, addMessageDb, addAppTableFromBodyAndCheckTokenOwner, cepsApiController.messageActions)
 
   /**
    * POST /ceps/message/mark_read
    * Mark messages as read (authenticated - requires Bearer token)
    */
-  router.post('/message/mark_read', setupGuard, (req, res, next) => { req.params.action = 'mark_read'; next() }, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addUserContactsDb, addMessageDb, addAppTableFromBodyAndCheckTokenOwner, cepsApiController.messageActions)
+  router.post('/message/mark_read', setupGuard, (req, res, next) => { req.params.action = 'mark_read'; next() }, getAppTokenInfo, rejectWritesForReadOnlyTokens, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, addUserContactsDb, addMessageDb, addAppTableFromBodyAndCheckTokenOwner, cepsApiController.messageActions)
+
+  /**
+   * GET /ceps/messages
+   * Get the requesting app's inbox messages (authenticated - requires Bearer token):
+   * messages it sent (app_id, pinned to the token) plus messages addressed to it (recipient_app).
+   *
+   * Query Parameters:
+   * - count: max messages to return (default 50)
+   * - skip: number of messages to skip
+   * - unread_only: 'true' to return only messages not yet marked read
+   */
+  router.get('/messages', setupGuard, (req, res, next) => { req.params.action = 'get'; next() }, getAppTokenInfo, apiRateLimit, addMessageDb, cepsApiController.messageActions)
 
   /**
    * POST /ceps/message/transmit

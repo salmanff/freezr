@@ -65,6 +65,18 @@
     },
 
     {
+      "requestor_app": "info.freezr.connections",
+      "type": "use_messaging",
+      "name": "messaging_readwrite",
+      "granted": true,
+      "system_perm": true,
+      "connection_names": ["*"],
+      "scopes": ["read", "write"],
+      "description": "Built-in connections app reads and writes (send, mark-read) on any of the user's messaging-enabled connections (e.g. Slack).",
+      "reason": "Mirrors use_mail. Per-connection write is still gated user-side by connection.access.messaging === 'readwrite'."
+    },
+
+    {
       "requestor_app": "info.freezr.creator",
       "type": "use_llm",
       "name": "creator_llm",
@@ -82,6 +94,28 @@
       "system_perm": true,
       "description": "Admin app installs / removes / lists local (trusted) 3rd-party functions on the server.",
       "reason": "info.freezr.admin/addlocalmicroservice.js calls freezr.serverless.upsertLocal / deleteLocal / getAllLocalFunctions. Pulls in the freezrApiV2.serverless.js add-on for admin pages."
+    },
+
+    {
+      "requestor_app": "info.freezr.creator",
+      "type": "message_records",
+      "name": "share_ask_apps",
+      "table_id": "info.freezr.creator.files",
+      "granted": true,
+      "system_perm": true,
+      "description": "Built-in creator app sends (person-to-person) shared ask-apps and app-share replies from its info.freezr.creator.files collection.",
+      "reason": "The ask-app Share tab freezr.messages.send()s a message_records message routed by table_id info.freezr.creator.files; the message's _accessibles stamping is what grants a same-host recipient the grantee zip fetch. See freezr_askapp_sharing_summary.md §2-3. Consumed by messageActions via getAllSystemPermissionsForApp."
+    },
+
+    {
+      "requestor_app": "info.freezr.creator",
+      "type": "read_all",
+      "name": "friends",
+      "table_id": "dev.ceps.contacts",
+      "granted": true,
+      "system_perm": true,
+      "description": "Built-in creator app reads the user's own contacts to populate the ask-app Share tab's recipient list.",
+      "reason": "Reads only the logged-in user's OWN contacts (requestor === owner, so no grantee widening). Mirrors how hiper.cards uses a 'friends' contacts perm. Consumed by permissionContext.addRightsToTable via getAllSystemPermissionsForApp."
     }
   ]
 }

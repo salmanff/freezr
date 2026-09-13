@@ -350,7 +350,10 @@ const readmoreFileList = function (dbx, cursor, oldlist, callback) {
     .then(response => {
       if (!response.result) response.result = {}
       if (!response.result.entries) response.result.entries = []
-      let entries = response.result.entries.map(entry => { return entry.path_lower.slice('/userdb/'.length) })
+      // entry.name matches the first page's shape (readdir maps entry.name). The old
+      // code sliced entry.path_lower with a hardcoded '/userdb/' prefix, so any listing
+      // past the first page returned mangled, lowercased path fragments instead of names.
+      let entries = response.result.entries.map(entry => { return entry.name })
       entries = entries.concat(oldlist)
       if (response.result.has_more) {
         readmoreFileList(dbx, response.result.cursor, entries, callback)

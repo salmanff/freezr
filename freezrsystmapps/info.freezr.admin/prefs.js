@@ -48,7 +48,11 @@ freezr.initPageScripts = function () {
         allowAccessToSysFsDb: document.getElementById('allowAccessToSysFsDbId').checked,
         log_visits: document.getElementById('logVisitsId').checked,
         scheduler_disabled: document.getElementById('schedulerDisabledId').checked,
+        sockets_enabled: document.getElementById('socketsEnabledId').checked,
+        local_llm_cli_enabled: document.getElementById('localLlmCliEnabledId').checked,
+        local_fs_access_enabled: document.getElementById('localFsAccessEnabledId').checked,
         serverless_callback_url: (document.getElementById('serverlessCallbackUrlId') ? document.getElementById('serverlessCallbackUrlId').value.trim() : ''),
+        apiRateLimitPerUserMinute: (document.getElementById('apiRateLimitPerUserMinute').value.trim() ? parseInt(document.getElementById('apiRateLimitPerUserMinute').value) : null),
         redirect_public: document.getElementById('redirectPublicId').checked,
         public_landing_app: document.getElementById('defaultPublicAppId').value,
         public_landing_page: document.getElementById('defaultLandingUrl').value,
@@ -57,6 +61,8 @@ freezr.initPageScripts = function () {
       }
       if (isNaN(theInfo.selfRegDefaultMBStorageLimit)) {
         showError('storage limit needs to be a number or left blank')
+      } else if (theInfo.apiRateLimitPerUserMinute !== null && (isNaN(theInfo.apiRateLimitPerUserMinute) || theInfo.apiRateLimitPerUserMinute < 30)) {
+        showError('API rate limit needs to be a number of at least 30, or left blank for the default')
       } else {
         (async () => {
           try {

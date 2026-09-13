@@ -7,12 +7,17 @@ import { sendFailure, sendAuthFailure, sendApiSuccess } from '../../../adapters/
 import { startsWith, endsWith, isEmpty, randomText, addToListAsUnique, getUniqueWords, removeFromListIfExists, isSafeRegex } from '../../../common/helpers/utils.mjs'
 import { permissionTypesThatDontNeedTableId, PERMISSION_TYPES_FOR_WHICH_RECORDS_ARE_MARKED } from '../../../middleware/permissions/permissionDefinitions.mjs'
 import { generateAppToken } from '../../../middleware/tokens/tokenHandler.mjs'
+import { fileTokenStore } from '../../../middleware/tokens/fileTokenStore.mjs'
 import { isSystemApp, validFilename } from '../../../common/helpers/config.mjs'
 import { convert as convertPicture } from '../../../common/helpers/pictures.mjs'
 import { removeStartAndEndSlashes } from '../../../adapters/datastore/fsConnectors/fileHandler.mjs'
 import { getOrigIdWithOatRemoved } from '../../../adapters/datastore/dbConnectors/mongo_utils.mjs'
 import { SYSTEM_PERMS } from '../../../common/helpers/config.mjs'
+import { getAllSystemPermissionsForApp } from '../../../common/helpers/systemPermissions.mjs'
 import { encryptResourceSensitiveFields } from '../../account/services/resourceCrypto.mjs'
+import { isPermitted, resolveCapability, checkCapabilities, normalizeWebOption } from '../services/llmCapabilityService.mjs'
+import { sanitizeModelKeys, unsanitizeModelKeys, canonicalizeModelMap, normalizePricingModels, makeEmptyTokensUsed, getModelFamily, findModelPrice, isLookupFailedForModel, applyPriceToTokensUsed, IMAGE_PRICING_SUFFIX, findImageModelPrice, applyImagePriceToTokensUsed, AUDIO_PRICING_SUFFIX, findAudioModelPrice, applyAudioPriceToTokensUsed } from '../services/llmCostService.mjs'
+import { recordUsage, queryTallies, summarizeTallies, utcDay } from '../../account/services/usageTallyService.mjs'
 
 // Writes to this table get their sensitive fields encrypted before persistence.
 // See features/account/services/resourceCrypto.mjs for the per-type field map.
@@ -34,6 +39,34 @@ import http from 'http'
 import https from 'https'
 
 const dnsLookup = promisify(dns.lookup)
+
+/**
+ * How long may the connector wait for this particular /feps/llm/ask?
+ *
+ * Bounded by whichever is sooner:
+ *   - what the caller explicitly asked for (`options.timeoutMs`), and
+ *   - how long the calling JOB has left (`x-freezr-job-deadline`, set by
+ *     adapters/jobs/internalApiClient.mjs on every in-process job request).
+ *
+ * The job bound matters because a job that abandons a step does NOT cancel the request it
+ * started: an in-process job's synthetic response has no socket, so it never emits 'close'
+ * and the disconnect path below cannot fire for it. Without this, a local-CLI call outlives
+ * the job that asked for it and keeps that connector's single slot — every later call is
+ * refused 429 "busy" until the CLI's own 5-minute ceiling expires. An LLM call should never
+ * outlive its job's budget regardless of this bug.
+ *
+ * Returns undefined when neither applies, leaving each connector on its own default. A
+ * deadline already past yields 1ms, which connectors floor to their minimum — the call fails
+ * fast rather than being handed a full fresh budget.
+ */
+export const resolveAskTimeoutMs = (req, options = {}) => {
+  const candidates = []
+  const requested = Number(options?.timeoutMs ?? req?.body?.timeoutMs)
+  if (Number.isFinite(requested) && requested > 0) candidates.push(requested)
+  const jobDeadline = Number(req?.headers?.['x-freezr-job-deadline'])
+  if (Number.isFinite(jobDeadline) && jobDeadline > 0) candidates.push(Math.max(1, jobDeadline - Date.now()))
+  return candidates.length > 0 ? Math.min(...candidates) : undefined
+}
 
 const BLOCKED_QUERY_OPERATORS = ['$where', '$function', '$accumulator', '$expr']
 const rejectBlockedQueryOperators = function (q) {
@@ -79,7 +112,15 @@ export const createCepsApiController = () => {
     if (!userId) {
       return sendApiSuccess(res, { logged_in: false, server_type: 'info.freezr', server_version: res.locals.freezr?.freezrPrefs?.version })
     } else {
-      return sendApiSuccess(res, { logged_in: true, logged_in_as_admin: !!req.session?.logged_in_as_admin, user_id: userId, server_type: 'info.freezr', server_version: res.locals.freezr?.freezrPrefs?.version, storageLimits: res.locals?.freezr?.freezrStorageLimits })
+      const pingResponse = { logged_in: true, logged_in_as_admin: !!req.session?.logged_in_as_admin, user_id: userId, server_type: 'info.freezr', server_version: res.locals.freezr?.freezrPrefs?.version, storageLimits: res.locals?.freezr?.freezrStorageLimits }
+      // App-identified pings (valid Bearer app token) also get the app's permission grants
+      // annotated with usability, plus the user-capability summary — set by addAppCapabilities.
+      if (res.locals.freezr.appPermissions) {
+        pingResponse.app_name = res.locals.freezr.tokenInfo?.app_name
+        pingResponse.permissions = res.locals.freezr.appPermissions
+        pingResponse.capabilities = res.locals.freezr.appCapabilities
+      }
+      return sendApiSuccess(res, pingResponse)
     }
   }
   /**
@@ -337,6 +378,11 @@ export const createCepsApiController = () => {
       console.error('❌ Error reading record by ID:', err)
       return sendFailure(res, err, 'readRecordById', 500)
     }
+    // read_by_id can return the CACHED object itself. The non-owner branches below delete fields
+    // (_accessibles) from the record before sending it — done on the cached object, that would
+    // permanently strip _accessibles from the cache, and a later shareRecords grant/deny reading
+    // the record through the cache would then wipe every grant on it. Clone before any mutation.
+    if (fetchedRecord) fetchedRecord = { ...fetchedRecord }
     // onsole.log('readRecordById permGiven 1', { aoc: appTableDb.oac, dataObjectId, fetchedRecord })
 
     if (res.locals.freezr.rightsToTable.own_record || res.locals.freezr.rightsToTable.can_read || res.locals.freezr.rightsToTable.write_all) {
@@ -350,9 +396,21 @@ export const createCepsApiController = () => {
     }
 
     // Conditional read with write_own or share_records
-    const requestee = res.locals.freezr.tokenInfo.requestor_id // .replace(/\./g, '_')
+    // Guard a missing record before the per-permission checks below dereference it — the
+    // own_record/can_read/write_all branch above returns early on null, this path must too, else a
+    // read-by-id of a non-existent record crashes the server (Cannot read properties of null).
+    if (!fetchedRecord) {
+      return sendFailure(res, 'no related records exist', 'readRecordById', 401)
+    }
 
-    
+    const requestee = res.locals.freezr.tokenInfo.requestor_id // .replace(/\./g, '_')
+    // The app consuming this read. An _accessibles grantee is a (user, app) pair: entries with a
+    // grantee_app name the consuming app explicitly (same-user app-scoped shares); entries without
+    // one keep the legacy semantics (consuming app = the granting app, entry.requestor_app).
+    // effectiveRequestorApp covers cross-user delegation, where the delegate app reads AS the
+    // granting app (see createResolveRequestorDelegates).
+    const consumingApp = res.locals.freezr.effectiveRequestorApp || res.locals.freezr.tokenInfo.app_name
+
     let relevantPerm = null
     let accessToRecord = false
     let permittedRecord
@@ -367,6 +425,7 @@ export const createCepsApiController = () => {
           obj.grantee === requestee &&
           obj.requestor_app === aPerm.requestor_app &&
           obj.permission_name === aPerm.name &&
+          (obj.grantee_app || obj.requestor_app) === consumingApp &&
           obj.granted === true
         )
         if (accessibleObj) {
@@ -577,12 +636,26 @@ export const createCepsApiController = () => {
       return sendFailure(res, queryResults.error, 'dbQuery', 500)
     }
 
+    // share_records reads: the injected query only pinned (grantee, granted) — verify per record that
+    // the grant's consuming app is THIS caller. A grantee is a (user, app) pair: entries with a
+    // grantee_app name the consuming app explicitly; entries without one mean the granting app
+    // (entry.requestor_app). effectiveRequestorApp covers cross-user delegation reads.
+    if (thePerm && thePerm.type === 'share_records' && queryResults && queryResults.length > 0) {
+      const shareConsumingApp = res.locals.freezr.effectiveRequestorApp || res.locals.freezr.tokenInfo.app_name
+      const shareRequestee = res.locals.freezr.tokenInfo.requestor_id
+      queryResults = queryResults.filter(rec => Array.isArray(rec._accessibles) && rec._accessibles.some(obj =>
+        obj && obj.granted === true &&
+        obj.grantee === shareRequestee &&
+        (obj.grantee_app || obj.requestor_app) === shareConsumingApp
+      ))
+    }
 
     if (thePerm && queryResults && queryResults.length > 0) {
       // onsole.log('dbQuery queryResults 1 and 2', { thePerm, queryResults1: queryResults[0], queryResults2: queryResults.length > 1 ? queryResults[1] : null })
-      queryResults.map(anitem => {
-        anitem._owner = res.locals.freezr.tokenInfo.data_owner_user_id
-        return anitem
+      // Clone before mutating: query results can be the cache's own objects — adding _owner or
+      // deleting _accessibles (reduceToPermittedFields below) on them would poison the cache.
+      queryResults = queryResults.map(anitem => {
+        return { ...anitem, _owner: res.locals.freezr.tokenInfo.data_owner_user_id }
       })
       if (thePerm.return_fields && thePerm.return_fields.length > 0) {
         const reduceToPermittedFields = function (record, returnFields) {
@@ -955,9 +1028,11 @@ export const createCepsApiController = () => {
     } else if (appTableId && permissionTypesThatDontNeedTableId().includes(grantedPermission.type) && grantedPermission.type !== 'upload_pages' && grantedPermission.type !== 'allow_self_frames') {
       // upload_pages / allow_self_frames exception - technically they do not need one as it goes into files, but table id is added in the route chain 
       return sendFailure(res, 'Table id passed onto a permission type that doesnt need it.', { function: 'shareRecords', requestorApp, userId })
-    } else if (permissionTypesThatDontNeedTableId().includes(grantedPermission.type) && appTableId !== res.locals.freezr.appTableDb.oac.app_table) {
+    } else if (permissionTypesThatDontNeedTableId().includes(grantedPermission.type) && appTableId !== res.locals.freezr.appTableDb?.oac?.app_table) {
+      // appTableDb is only set by middleware when req.body.table_id is present, so it is undefined
+      // for table-less permission types (eg use_app) - both sides are then undefined and this passes
       console.warn('The table being granted permission to does not correspond to the permission (1) ', { appTableId, appTableFromAppTableDb: res.locals.freezr.appTableDb?.oac?.app_table })
-      return sendFailure(res, 'The table being granted permission to does not correspond to the permission ', { function: 'shareRecords', requestorApp, userId, appTableId, appTableFromAppTableDb: res.locals.freezr.appTableDb.oac.app_table })
+      return sendFailure(res, 'The table being granted permission to does not correspond to the permission ', { function: 'shareRecords', requestorApp, userId, appTableId, appTableFromAppTableDb: res.locals.freezr.appTableDb?.oac?.app_table })
     }else if (grantedPermission.type === 'upload_pages' && appTableId.split('.').pop() !== 'files') {
       return sendFailure(res, 'Upload pages permission can only be used on files', { function: 'shareRecords', requestorApp, userId })
     } else if (PERMISSION_TYPES_FOR_WHICH_RECORDS_ARE_MARKED.includes(grantedPermission.type) // ie share_records, message_records, upload_pages
@@ -1045,6 +1120,20 @@ export const createCepsApiController = () => {
           allowedGrantees.push(grantee)
         } else {
           granteesNotAllowed.push(grantee)
+        }
+      } else if (startsWith(grantee, 'app:')) {
+        // Same-user app grantee: grants access to another app OF THE SAME USER. Expanded server-side
+        // to the (owner user, app) pair — never an app alone, so on a multi-user server another user
+        // running the same app can never match. No contact check: the grantee user is the owner.
+        const granteeAppName = grantee.substring('app:'.length)
+        if (!granteeAppName || !/^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/i.test(granteeAppName)) {
+          granteesNotAllowed.push(grantee)
+        } else if (!PERMISSION_TYPES_FOR_WHICH_RECORDS_ARE_MARKED.includes(grantedPermission.type)) {
+          // App-scoped grants are only defined for record-marked sharing (share_records etc.);
+          // table-level permission types keep user-identity grantees.
+          return sendFailure(res, 'app grantees can only be used with record-marked permission types (eg share_records)', { function: 'shareRecords', requestorApp, userId })
+        } else {
+          allowedGrantees.push(grantee)
         }
       } else { // if (grantee.indexOf('@') > 0)
         grantee = grantee.replace(/\./g, '_')
@@ -1135,14 +1224,20 @@ export const createCepsApiController = () => {
 
         if (doGrant) {
           for (const grantee of allowedGrantees) {
-            const granteeKey = (grantee === '_public' || grantee === '_privatelink') ? grantee : ((startsWith(grantee, '_privatefeed:')) ? grantee.substr(0, 12) : grantee)
+            // 'app:<appName>' grantees expand to (owner user, app): grantee = the owner's own userId,
+            // grantee_app = the consuming app. Read paths match (grantee, grantee_app ?? requestor_app).
+            const isAppGrantee = startsWith(grantee, 'app:')
+            const granteeApp = isAppGrantee ? grantee.substring('app:'.length) : null
+            const granteeKey = isAppGrantee ? userId : ((grantee === '_public' || grantee === '_privatelink') ? grantee : ((startsWith(grantee, '_privatefeed:')) ? grantee.substr(0, 12) : grantee))
 
-            // find array object with grantee, requestor_app and permission_name
-            let accessibleObject = accessibles.find(obj => obj.grantee === granteeKey && obj.requestor_app === requestorApp && obj.permission_name === permissionName)
+            // find array object on the full (grantee, grantee_app, requestor_app, permission_name)
+            // tuple, so an app-scoped grant never collides with a user-scoped one on the same record
+            let accessibleObject = accessibles.find(obj => obj.grantee === granteeKey && (obj.grantee_app || null) === granteeApp && obj.requestor_app === requestorApp && obj.permission_name === permissionName)
             if (!accessibleObject) {
               accessibleObject = { grantee: granteeKey, requestor_app: requestorApp, permission_name: permissionName, granted: true }
+              if (granteeApp) accessibleObject.grantee_app = granteeApp
               accessibles.push(accessibleObject)
-            } 
+            }
             accessibleObject.granted = true
             
             if (granteeKey === '_public' || granteeKey === '_privatelink' || granteeKey === '_privatefeed') {
@@ -1329,10 +1424,14 @@ export const createCepsApiController = () => {
           }
         } else { // revoke
           for (const grantee of allowedGrantees) {
-            const granteeKey = (grantee === '_public' || grantee === '_privatelink') ? grantee : (startsWith(grantee, '_privatefeed:')) ? grantee.substr(0, 12) : grantee
+            const isAppGrantee = startsWith(grantee, 'app:')
+            const granteeApp = isAppGrantee ? grantee.substring('app:'.length) : null
+            const granteeKey = isAppGrantee ? userId : ((grantee === '_public' || grantee === '_privatelink') ? grantee : (startsWith(grantee, '_privatefeed:')) ? grantee.substr(0, 12) : grantee)
             // future - could keep all public id's and then use those to delete them later
             let accessiblePublicid = null
-            const index = accessibles.findIndex(obj => obj.grantee === granteeKey && obj.requestor_app === requestorApp && obj.permission_name === permissionName);
+            // match on the full (grantee, grantee_app, requestor_app, permission_name) tuple, so an
+            // app-scoped grant can be revoked without touching a user-scoped one on the same record
+            const index = accessibles.findIndex(obj => obj.grantee === granteeKey && (obj.grantee_app || null) === granteeApp && obj.requestor_app === requestorApp && obj.permission_name === permissionName);
             if (index !== -1) {
               const accessibleObject = { ...accessibles[index] };
               accessibles.splice(index, 1);
@@ -1807,28 +1906,32 @@ export const createCepsApiController = () => {
     // Helper function for same-host message exchange
     const sameHostMessageExchange = async (recipient, messageCopy) => {
       const username = recipient.recipient_id
-      
-      if (!freezr.freezrOtherPersonContacts?.[username]) {
+      const isSelfSend = username === messageCopy.sender_id
+
+      if (!isSelfSend && !freezr.freezrOtherPersonContacts?.[username]) {
         throw new Error('no contact db found for user ' + username)
       }
       if (!freezr.freezrOtherPersonGotMsgs?.[username]) {
         throw new Error('no msgdb found for user ' + username)
       }
-      
-      // Check if recipient has sender as contact
-      let contacts = null
-      try {
-        contacts = await freezr.freezrOtherPersonContacts[username].query({ username: messageCopy.sender_id, serverurl: null }, {})
-      } catch (err) {
-        console.error('❌ Error querying contacts:', err)
-        throw new Error('Failed to query contacts: ' + err.message)
-      }
-      
-      if (!contacts || contacts.length === 0) {
-        messageCopy.senderIsNotContact = true
-      }
-      if (contacts && contacts.length > 1) {
-        console.warn('two contacts found where one was expected ' + JSON.stringify(contacts))
+
+      // Check if recipient has sender as contact (skipped on self-send: users are not
+      // contacts of themselves, and the flag would wrongly mark their own messages)
+      if (!isSelfSend) {
+        let contacts = null
+        try {
+          contacts = await freezr.freezrOtherPersonContacts[username].query({ username: messageCopy.sender_id, serverurl: null }, {})
+        } catch (err) {
+          console.error('❌ Error querying contacts:', err)
+          throw new Error('Failed to query contacts: ' + err.message)
+        }
+
+        if (!contacts || contacts.length === 0) {
+          messageCopy.senderIsNotContact = true
+        }
+        if (contacts && contacts.length > 1) {
+          console.warn('two contacts found where one was expected ' + JSON.stringify(contacts))
+        }
       }
       
       // Add the message to recipient's message queue
@@ -1932,11 +2035,30 @@ export const createCepsApiController = () => {
             return !failed
           }
 
-          if (!objectFieldsHaveAllStrings(params, ['app_id', 'sender_id', 'sender_host', 'contact_permission', 'table_id']) || (!params.record_id && !params.message_id)) {
-            return sendFailure(res, 'field insufficency mismatch', 'messageActions', 400)
+          if (!params.type) params.type = 'message_records'
+          if (params.type !== 'message_records' && params.type !== 'message_direct') {
+            return sendFailure(res, 'only message_records and message_direct type messaging currently allowed', 'messageActions', 400)
           }
-          if (params.type !== 'message_records') {
-            return sendFailure(res, 'only message_records type messaging currently allowed', 'messageActions', 400)
+          // Sender identity is authoritative from the TOKEN, not the client. Browser clients stamp
+          // sender_id/sender_host from freezrMeta, but the job runtimes have no full freezrMeta
+          // (adapters/jobs/jobClientCore.mjs builds a minimal sandbox), so: default a missing
+          // sender_id from the token (a SUPPLIED one must still match it — checked below), and treat
+          // sender_host as OPTIONAL. sender_host is only load-bearing for CROSS-SERVER sends (the
+          // recipient server authenticates by calling back <sender_host>/ceps/message/verify), so
+          // those are refused without it (guard below). Long-term: derive it from a canonical-server-
+          // url admin pref rather than trusting the client — see TODO.md.
+          if (!params.sender_id) params.sender_id = freezr.tokenInfo.requestor_id
+          if (!params.sender_host) delete params.sender_host // '' from the job SDK → treat as absent
+          if (params.sender_host && typeof params.sender_host !== 'string') {
+            return sendFailure(res, 'sender_host invalid', 'messageActions', 400)
+          }
+          // message_records shares a stored record (needs a record_id, or a message_id to reply about one);
+          // message_direct carries free text + an optional opaque payload (neither required). table_id is
+          // required for both (above), so the message always lands in a specific app's inbox.
+          // See freezr_askapp_sharing_summary.md §3 (Message shapes).
+          if (!objectFieldsHaveAllStrings(params, ['app_id', 'sender_id', 'table_id']) ||
+              (params.type === 'message_records' && !params.record_id && !params.message_id)) {
+            return sendFailure(res, 'field insufficency mismatch', 'messageActions', 400)
           }
           if (params.sender_id !== freezr.tokenInfo.requestor_id) {
             return sendFailure(res, 'requestor id mismatch', 'messageActions', 401)
@@ -1944,8 +2066,19 @@ export const createCepsApiController = () => {
           if (params.app_id !== freezr.tokenInfo.app_name) {
             return sendFailure(res, 'app id mismatch', 'messageActions', 401)
           }
-          if (!params.messaging_permission || !params.contact_permission) {
+          if (!params.messaging_permission) {
             return sendFailure(res, 'missing permission names in request', 'messageActions', 400)
+          }
+          // contact_permission is optional (the grant was never actually enforced — see the commented-out
+          // contactPerm check below); when present it must be a string as it is echoed in the envelope.
+          if (params.contact_permission && typeof params.contact_permission !== 'string') {
+            return sendFailure(res, 'contact_permission invalid', 'messageActions', 400)
+          }
+          // recipient_app is optional routing: which app's inbox this message is addressed to (honored by
+          // the inbox read rule for same-user recipients). app_id stays pinned to the sender's token —
+          // it is authentication; recipient_app is routing.
+          if (params.recipient_app && typeof params.recipient_app !== 'string') {
+            return sendFailure(res, 'recipient_app invalid', 'messageActions', 400)
           }
           if (!params.recipient_id && !params.group_name && !params.recipients) {
             return sendFailure(res, 'malformed recipients in request', 'messageActions', 400)
@@ -1962,6 +2095,18 @@ export const createCepsApiController = () => {
           if (params.message && typeof params.message !== 'string') {
             return sendFailure(res, 'message related to a message must be text', 'messageActions', 400)
           }
+          // Cross-server sends REQUIRE sender_host — the recipient server authenticates the message
+          // by calling back <sender_host>/ceps/message/verify with the nonce, so a message without a
+          // sender_host can never be verified. Refuse LOUDLY here rather than failing weirdly at the
+          // recipient (this is the deliberately-unsupported case for background jobs until a
+          // canonical-server-url admin pref exists — see TODO.md). Same-server recipients carry no
+          // recipient_host, so same-user/app-to-app sends pass through.
+          if (!params.sender_host) {
+            const crossHostRecipient = (freezr.freezrMessageRecipients || []).find(r => r && r.recipient_host)
+            if (crossHostRecipient) {
+              return sendFailure(res, 'sender_host is required for cross-server messages (unavailable from background jobs until the canonical server url pref exists)', 'messageActions', 400)
+            }
+          }
 
           // 2. Check message permission
           if (!freezr.ownerPermsDb) {
@@ -1974,13 +2119,17 @@ export const createCepsApiController = () => {
             console.error('❌ Error querying permissions:', err)
             return sendFailure(res, err, 'messageActions', 500)
           }
+          // Layer in auto-granted system-app messaging/contacts perms (common/systemPermissions.json) so
+          // system apps (e.g. info.freezr.creator sharing ask-apps) can message without a user-grant
+          // dialog. See freezr_askapp_sharing_summary.md §3. Fabricated in-memory records, never written.
+          permsResults = (permsResults || []).concat(getAllSystemPermissionsForApp(freezr.tokenInfo.app_name))
           if (!permsResults || permsResults.length === 0) {
             return sendFailure(res, 'Sharing Permissions missing - internal', 'messageActions', 401)
           }
 
           permsResults.forEach(aPerm => {
             if (aPerm.name === params.messaging_permission &&
-              aPerm.granted && aPerm.type === 'message_records' && params.type === 'message_records' &&
+              aPerm.granted && aPerm.type === 'message_records' && (params.type === 'message_records' || params.type === 'message_direct') &&
               (aPerm.table_id === freezr.appTableDb.oac.app_table || aPerm.table_id.includes(freezr.appTableDb.oac.app_table))
             ) messagingPerm = aPerm
             if (aPerm.name === params.contact_permission &&
@@ -1998,7 +2147,7 @@ export const createCepsApiController = () => {
             return sendFailure(res, 'Permission type mismatch for messaging', 'messageActions', 401)
           }
 
-          // 3. Get record and make sure grantee is in it
+          // 3. Get record (message_records only; message_direct carries no stored record)
           let fetchedRecord = null
           if (params.record_id) {
             try {
@@ -2006,8 +2155,6 @@ export const createCepsApiController = () => {
             } catch (err) {
               return sendFailure(res, 'Error reading record', { function: 'messageActions', error: err }, 500)
             }
-          } else {
-            return sendFailure(res, 'no record id or message id provided', 'messageActions', 400)
           }
 
           // 4. Construct a permitted-record
@@ -2032,6 +2179,12 @@ export const createCepsApiController = () => {
             }
             delete permittedRecord._accessible // old format
             delete permittedRecord._accessibles
+          } else if (params.type === 'message_direct') {
+            // No stored record: pass the app-defined payload through opaquely (no return_fields trim, no
+            // _accessibles grant), or null for a text-only message. Recipient-side validation only (the
+            // blockMsgsToNonContacts pref). See freezr_askapp_sharing_summary.md §3 (message_direct).
+            permittedRecord = (params.record && typeof params.record === 'object') ? JSON.parse(JSON.stringify(params.record)) : null
+            if (permittedRecord) { delete permittedRecord._accessible; delete permittedRecord._accessibles }
           } else {
             return sendFailure(res, 'snbh type was already checked ???', 'messageActions', 400)
           }
@@ -2055,6 +2208,12 @@ export const createCepsApiController = () => {
           // 6. Validate recipients if blocking messages to non-contacts
           if (freezr.userPrefs?.blockMsgsToNonContacts) {
             for (const recipient of freezr.freezrMessageRecipients) {
+              // Self-send (recipient user is the sender user, same host — eg app-to-app messaging within
+              // one account) needs no contacts entry: users are not contacts of themselves.
+              if (recipient.recipient_id === params.sender_id && (!recipient.recipient_host || recipient.recipient_host === params.sender_host)) {
+                validatedRecipients.push(recipient)
+                continue
+              }
               try {
                 let contactResults = null
                 try {
@@ -2168,24 +2327,28 @@ export const createCepsApiController = () => {
             }
           }
 
-          // 11. Update record _accessibles field with messaging grants
-          if (!Array.isArray(recordAccessibleField)) recordAccessibleField = []
-          recipientsSuccessfullysentTo.forEach(recipient => {
-            const recipientString = recipientAsJsonKey(recipient)
-            let entry = recordAccessibleField.find(obj => obj.grantee === recipientString && obj.requestor_app === params.app_id && obj.permission_name === params.messaging_permission)
-            if (!entry) {
-              entry = { grantee: recipientString, requestor_app: params.app_id, permission_name: params.messaging_permission, granted: true, messaged: [] }
-              recordAccessibleField.push(entry)
+          // 11. Update record _accessibles field with messaging grants (message_records only — a
+          // message_direct has no stored record to stamp, so skip). This stamping is what grants each
+          // same-host recipient the grantee file-fetch of a shared record. §2-3.
+          if (params.record_id) {
+            if (!Array.isArray(recordAccessibleField)) recordAccessibleField = []
+            recipientsSuccessfullysentTo.forEach(recipient => {
+              const recipientString = recipientAsJsonKey(recipient)
+              let entry = recordAccessibleField.find(obj => obj.grantee === recipientString && obj.requestor_app === params.app_id && obj.permission_name === params.messaging_permission)
+              if (!entry) {
+                entry = { grantee: recipientString, requestor_app: params.app_id, permission_name: params.messaging_permission, granted: true, messaged: [] }
+                recordAccessibleField.push(entry)
+              }
+              if (!entry.messaged) entry.messaged = []
+              entry.messaged.push(new Date().getTime())
+            })
+            try {
+              const updateResult = await freezr.appTableDb.update(params.record_id.toString(), { _accessibles: recordAccessibleField }, { replaceAllFields: false, newSystemParams: true })
+              console.log('🔑 messageActions initiate 11 - update result ', { updateResult })
+            } catch (err) {
+              console.error('❌ Error updating record accessible field:', err)
+              return sendFailure(res, 'Error updating record accessible field', { function: 'messageActions', error: err }, 500)
             }
-            if (!entry.messaged) entry.messaged = []
-            entry.messaged.push(new Date().getTime())
-          })
-          try {
-            const updateResult = await freezr.appTableDb.update(params.record_id.toString(), { _accessibles: recordAccessibleField }, { replaceAllFields: false, newSystemParams: true })
-            console.log('🔑 messageActions initiate 11 - update result ', { updateResult })
-          } catch (err) {
-            console.error('❌ Error updating record accessible field:', err)
-            return sendFailure(res, 'Error updating record accessible field', { function: 'messageActions', error: err }, 500)
           }
 
           console.log('🔑 messageActions initiate 11 end ', { success: true, recipientsSuccessfullysentTo, recipientsWithErrorsSending })
@@ -2201,8 +2364,8 @@ export const createCepsApiController = () => {
           let status = 0
 
           // 1. Validate fields
-          const fields = ['app_id', 'sender_id', 'sender_host', 'recipient_host', 'recipient_id', 'type', 'contact_permission', 'table_id', 'nonce', 'message', 'messaging_permission', 'record']
-          const fieldExceptions = ['message', 'record_id', 'record', 'message_id']
+          const fields = ['app_id', 'sender_id', 'sender_host', 'recipient_host', 'recipient_id', 'type', 'contact_permission', 'recipient_app', 'table_id', 'nonce', 'message', 'messaging_permission', 'record']
+          const fieldExceptions = ['message', 'record_id', 'record', 'message_id', 'contact_permission', 'recipient_app']
           let failed = false
           const validatedParams = {}
           
@@ -2336,7 +2499,7 @@ export const createCepsApiController = () => {
           }
 
           const haveDifferentMessageFields = (dbMessage, verifyeeMessage) => {
-            const fields = ['app_id', 'sender_id', 'sender_host', 'contact_permission', 'table_id']
+            const fields = ['app_id', 'sender_id', 'sender_host', 'table_id'] // contact_permission is optional so no longer compared
             let failed = false
             fields.forEach(key => { if (dbMessage[key] !== verifyeeMessage[key]) failed = true })
             if (!verifyeeMessage.recipient_id || !verifyeeMessage.recipient_host) failed = true
@@ -2390,7 +2553,8 @@ export const createCepsApiController = () => {
               } catch (err) {
                 return sendFailure(res, 'Error querying message', { function: 'messageActions', error: err }, 500)
               }
-              if (!results || results.length === 0 || results[0].app_id !== freezr.tokenInfo.app_name) {
+              // An app may mark messages it sent (app_id) or messages addressed to it (recipient_app)
+              if (!results || results.length === 0 || (results[0].app_id !== freezr.tokenInfo.app_name && results[0].recipient_app !== freezr.tokenInfo.app_name)) {
                 console.warn('message not found ', { messageId, results })
                 return sendFailure(res, 'message not found', { function: 'messageActions' }, 404)
               }
@@ -2401,10 +2565,17 @@ export const createCepsApiController = () => {
               }
             }
           } else {
-            try {
-              await freezr.userMessagesGotDb.update({ app_id: freezr.tokenInfo.app_name }, { marked_read: true }, { replaceAllFields: false })
-            } catch (err) {
-              return sendFailure(res, 'Error updating all messages read status', { function: 'messageActions', error: err }, 500)
+            // Two separate updates (not $or — the cache query matcher only supports plain field
+            // equality): messages the app sent and messages addressed to it via recipient_app.
+            // 'no record found to update' just means one of the two sets is empty.
+            for (const markAllQuery of [{ app_id: freezr.tokenInfo.app_name }, { recipient_app: freezr.tokenInfo.app_name }]) {
+              try {
+                await freezr.userMessagesGotDb.update(markAllQuery, { marked_read: true }, { replaceAllFields: false })
+              } catch (err) {
+                if (!err?.message?.includes('no record')) {
+                  return sendFailure(res, 'Error updating all messages read status', { function: 'messageActions', error: err }, 500)
+                }
+              }
             }
           }
 
@@ -2412,9 +2583,40 @@ export const createCepsApiController = () => {
           return sendApiSuccess(res, { success: true })
         }
 
-        case 'get':
-          // Not used - kept for compatibility
-          return sendFailure(res, 'get action not implemented', 'messageActions', 501)
+        case 'get': {
+          // GET /ceps/messages — the app's inbox: messages it sent that landed here (app_id, which is
+          // pinned to the sender's token) plus messages addressed to it via the optional recipient_app
+          // routing field. Two queries rather than $or (the cache query matcher only supports plain
+          // field equality), deduped by _id.
+          const appName = freezr.tokenInfo.app_name
+          const skip = req.query?.skip ? parseInt(req.query.skip) : 0
+          const count = req.query?.count ? parseInt(req.query.count) : 50
+          const unreadOnly = req.query?.unread_only === 'true' || req.query?.unread_only === true
+
+          const messages = []
+          const seenIds = {}
+          for (const getQuery of [{ app_id: appName }, { recipient_app: appName }]) {
+            if (unreadOnly) getQuery.marked_read = { $ne: true }
+            let results = null
+            try {
+              // fetch enough to honor skip+count after the two result sets are merged
+              results = await freezr.userMessagesGotDb.query(getQuery, { sort: { _date_created: -1 }, count: (skip + count) })
+            } catch (err) {
+              return sendFailure(res, 'Error querying messages', { function: 'messageActions', error: err }, 500)
+            }
+            (results || []).forEach(msg => {
+              const idString = msg._id?.toString()
+              if (!seenIds[idString]) {
+                seenIds[idString] = true
+                messages.push(msg)
+              }
+            })
+          }
+          messages.sort((a, b) => (b._date_created || 0) - (a._date_created || 0))
+
+          res.locals.freezr.permGiven = true
+          return sendApiSuccess(res, { messages: messages.slice(skip, skip + count) })
+        }
 
         default:
           return sendFailure(res, 'invalid query', 'messageActions', 400)
@@ -2833,6 +3035,31 @@ export const createCepsApiController = () => {
     }
   }
 
+  // Cross-user file authorisation. Returns true iff the file record identified by `filePath`
+  // in the data owner's <app>.files collection carries an _accessibles grant for this requestor,
+  // matching the grantee (user, app) pair: (grantee, grantee_app ?? requestor_app) against the
+  // token's (requestor_id, consuming app). Mirrors the record-level check in readRecordById.
+  // Fails closed on any error / missing record / missing collection.
+  const requestorHasAccessibleFileGrant = async (res, filePath, tokenInfo, appName) => {
+    try {
+      const appTableDb = res.locals.freezr?.appTableDb // the data owner's <app>.files collection
+      if (!appTableDb) return false
+      const fileRecord = await appTableDb.read_by_id(filePath)
+      if (!fileRecord || !Array.isArray(fileRecord._accessibles)) return false
+      const requestee = tokenInfo.requestor_id
+      // Consuming app: the app that minted the fileToken (stored at mint time), falling back to
+      // the path app for tokens minted before requestor_app was stored — the legacy pinning.
+      const consumingApp = tokenInfo.requestor_app || appName
+      return fileRecord._accessibles.some(obj =>
+        obj && obj.granted === true &&
+        obj.grantee === requestee &&
+        (obj.grantee_app || obj.requestor_app) === consumingApp
+      )
+    } catch (e) {
+      return false
+    }
+  }
+
   /**
    * GET /feps/userfiles/:app_name/:user_id/*
    * Serve a user file, authenticated via path-scoped app_token cookie.
@@ -2845,10 +3072,34 @@ export const createCepsApiController = () => {
       const userId = req.params.user_id
       const appName = req.params.app_name
 
+      // Reject path traversal early (defence-in-depth; the FS layer also confines the path).
+      // A leading slash, a null byte, or any '..' segment is never a legitimate app-relative path.
+      if (!filePath || filePath.indexOf('\0') >= 0 || filePath.charAt(0) === '/' ||
+          filePath.split('/').some(seg => seg === '..')) {
+        return sendAuthFailure(res, { type: 'Unauthorized', error: 'invalid file path', function: 'sendUserFile', statusCode: 400 })
+      }
+
       const tokenInfo = res.locals.freezr?.tokenInfo
-      if (!tokenInfo ||
-          (tokenInfo.requestor_id !== userId && tokenInfo.owner_id !== userId) ||
-          tokenInfo.app_name !== appName) {
+      if (!tokenInfo || tokenInfo.app_name !== appName) {
+        return sendAuthFailure(res, { type: 'Unauthorized', error: 'invalid authentication', function: 'sendUserFile', statusCode: 401 })
+      }
+
+      // The credential (a scoped ?fileToken= or a Bearer app_token) was ALREADY validated upstream by
+      // the getFileTokenInfo middleware — a request with neither is 401'd there, never reaching here —
+      // and just above we required tokenInfo.app_name === the requested app. This is the second,
+      // record-level identity check that ties that validated token to THIS file:
+      //  (a) OWNER: the token's user is the path user → its own app's files.
+      //  (b) GRANTEE: a cross-user token (requestor_id = grantee, owner_id = data owner = path user)
+      //      may read ONLY a file explicitly shared with the requestor, verified via the record's
+      //      _accessibles entry. Reached by an exact-file grantee fileToken (see getUserFileToken, §5).
+      // (Essential for the Bearer path: getFileTokenInfo pins a Bearer token to the SESSION user, not
+      //  the PATH user, so this owner check is what stops app X's token reading /userfiles/X/other/…)
+      const isOwner = tokenInfo.requestor_id === userId
+      let permitted = isOwner
+      if (!permitted && tokenInfo.owner_id === userId && tokenInfo.requestor_id) {
+        permitted = await requestorHasAccessibleFileGrant(res, filePath, tokenInfo, appName)
+      }
+      if (!permitted) {
         return sendAuthFailure(res, { type: 'Unauthorized', error: 'invalid authentication', function: 'sendUserFile', statusCode: 401 })
       }
 
@@ -2857,6 +3108,96 @@ export const createCepsApiController = () => {
       appFS.sendUserFile(filePath, res)
     } catch (err) {
       return sendFailure(res, 'Error in sendUserFile', 'sendUserFile', 500)
+    }
+  }
+
+  /**
+   * GET /feps/getuserfiletoken/:permission_name/:app_name/:user_id   (optional ?file=<path>)
+   * Mint a short-lived, scoped fileToken (held in memory) so native <img>/<video>/CSS loads can
+   * authenticate private userfiles WITHOUT the ambient cookie (which leaks cross-site/cross-app). See
+   * freezr_file_access_plan_v1.md §4b. Authenticated as the requesting app's own app_token (Bearer).
+   *
+   *  - SELF (own app + own user): the reader already owns the files, so an (app,user)-scoped token
+   *    (no file_path) covers every private image on the page in one mint.
+   *  - GRANTEE (another user's file, same app): must present the exact `?file=` and hold an
+   *    _accessibles grant on that specific .files record (checked against res.locals.freezr.appTableDb,
+   *    the owner's <app>.files collection); the token is scoped to that one file.
+   */
+  const FILE_TOKEN_TTL_MS = 10 * 60 * 1000 // 10 minutes — long enough to load a page, short enough to bound leakage
+  const getUserFileToken = async (req, res) => {
+    const FUNC = 'getUserFileToken'
+    try {
+      const tokenInfo = res.locals.freezr?.tokenInfo
+      if (!tokenInfo) {
+        return sendAuthFailure(res, { type: 'Unauthorized', error: 'invalid authentication', function: FUNC, statusCode: 401 })
+      }
+      const permissionName = req.params.permission_name || 'self'
+      const appName = req.params.app_name // whose files
+      const userId = req.params.user_id // data owner (files owner)
+      if (!appName || !userId) return sendFailure(res, 'app_name and user_id required', FUNC, 400)
+
+      // Optional exact-file scope (required for grantee tokens); reject traversal in it.
+      let filePath = (req.query && req.query.file) ? decodeURIComponent(req.query.file) : null
+      if (filePath) {
+        if (filePath.charAt(0) === '/') filePath = filePath.slice(1)
+        if (filePath.indexOf('\0') >= 0 || filePath.split('/').some(seg => seg === '..')) {
+          return sendFailure(res, 'invalid file path', FUNC, 400)
+        }
+      }
+
+      const requestorApp = tokenInfo.app_name
+      const requestorUser = tokenInfo.requestor_id
+
+      const isSelf = (requestorApp === appName && requestorUser === userId)
+      if (!isSelf) {
+        // GRANTEE: requires an _accessibles grant on the exact file. Two forms, matched below as
+        // (grantee, grantee_app ?? requestor_app) === the token's server-verified (user, app):
+        //  - cross-user, same app: a user-scoped grant (no grantee_app; consuming app = granting app)
+        //  - same-user, cross-app: an app-scoped grant whose grantee_app names THIS consuming app
+        // (replaces the old blanket cross-app 403)
+        if (!filePath) {
+          return sendFailure(res, 'a specific ?file= is required for a shared-file token', FUNC, 400)
+        }
+        // res.locals.freezr.appTableDb is the OWNER's <app>.files collection (opened by the route's
+        // addOwnerAppTableAndFsIfNeedBe with data_owner_id = user_id).
+        const appTableDb = res.locals.freezr?.appTableDb
+        let granted = false
+        try {
+          if (appTableDb) {
+            const rec = await appTableDb.read_by_id(filePath)
+            if (rec && Array.isArray(rec._accessibles)) {
+              granted = rec._accessibles.some(obj =>
+                obj && obj.granted === true &&
+                obj.grantee === requestorUser &&
+                (obj.grantee_app || obj.requestor_app) === requestorApp &&
+                (!permissionName || permissionName === 'self' || obj.permission_name === permissionName)
+              )
+            }
+          }
+        } catch (e) { granted = false }
+        if (!granted) {
+          return sendAuthFailure(res, { type: 'Unauthorized', error: 'no grant for this file', function: FUNC, statusCode: 403 })
+        }
+      }
+
+      // Authorisation passed (self, or a verified grantee grant) — mark it for the response guard.
+      res.locals.freezr.permGiven = true
+
+      const fileToken = crypto.randomBytes(32).toString('hex')
+      const expiry = new Date().getTime() + FILE_TOKEN_TTL_MS
+      fileTokenStore.set(fileToken, {
+        app_name: appName, // whose files
+        user_id: userId, // data owner
+        requestor_id: requestorUser, // the reader
+        requestor_app: requestorApp, // the CONSUMING app (== appName except for app-scoped grants)
+        owner_id: userId, // the files' owner (== requestor for self)
+        file_path: isSelf ? (filePath || null) : filePath, // self: optional (app,user)-scope; grantee: exact file
+        permission_name: permissionName,
+        expiry
+      })
+      return sendApiSuccess(res, { fileToken, expiry })
+    } catch (err) {
+      return sendFailure(res, 'Error in getUserFileToken', FUNC, 500)
     }
   }
 
@@ -2894,64 +3235,6 @@ export const createCepsApiController = () => {
     }
   }
 
-  const sanitizeModelKeys = (models) => {
-    if (!models || typeof models !== 'object') return models
-    const clean = {}
-    for (const [key, val] of Object.entries(models)) {
-      clean[key.replace(/\./g, '_')] = val
-    }
-    return clean
-  }
-
-  const canonicalizeModelKey = (provider, key) => {
-    if (!key) return key
-    if (provider === 'ChatGPT') {
-      return key
-        .replace(/-\d{4}-\d{2}-\d{2}$/, '')
-        .replace(/-latest$/, '')
-    }
-    return key
-  }
-
-  const canonicalizeModelMap = (provider, models) => {
-    if (!models || typeof models !== 'object') return models
-    const clean = {}
-    for (const [key, val] of Object.entries(models)) {
-      clean[canonicalizeModelKey(provider, key)] = val
-    }
-    return clean
-  }
-
-  const unsanitizeModelKeys = (models) => {
-    if (!models || typeof models !== 'object') return models
-    const clean = {}
-    for (const [key, val] of Object.entries(models)) {
-      clean[key.replace(/_/g, '.')] = val
-    }
-    return clean
-  }
-
-  const normalizePricingModels = (provider, models) => {
-    if (!models || typeof models !== 'object') return null
-    const normalized = {}
-    for (const [rawKey, rawVal] of Object.entries(models)) {
-      if (!rawVal || typeof rawVal !== 'object') continue
-      const input = Number(rawVal.input)
-      const output = Number(rawVal.output)
-      const cachedInput = rawVal.cachedInput !== undefined ? Number(rawVal.cachedInput) : null
-      if (!Number.isFinite(input) || !Number.isFinite(output)) continue
-      if (input <= 0 && output <= 0) continue
-
-      const key = canonicalizeModelKey(provider, rawKey)
-      normalized[key] = { input, output }
-      if (Number.isFinite(cachedInput) && cachedInput >= 0) {
-        normalized[key].cachedInput = cachedInput
-      }
-    }
-
-    return Object.keys(normalized).length > 0 ? normalized : null
-  }
-
   const upsertPricingRecord = async (pricingDb, provider, modelsToMerge, sourceModel, { replaceAll = false, source = 'llm_self_report' } = {}) => {
     const now = new Date().toISOString()
     const canonicalModels = canonicalizeModelMap(provider, modelsToMerge)
@@ -2983,9 +3266,19 @@ export const createCepsApiController = () => {
 
   const LLM_PRICING_STALE_MS = 7 * 24 * 60 * 60 * 1000
 
-  const getConnectorPath = (provider) => (provider === 'ChatGPT'
-    ? '../../../adapters/llmConnectors/openai.mjs'
-    : '../../../adapters/llmConnectors/anthropic.mjs')
+  // The one place a provider name maps to a connector module. Unknown names still fall
+  // through to Anthropic (long-standing behavior existing records may rely on).
+  const CONNECTOR_PATHS = {
+    Claude: '../../../adapters/llmConnectors/anthropic.mjs',
+    ChatGPT: '../../../adapters/llmConnectors/openai.mjs',
+    ClaudeLocal: '../../../adapters/llmConnectors/claudeLocal.mjs',
+    CodexLocal: '../../../adapters/llmConnectors/codexLocal.mjs'
+  }
+  const getConnectorPath = (provider) => CONNECTOR_PATHS[provider] || CONNECTOR_PATHS.Claude
+
+  // A local-CLI resource has no `key` — its credential is the CLI login on this machine.
+  // Everywhere "has a key" used to mean "usable", localCli now counts too.
+  const isUsableLlmResource = (r) => !!(r && (r.key || r.localCli))
 
   const _tryParseJson = (text) => {
     if (!text) return text
@@ -3007,6 +3300,75 @@ export const createCepsApiController = () => {
     return text
   }
 
+  /**
+   * Add one LLM call to the caller's daily cost tally (info.freezr.account.usageTallies).
+   *
+   * Never throws and never blocks the answer: the response bytes are already on the wire
+   * when this runs, and a metering failure (a closed db, or storageLimitExceeded when the
+   * user is over quota) must not turn a successful LLM call into an error.
+   *
+   * The row is keyed by the API KEY actually spent, plus the upstream vendor the connector
+   * reports — so an aggregator key (OpenRouter) splits into one row per real vendor while a
+   * direct key just has vendor === provider.
+   */
+  const meterLlmUsage = async (res, { resource, connector, model, kind, tokensUsed = null, cost = null, outcome = 'ok' }) => {
+    try {
+      const tallyDb = res.locals?.freezr?.usageTallyDb
+      if (!tallyDb || !resource) return
+      const tokenInfo = res.locals?.freezr?.tokenInfo || {}
+      await recordUsage(tallyDb, {
+        ownerId: tokenInfo.requestor_id,
+        appName: tokenInfo.app_name,
+        resource: 'llm',
+        resourceId: resource._id,
+        resourceName: resource.name || null,
+        provider: resource.provider || null,
+        vendor: (typeof connector?.getVendorForModel === 'function' && connector.getVendorForModel(model)) || resource.provider || null,
+        model: model || null,
+        kind,
+        tokensUsed,
+        cost,
+        outcome
+      })
+    } catch (e) {
+      console.warn('Could not record LLM usage tally:', e.message)
+    }
+  }
+
+  /**
+   * Capability maps for every provider the user actually holds a key for. Built from each
+   * connector's own getCapabilities so the answer is the connector's, not a table here —
+   * and scoped to the user's own keys so an error never advertises a provider they cannot use.
+   */
+  const collectProviderCapabilities = async (llmResources, model) => {
+    const out = {}
+    for (const resource of (llmResources || []).filter(isUsableLlmResource)) {
+      try {
+        const connector = await import(getConnectorPath(resource.provider))
+        out[resource.provider] = typeof connector.getCapabilities === 'function'
+          ? await connector.getCapabilities({ apiKey: resource.key, model })
+          : (connector.CAPABILITIES || {})
+      } catch (e) {
+        console.warn('Could not read capabilities for', resource.provider, ':', e.message)
+      }
+    }
+    return out
+  }
+
+  /**
+   * Fold the connector's server-tool rates (web search per 1,000, etc.) into a stored price.
+   *
+   * Server-tool rates are PROVIDER-level constants, but pricing records are per-model and
+   * cached for a week — so a record written before those rates existed carries none, and the
+   * cost maths then bills searches at ZERO rather than failing loudly. Reading them from the
+   * connector at request time makes a stale record harmless. The stored value still wins if
+   * one is present, so a future per-model override is not clobbered.
+   */
+  const withServerToolPrices = (price, connector) => {
+    if (!price || typeof connector?.getServerToolPrices !== 'function') return price
+    return { ...connector.getServerToolPrices(), ...price }
+  }
+
   const getSelectedResource = (llmResources, provider) => {
     let resource = null
     if (provider) resource = llmResources.find(r => r.provider === provider)
@@ -3026,96 +3388,6 @@ export const createCepsApiController = () => {
       lastUpdated: rec.lastUpdated || null,
       source: rec.source || null,
       sourceModel: rec.sourceModel || null
-    }
-  }
-
-  const makeEmptyTokensUsed = (tokensUsed = {}) => ({
-    input: { qtty: tokensUsed.input?.qtty || 0, cost: null },
-    output: { qtty: tokensUsed.output?.qtty || 0, cost: null },
-    other: {
-      qtty: tokensUsed.other?.qtty || 0,
-      cost: null,
-      details: tokensUsed.other?.details || {}
-    }
-  })
-
-  const getModelFamily = (provider, modelId) => {
-    const canonical = canonicalizeModelKey(provider, modelId || '')
-    if (provider === 'Claude') {
-      const stripped = canonical
-        .replace(/^claude-/, '')
-        .replace(/-\d{8}$/, '')
-      const segments = stripped.split('-')
-      const nameParts = []
-      let majorVersion = null
-      for (const seg of segments) {
-        if (/^\d+$/.test(seg)) {
-          if (majorVersion === null) majorVersion = seg
-        } else {
-          nameParts.push(seg)
-        }
-      }
-      const base = nameParts.join('-')
-      return majorVersion ? `${base}-${majorVersion}` : base
-    }
-    return canonical
-  }
-
-  const isValidPrice = (entry) => (
-    entry && entry.input !== undefined && entry.output !== undefined && !entry.lookup_failed
-  )
-
-  const findModelPrice = (provider, pricingModels, modelId, family) => {
-    if (!pricingModels) return null
-    const canonicalId = canonicalizeModelKey(provider, modelId || '')
-    if (isValidPrice(pricingModels[canonicalId])) {
-      return { key: canonicalId, ...pricingModels[canonicalId] }
-    }
-    const wantedFamily = family || getModelFamily(provider, modelId)
-    for (const [key, entry] of Object.entries(pricingModels)) {
-      if (isValidPrice(entry) && getModelFamily(provider, key) === wantedFamily) {
-        return { key, ...entry }
-      }
-    }
-    return null
-  }
-
-  const isLookupFailedForModel = (provider, pricingModels, modelId) => {
-    if (!pricingModels) return false
-    const canonicalId = canonicalizeModelKey(provider, modelId || '')
-    return pricingModels[canonicalId]?.lookup_failed === true
-  }
-
-  const buildCostSummary = (tokensUsed) => {
-    const inputTokens = tokensUsed?.input?.qtty || 0
-    const outputTokens = tokensUsed?.output?.qtty || 0
-    const otherTokens = tokensUsed?.other?.qtty || 0
-    const inputCost = tokensUsed?.input?.cost || 0
-    const outputCost = tokensUsed?.output?.cost || 0
-    const otherCost = tokensUsed?.other?.cost || 0
-    return {
-      inputTokens,
-      outputTokens,
-      otherTokens,
-      totalTokens: inputTokens + outputTokens + otherTokens,
-      inputCost,
-      outputCost,
-      otherCost,
-      totalCost: inputCost + outputCost + otherCost
-    }
-  }
-
-  const applyPriceToTokensUsed = (tokensUsed, price) => {
-    const normalized = makeEmptyTokensUsed(tokensUsed)
-    if (!price) return { tokensUsed: normalized, cost: null }
-
-    normalized.input.cost = (normalized.input.qtty / 1000000) * price.input
-    normalized.output.cost = (normalized.output.qtty / 1000000) * price.output
-    normalized.other.cost = normalized.other.cost || 0
-
-    return {
-      tokensUsed: normalized,
-      cost: buildCostSummary(normalized)
     }
   }
 
@@ -3142,52 +3414,45 @@ export const createCepsApiController = () => {
     return { models: allModels, lastUpdated: new Date().toISOString(), sourceModel: pricingResult?.sourceModel || null }
   }
 
-  const normalizeModelId = (id) => (id || '').toLowerCase().replace(/-\d{4}-\d{2}-\d{2}$/, '').replace(/-latest$/, '')
-
-  const IMAGE_PRICING_SUFFIX = '_image'
-
-  const getImagePricingProvider = (provider) => provider + IMAGE_PRICING_SUFFIX
-
-  const refreshImagePricing = async ({ resource, pricingDb, connector, targetModel = null }) => {
-    if (typeof connector.getImagePricing !== 'function') return null
-    // console.log('🖼️ Fetching image pricing for', resource.provider, targetModel ? ('model: ' + targetModel) : '(all)')
-    const pricingResult = await connector.getImagePricing({ apiKey: resource.key, targetModel })
-    // console.log('🖼️ Image pricing result:', JSON.stringify(pricingResult?.models || null))
+  /**
+   * Pricing for a NAMESPACED model family — images, and now audio. Both live in their own
+   * `<provider>_image` / `<provider>_audio` record because their price rows have different
+   * axes from a text row (an audio token is not a text token and does not cost the same), and
+   * mixing them would let findModelPrice return an image rate for a chat call.
+   *
+   * Written once and shared rather than copied per namespace: this file already learned that
+   * lesson on the ask() options, where three hand-maintained copies of one list is how `effort`
+   * shipped in all three transports and was documented in none.
+   */
+  const refreshNamespacedPricing = async ({ resource, pricingDb, connector, namespace, fetcher, targetModel = null }) => {
+    if (typeof connector[fetcher] !== 'function') return null
+    const pricingResult = await connector[fetcher]({ apiKey: resource.key, targetModel })
     if (!pricingResult?.models) return null
-    const imagePricingProvider = getImagePricingProvider(resource.provider)
+    const namespacedProvider = resource.provider + namespace
 
     const safeModels = sanitizeModelKeys(pricingResult.models)
-    const existing = await pricingDb.query({ provider: imagePricingProvider }, { count: 1 })
+    const existing = await pricingDb.query({ provider: namespacedProvider }, { count: 1 })
     const now = new Date().toISOString()
+    const record = {
+      provider: namespacedProvider,
+      lastUpdated: now,
+      source: pricingResult.source || 'llm_self_report',
+      sourceModel: pricingResult.sourceModel || null
+    }
 
     if (existing && existing.length > 0) {
-      const existingModels = existing[0].models || {}
-      const merged = targetModel ? { ...existingModels, ...safeModels } : safeModels
-      await pricingDb.update(existing[0]._id.toString(), {
-        provider: imagePricingProvider,
-        models: merged,
-        lastUpdated: now,
-        source: pricingResult.source || 'llm_self_report',
-        sourceModel: pricingResult.sourceModel || null
-      })
-      // console.log('🖼️ Updated image pricing record, keys:', Object.keys(unsanitizeModelKeys(merged)))
+      // A targeted refresh MERGES (it only looked up one model); a full one replaces.
+      const merged = targetModel ? { ...(existing[0].models || {}), ...safeModels } : safeModels
+      await pricingDb.update(existing[0]._id.toString(), { ...record, models: merged })
       return { models: unsanitizeModelKeys(merged), lastUpdated: now }
-    } else {
-      await pricingDb.create(null, {
-        provider: imagePricingProvider,
-        models: safeModels,
-        lastUpdated: now,
-        source: pricingResult.source || 'llm_self_report',
-        sourceModel: pricingResult.sourceModel || null
-      })
-      // console.log('🖼️ Created image pricing record, keys:', Object.keys(unsanitizeModelKeys(safeModels)))
-      return { models: unsanitizeModelKeys(safeModels), lastUpdated: now }
     }
+    await pricingDb.create(null, { ...record, models: safeModels })
+    return { models: unsanitizeModelKeys(safeModels), lastUpdated: now }
   }
 
-  const getImagePricingRecord = async (pricingDb, provider) => {
+  const getNamespacedPricingRecord = async (pricingDb, provider, namespace) => {
     if (!pricingDb || !provider) return null
-    const existing = await pricingDb.query({ provider: getImagePricingProvider(provider) }, { count: 1 })
+    const existing = await pricingDb.query({ provider: provider + namespace }, { count: 1 })
     if (!existing || existing.length === 0) return null
     const rec = existing[0]
     return {
@@ -3198,54 +3463,17 @@ export const createCepsApiController = () => {
     }
   }
 
-  const findImageModelPrice = (pricingModels, modelId) => {
-    if (!pricingModels || !modelId) return null
-    const normalId = normalizeModelId(modelId)
-    for (const [key, entry] of Object.entries(pricingModels)) {
-      const normKey = normalizeModelId(key)
-      if (normKey === normalId || key === modelId) {
-        if (entry.text_input !== undefined && entry.image_output !== undefined) {
-          const price = { ...entry }
-          if (price.text_input < 0.1 && price.image_output < 0.1) {
-            console.warn('🖼️ Image prices look like per-1K, normalizing to per-1M')
-            // hack for getting wrng unit prices from 
-            price.text_input *= 1000
-            price.image_input = (price.image_input || 0) * 1000
-            price.image_output *= 1000
-          }
-          return price
-        }
-      }
-    }
-    return null
-  }
+  const refreshImagePricing = ({ resource, pricingDb, connector, targetModel = null }) =>
+    refreshNamespacedPricing({ resource, pricingDb, connector, namespace: IMAGE_PRICING_SUFFIX, fetcher: 'getImagePricing', targetModel })
 
-  const applyImagePriceToTokensUsed = (tokensUsed, price) => {
-    const normalized = makeEmptyTokensUsed(tokensUsed)
-    if (!price) return { tokensUsed: normalized, cost: null }
+  const getImagePricingRecord = (pricingDb, provider) =>
+    getNamespacedPricingRecord(pricingDb, provider, IMAGE_PRICING_SUFFIX)
 
-    const details = tokensUsed?.other?.details || {}
-    const textInputTokens = details.textInputTokens || 0
-    const imageInputTokens = details.imageInputTokens || 0
-    const outputTokens = normalized.output.qtty || 0
+  const refreshAudioPricing = ({ resource, pricingDb, connector, targetModel = null }) =>
+    refreshNamespacedPricing({ resource, pricingDb, connector, namespace: AUDIO_PRICING_SUFFIX, fetcher: 'getVoicePricing', targetModel })
 
-    const textInputCost = (textInputTokens / 1000000) * (price.text_input || 0)
-    const imageInputCost = (imageInputTokens / 1000000) * (price.image_input || 0)
-    const outputCost = (outputTokens / 1000000) * (price.image_output || 0)
-
-    normalized.input.cost = textInputCost + imageInputCost
-    normalized.output.cost = outputCost
-    normalized.other.details = {
-      ...details,
-      textInputCost,
-      imageInputCost
-    }
-
-    return {
-      tokensUsed: normalized,
-      cost: buildCostSummary(normalized)
-    }
-  }
+  const getAudioPricingRecord = (pricingDb, provider) =>
+    getNamespacedPricingRecord(pricingDb, provider, AUDIO_PRICING_SUFFIX)
 
   const buildImageProviderState = async ({ resource, pricingDb, refresh = false }) => {
     const connector = await import(getConnectorPath(resource.provider))
@@ -3291,6 +3519,55 @@ export const createCepsApiController = () => {
     }
   }
 
+  /**
+   * The voice models a provider offers, for the ping snapshot. Same shape as the image one,
+   * plus a `kind` ('stt' | 'tts') so an app picking a model does not have to read its name.
+   *
+   * Unlike images, a voice model is listed even with NO price row: a missing rate must not
+   * hide the capability, because the gate has already told the app it can transcribe. The
+   * pricing gap shows up as pricing:null, which is visible, rather than as an absent model.
+   */
+  const buildVoiceProviderState = async ({ resource, pricingDb, refresh = false }) => {
+    const connector = await import(getConnectorPath(resource.provider))
+    if (typeof connector.listVoiceModels !== 'function') return null
+
+    let voiceModels = []
+    try {
+      voiceModels = await connector.listVoiceModels({ apiKey: resource.key })
+    } catch (e) {
+      console.warn('Could not list voice models for', resource.provider, ':', e.message)
+      return null
+    }
+    if (voiceModels.length === 0) return null
+
+    let pricingRecord = await getAudioPricingRecord(pricingDb, resource.provider)
+    if (refresh) {
+      try {
+        await refreshAudioPricing({ resource, pricingDb, connector })
+        pricingRecord = await getAudioPricingRecord(pricingDb, resource.provider)
+      } catch (e) {
+        console.warn('Voice pricing refresh failed for', resource.provider, ':', e.message)
+      }
+    }
+
+    const pricingModels = pricingRecord?.models || {}
+    const lastUpdated = pricingRecord?.lastUpdated || null
+    const refreshNeeded = !lastUpdated || ((Date.now() - new Date(lastUpdated).getTime()) > LLM_PRICING_STALE_MS)
+
+    const models = voiceModels.map(m => ({
+      id: m.id,
+      provider: m.provider || resource.provider,
+      created: m.created,
+      kind: m.kind || null,
+      pricing: findAudioModelPrice(pricingModels, m.id) || null
+    }))
+
+    return {
+      models,
+      pricingMeta: { lastUpdated, refreshNeeded }
+    }
+  }
+
   const buildProviderState = async ({ resource, pricingDb, refresh = false }) => {
     const connector = await import(getConnectorPath(resource.provider))
     const modelInfos = await connector.listModels({ apiKey: resource.key })
@@ -3307,7 +3584,13 @@ export const createCepsApiController = () => {
 
     const pricingModels = pricingRecord?.models || {}
     const lastUpdated = pricingRecord?.lastUpdated || null
-    const refreshNeeded = !lastUpdated || ((Date.now() - new Date(lastUpdated).getTime()) > LLM_PRICING_STALE_MS)
+    // A purely self-reported table is refresh-eligible REGARDLESS of age: models mis-state their
+    // own prices (observed: every current Opus model claiming the old $15/$75 rate, tripling every
+    // cost figure shown), and the connector now answers from an official table first — but only a
+    // refresh replaces what is already stored. Age alone would leave wrong values in place for days.
+    const selfReportedOnly = pricingRecord?.source === 'llm_self_report'
+    const refreshNeeded = !lastUpdated || selfReportedOnly ||
+      ((Date.now() - new Date(lastUpdated).getTime()) > LLM_PRICING_STALE_MS)
 
     const models = modelInfos.map(m => {
       const price = findModelPrice(resource.provider, pricingModels, m.id, m.family)
@@ -3326,9 +3609,25 @@ export const createCepsApiController = () => {
         provider: m.provider || resource.provider,
         version: m.version || '',
         latest: m.latest || false,
+        // The provider's own per-model answer, condensed to freezr's vocabulary. Absent when
+        // the provider publishes nothing about that model — which means "unknown, try it",
+        // never "unsupported".
+        ...(m.capabilities ? { capabilities: m.capabilities } : {}),
         pricing
       }
-    }).filter(m => m.pricing)
+    })
+    // NOT filtered by `pricing`. It used to be, and the effect was that a model the provider
+    // had released but the pricing table did not yet cover was INVISIBLE in every app's model
+    // picker — observed 2026-09-06 with a key whose newest models (gpt-6, gpt-5.6, gpt-5.5-pro)
+    // simply did not appear, so the list looked like it stopped at 5.4.
+    // A missing price is not a reason to hide a working model:
+    //   - llmAsk already does a targeted pricing refresh the first time it meets an unpriced
+    //     model, so the gap closes itself on first use;
+    //   - the usage tallies already count `unpriced_requests`, i.e. an unpriced call is a state
+    //     this system was built to expect, not an error;
+    //   - `pricing: null` travels to the app, so a picker that wants to say "cost unknown" can.
+    // Hiding it, by contrast, could never fix itself: the model stayed unpriced precisely
+    // because nothing was ever able to select it.
 
     return {
       models,
@@ -3349,7 +3648,19 @@ export const createCepsApiController = () => {
       const max_tokens = options.max_tokens || req.body?.max_tokens
       const role = options.role || req.body?.role
       const responseType = options.responseType || req.body?.responseType
-      const thinking = options.thinking || req.body?.thinking || null
+      // `false` is a real value here — "do not think" — and recent models think by default, so
+      // collapsing false to null silently re-enables the most expensive behaviour on the wire.
+      const effort = options.effort || req.body?.effort || null
+      const thinking = options.thinking !== undefined
+        ? options.thinking
+        : (req.body?.thinking !== undefined ? req.body.thinking : null)
+      const cache = options.cache || req.body?.cache || null
+      // Web access. Normalized here so the gate, the connector and the meta all read the
+      // same shape (true -> { search: true, fetch: true }).
+      const web = normalizeWebOption(options.web !== undefined ? options.web : req.body?.web)
+      // Per-request wait, bounded by the caller's ask and by the calling job's remaining
+      // budget. Connectors clamp it to their own ceiling/floor — see resolveAskTimeoutMs.
+      const timeoutMs = resolveAskTimeoutMs(req, options)
       const noCosts = options.noCosts === true || req.body?.noCosts === true
       const refresh = options.refresh === true || req.body?.refresh === true
       const llmResources = res.locals.freezr?.llmResources || []
@@ -3359,10 +3670,11 @@ export const createCepsApiController = () => {
       const resource = getSelectedResource(llmResources, provider)
 
       if (req.body?.ping) {
-        const activeResources = llmResources.filter(r => r.key)
+        const activeResources = llmResources.filter(isUsableLlmResource)
         const selectedProvider = provider || resource?.provider || activeResources[0]?.provider || null
         const providers = {}
         const imageProviders = {}
+        const voiceProviders = {}
         const pricingMeta = {}
         for (const active of activeResources) {
           const state = await buildProviderState({
@@ -3386,6 +3698,20 @@ export const createCepsApiController = () => {
           } catch (e) {
             console.warn('Image model state failed for', active.provider, ':', e.message)
           }
+
+          try {
+            const voiceState = await buildVoiceProviderState({
+              resource: active,
+              pricingDb,
+              refresh: refresh && (!provider || provider === active.provider)
+            })
+            if (voiceState) {
+              voiceProviders[active.provider] = voiceState.models
+              pricingMeta[active.provider + AUDIO_PRICING_SUFFIX] = voiceState.pricingMeta
+            }
+          } catch (e) {
+            console.warn('Voice model state failed for', active.provider, ':', e.message)
+          }
         }
         let defaultFamily = null
         if (selectedProvider) {
@@ -3395,21 +3721,50 @@ export const createCepsApiController = () => {
           } catch (e) { /* ignore */ }
         }
 
+        // Capability snapshot, so an app can show a "search the web" toggle only where it
+        // will work instead of discovering it by failing. Values are true / false /
+        // 'unknown' — 'unknown' means "try it and handle the error", not "no".
+        const capabilities = await collectProviderCapabilities(activeResources, null)
+
         const pingResponse = {
           success: true,
           exists: activeResources.length > 0,
           defaultProvider: selectedProvider,
           defaultFamily,
           providers,
+          capabilities,
           pricingMeta
         }
         if (Object.keys(imageProviders).length > 0) {
           pingResponse.imageProviders = imageProviders
         }
+        if (Object.keys(voiceProviders).length > 0) {
+          pingResponse.voiceProviders = voiceProviders
+        }
+
+        // What this app has spent of the user's LLM budget today and this month, so an app
+        // can show a running total without keeping its own books. Non-fatal: a ping must
+        // still answer if the meter is unreadable.
+        try {
+          const tallyDb = res.locals.freezr?.usageTallyDb
+          const appName = res.locals.freezr?.tokenInfo?.app_name
+          if (tallyDb && appName) {
+            const today = utcDay(Date.now())
+            const rows = await queryTallies(tallyDb, { resource: 'llm', from: today.slice(0, 8) + '01', to: today, appName })
+            pingResponse.usage = {
+              today: summarizeTallies(rows.filter(r => r.date === today)).total,
+              month: summarizeTallies(rows).total,
+              currency: 'USD'
+            }
+          }
+        } catch (e) {
+          console.warn('Could not read LLM usage tallies for ping:', e.message)
+        }
+
         return sendApiSuccess(res, pingResponse)
       }
 
-      if (!resource || !resource.key) {
+      if (!isUsableLlmResource(resource)) {
         return res.status(400).json({
           success: false,
           error: 'No LLM key found. Add one in Account Resources.',
@@ -3424,6 +3779,29 @@ export const createCepsApiController = () => {
       const connector = await import(getConnectorPath(resource.provider))
       const resolvedModel = model || family || connector.DEFAULT_FAMILY || null
 
+      // Capability gate. Runs BEFORE any provider call, so a request for something this
+      // provider genuinely cannot do costs the user nothing. Note that an UNKNOWN capability
+      // passes through on purpose — the connectors settle those by trying (see the three-tier
+      // note in common/helpers/llmCapabilities.mjs), which is what keeps freezr out of the
+      // business of maintaining a per-model feature table.
+      let webUnavailable = []
+      if (web) {
+        const required = []
+        if (web.search) required.push('web.search')
+        if (web.fetch) required.push('web.fetch')
+        const providerCapabilities = await collectProviderCapabilities(llmResources, resolvedModel)
+        const gate = checkCapabilities({
+          required,
+          optional: web.optional,
+          providerCapabilities,
+          provider: resource.provider,
+          model: resolvedModel
+        })
+        if (!gate.ok) return res.status(400).json(gate.error)
+        webUnavailable = gate.unavailable
+      }
+
+
       // Always use SSE streaming when available to keep the connection alive
       // (Heroku and similar hosts impose a 30s first-byte timeout on HTTP responses).
       // The client reads the SSE stream internally and only surfaces chunks
@@ -3434,27 +3812,95 @@ export const createCepsApiController = () => {
         res.setHeader('Content-Type', 'text/event-stream')
         res.setHeader('Cache-Control', 'no-cache')
         res.setHeader('Connection', 'keep-alive')
+        res.setHeader('X-Accel-Buffering', 'no') // nginx: never buffer this response
         res.flushHeaders()
 
-        const writeSSE = (data) => { res.write('data: ' + JSON.stringify(data) + '\n\n') }
+        // Some front-end proxies (Azure App Service / ARR, some CDNs) hold response bytes in a
+        // ~4KB buffer before forwarding them. A 6-byte heartbeat comment can sit in that buffer
+        // forever, so the platform's IDLE timer (230s on App Service, 4 min on Azure LB) never
+        // resets and the connection is killed mid-request even though we "wrote" regularly.
+        // Padding each heartbeat past the buffer threshold forces the bytes onto the wire; the
+        // client's SSE parser skips comment lines, so the only cost is ~4KB per quiet 15s window.
+        const SSE_PAD = ': ' + '.'.repeat(4096) + '\n\n'
+        res.write(SSE_PAD) // commit the front-end to streaming mode before the first quiet window
+
+        let lastWriteAt = Date.now()
+        const writeSSE = (data) => {
+          lastWriteAt = Date.now()
+          res.write('data: ' + JSON.stringify(data) + '\n\n')
+        }
+
+        // Every intermediary between us and the browser (Heroku 55s, nginx proxy_read_timeout
+        // 60s, Cloudflare 100s) drops an SSE connection that goes quiet, and once headers are
+        // flushed the client just sees a clean EOF — which surfaces as the useless
+        // "Stream ended without a done event". There are two long silent windows here: before
+        // the first token (model resolution + prompt prefill on a big document, and OpenAI
+        // o-series reasoning, which emits no deltas at all) and after the last one (the pricing
+        // lookup/refresh below). A comment line keeps bytes moving through both; the client's
+        // parser only reads `data: ` lines so it ignores these.
+        const HEARTBEAT_MS = 15000
+        const heartbeat = setInterval(() => {
+          if (res.writableEnded) return
+          if (Date.now() - lastWriteAt < HEARTBEAT_MS) return
+          lastWriteAt = Date.now()
+          res.write(SSE_PAD)
+        }, HEARTBEAT_MS / 3)
+        if (heartbeat.unref) heartbeat.unref()
+
+        // If the browser goes away mid-answer, stop paying the provider for the rest of it.
+        //
+        // TWO mechanisms, because neither alone is enough:
+        //   - abortController: the authoritative one. A connector that spawns a subprocess
+        //     (the local CLI connectors) listens on the signal and kills its child at once.
+        //   - gen.return(): ends the generator so the loop below unwinds. On its own this
+        //     CANNOT stop a quiet connector: an async generator's return() is QUEUED and only
+        //     takes effect when the generator next suspends AT A YIELD, so a CLI that has gone
+        //     silent mid-answer would keep running — and keep that connector's single slot,
+        //     failing every later call with 429 — until its own timeout. Hence the signal.
+        // Both are safe on normal completion: Node also emits 'close' when the response
+        // finishes, by which point the generator is done (return() is a no-op) and the
+        // connector has already removed its abort listener.
+        let clientGone = false
+        let gen = null
+        const abortController = new AbortController()
+        const onClientClose = () => {
+          clientGone = true
+          abortController.abort()
+          try { gen?.return?.() } catch (e) { /* generator already finished */ }
+        }
+        res.on('close', onClientClose)
 
         try {
-          const gen = connector.askStream({
+          gen = connector.askStream({
             apiKey: resource.key,
             prompt,
             context,
             model: resolvedModel,
             max_tokens: max_tokens || null,
             role: role || null,
-            thinking: thinking || null,
-            files: (files && files.length > 0) ? files : null
+            thinking: thinking === false ? false : (thinking || null),
+            effort: effort || undefined,
+            cache: cache || null,
+            web: web || null,
+            files: (files && files.length > 0) ? files : null,
+            // local-CLI connector config ({ binaryPath }) from the resource record;
+            // key-based connectors ignore it
+            local: resource.local || null,
+            // per-request wait + client-disconnect abort; key-based connectors don't
+            // destructure either and ignore them
+            timeoutMs,
+            signal: abortController.signal
           })
 
           let doneResult = null
           for await (const chunk of gen) {
+            if (clientGone) { await gen.return?.(); break }
             if (chunk.type === 'done') {
               doneResult = chunk
             } else {
+              // delta / thinking / tool — relayed verbatim. Clients that predate a chunk
+              // type ignore it (see the SSE reader in freezrApiV2.llm.js), so adding one
+              // is backwards compatible.
               writeSSE(chunk)
             }
           }
@@ -3467,7 +3913,9 @@ export const createCepsApiController = () => {
 
             let pricingRecord = pricingDb ? await getPricingRecord(pricingDb, resource.provider) : null
             let price = null
-            if (!noCosts && pricingDb) {
+            // Priced even when the app asked for noCosts: the meter needs the dollars even
+            // though the response below omits them. Accounting is not app-optional.
+            if (pricingDb) {
               price = findModelPrice(resource.provider, pricingRecord?.models || {}, doneResult.model, doneResult.family)
               if (!price && !isLookupFailedForModel(resource.provider, pricingRecord?.models || {}, doneResult.model)) {
                 try {
@@ -3479,7 +3927,7 @@ export const createCepsApiController = () => {
                 }
               }
             }
-            const pricedTokens = applyPriceToTokensUsed(doneResult.tokensUsed, price)
+            const pricedTokens = applyPriceToTokensUsed(doneResult.tokensUsed, withServerToolPrices(price, connector))
             writeSSE({
               type: 'done',
               success: true,
@@ -3489,19 +3937,64 @@ export const createCepsApiController = () => {
                 provider: doneResult.provider,
                 model: doneResult.model,
                 modelFamily: doneResult.family,
+                // stopReason 'max_tokens' means the answer was CUT OFF at maxTokens —
+                // the app should treat the response as partial (and unparseable, if it
+                // asked for JSON) rather than guessing from token counts.
+                stopReason: doneResult.stopReason || null,
+                maxTokens: doneResult.maxTokens || null,
                 rawUsage: doneResult.rawUsage,
                 tokensUsed: noCosts ? makeEmptyTokensUsed(doneResult.tokensUsed) : pricedTokens.tokensUsed,
                 cost: noCosts ? null : pricedTokens.cost,
+                pricing: noCosts ? null : (price || null),
+                // What the web tools actually did: sources to show the user, fetched URLs as
+                // the audit trail for what left the conversation.
+                ...(doneResult.toolsUsed ? { toolsUsed: doneResult.toolsUsed } : {}),
+                ...(doneResult.citations ? { citations: doneResult.citations } : {}),
+                // Names anything the caller asked for and did NOT get (only possible when
+                // they passed optional) — otherwise a stale answer passes for a fresh one.
+                capabilities: { unavailable: [...webUnavailable, ...(doneResult.unavailable || [])] },
                 hasKey: true
               }
             })
+            await meterLlmUsage(res, {
+              resource,
+              connector,
+              model: doneResult.model,
+              kind: 'ask',
+              tokensUsed: pricedTokens.tokensUsed,
+              cost: pricedTokens.cost
+            })
+          } else if (!clientGone) {
+            // The generator finished without a done chunk. Never end the response silently —
+            // a bodiless EOF is indistinguishable from a dropped connection at the client.
+            console.error('❌ llmAsk (streaming): connector ended without a done chunk', resource.provider, resolvedModel)
+            writeSSE({ type: 'error', error: 'LLM stream ended without a result', code: 'no_done' })
+            await meterLlmUsage(res, { resource, connector, model: resolvedModel, kind: 'ask', outcome: 'error' })
+          } else {
+            // Client left mid-answer. The provider has already billed the prefill, so the
+            // request is counted even though the `done` chunk (and its usage) never arrived.
+            await meterLlmUsage(res, { resource, connector, model: resolvedModel, kind: 'ask', outcome: 'aborted' })
           }
 
           return res.end()
         } catch (streamError) {
           console.error('❌ Error in llmAsk (streaming):', streamError)
-          writeSSE({ type: 'error', error: streamError.message || 'LLM streaming failed' })
+          // SSE headers are already flushed by this point, so a capability rejection raised by
+          // the connector (tier 3: the model turned out not to support what was asked) cannot
+          // become a 400 — it has to travel as an error EVENT. Carry its structure, or the app
+          // is left regexing a message string. The SSE reader copies `code` onto the thrown error.
+          writeSSE({
+            type: 'error',
+            error: streamError.message || 'LLM streaming failed',
+            ...(streamError.code ? { code: streamError.code } : {}),
+            ...(streamError.capability ? { capability: streamError.capability } : {}),
+            ...(streamError.model ? { model: streamError.model } : {})
+          })
+          await meterLlmUsage(res, { resource, connector, model: resolvedModel, kind: 'ask', outcome: 'error' })
           return res.end()
+        } finally {
+          clearInterval(heartbeat)
+          res.removeListener('close', onClientClose)
         }
       }
 
@@ -3514,13 +4007,19 @@ export const createCepsApiController = () => {
         max_tokens: max_tokens || null,
         role: role || null,
         responseType: responseType || null,
-        thinking: thinking || null,
-        files: (files && files.length > 0) ? files : null
+        thinking: thinking === false ? false : (thinking || null),
+        effort: effort || undefined,
+        cache: cache || null,
+        web: web || null,
+        files: (files && files.length > 0) ? files : null,
+        local: resource.local || null,
+        timeoutMs
       })
 
       let pricingRecord = pricingDb ? await getPricingRecord(pricingDb, resource.provider) : null
       let price = null
-      if (!noCosts && pricingDb) {
+      // Priced even under noCosts — see the streaming path above.
+      if (pricingDb) {
         price = findModelPrice(resource.provider, pricingRecord?.models || {}, result.model, result.family)
         if (!price && !isLookupFailedForModel(resource.provider, pricingRecord?.models || {}, result.model)) {
           try {
@@ -3533,7 +4032,7 @@ export const createCepsApiController = () => {
         }
       }
 
-      const pricedTokens = applyPriceToTokensUsed(result.tokensUsed, price)
+      const pricedTokens = applyPriceToTokensUsed(result.tokensUsed, withServerToolPrices(price, connector))
 
       const reply = {
         success: true,
@@ -3542,16 +4041,45 @@ export const createCepsApiController = () => {
           provider: result.provider,
           model: result.model,
           modelFamily: result.family,
+          // See the streaming path above: 'max_tokens' means the answer was cut off.
+          stopReason: result.stopReason || null,
+          maxTokens: result.maxTokens || null,
           rawUsage: result.rawUsage,
           tokensUsed: noCosts ? makeEmptyTokensUsed(result.tokensUsed) : pricedTokens.tokensUsed,
           cost: noCosts ? null : pricedTokens.cost,
+          pricing: noCosts ? null : (price || null),
+          ...(result.toolsUsed ? { toolsUsed: result.toolsUsed } : {}),
+          ...(result.citations ? { citations: result.citations } : {}),
+          capabilities: { unavailable: [...webUnavailable, ...(result.unavailable || [])] },
           hasKey: true
         }
       }
       if (result.thinking) reply.thinking = result.thinking
-      return sendApiSuccess(res, reply)
+      const sent = sendApiSuccess(res, reply)
+      await meterLlmUsage(res, {
+        resource,
+        connector,
+        model: result.model,
+        kind: 'ask',
+        tokensUsed: pricedTokens.tokensUsed,
+        cost: pricedTokens.cost
+      })
+      return sent
     } catch (error) {
       console.error('❌ Error in llmAsk:', error)
+      // A capability rejection raised by the connector (the model turned out not to support
+      // what was asked) is a 400 with its structure preserved, not an opaque 500 — the app
+      // needs `code`/`capability` to react rather than a message string to regex.
+      if (error.code === 'capability_unsupported' || error.code === 'capability_unsupported_on_model') {
+        return res.status(400).json({
+          success: false,
+          error: error.message,
+          code: error.code,
+          capability: error.capability || null,
+          model: error.model || null,
+          supportedBy: error.supportedBy || []
+        })
+      }
       const statusCode = error.status || 500
       const errorResponse = {
         success: false,
@@ -3560,6 +4088,164 @@ export const createCepsApiController = () => {
         errorStatus: statusCode
       }
       return res.status(statusCode).json(errorResponse)
+    }
+  }
+
+  /**
+   * Resolve the provider + connector for a voice call and gate the capability BEFORE calling
+   * out, so a request the provider cannot serve costs nothing. Shared by both handlers because
+   * the only difference between them is which half of `voice` they need.
+   *
+   * This is the first gate that can answer "Claude cannot, ChatGPT can" — every capability
+   * before voice ran the other way round.
+   */
+  const resolveVoiceTarget = async ({ res, llmResources, provider, capability }) => {
+    let resource = getSelectedResource(llmResources, provider)
+    if (!isUsableLlmResource(resource)) {
+      return { error: { status: 400, body: { success: false, error: 'No LLM key found. Add one in Account Resources.', meta: { hasKey: false } } } }
+    }
+    const providerCapabilities = await collectProviderCapabilities(llmResources, null)
+
+    // If the user's DEFAULT provider cannot do this, fall back to one of their own keys that
+    // can — voice is currently ChatGPT-only, so a user whose default is Claude would otherwise
+    // be unable to use it at all despite holding a working key.
+    //
+    // Note this is the OPPOSITE of what llmAsk does, deliberately. There, switching provider
+    // silently would change the MODEL ANSWERING THE QUESTION, so the gate refuses and names the
+    // alternative instead. Here the provider is doing a mechanical transform — the same audio
+    // in, the same words out — so picking the one that can is a convenience, not a substitution.
+    // Which key was actually spent still comes back in meta.provider, and only providers the
+    // user already holds a key for are ever considered.
+    if (!isPermitted(resolveCapability(providerCapabilities[resource.provider] || {}, capability))) {
+      const capable = (llmResources || []).find(r => r.key &&
+        isPermitted(resolveCapability(providerCapabilities[r.provider] || {}, capability)))
+      if (capable) {
+        console.log('[freezr llm] ' + resource.provider + ' cannot ' + capability + '; using this user\'s ' + capable.provider + ' key instead')
+        resource = capable
+      }
+    }
+
+    const connector = await import(getConnectorPath(resource.provider))
+    const gate = checkCapabilities({ required: [capability], providerCapabilities, provider: resource.provider })
+    if (!gate.ok) return { error: { status: 400, body: gate.error } }
+    return { resource, connector }
+  }
+
+  /**
+   * Price a voice call against the <provider>_audio namespace, refreshing once if the model is
+   * not in the table yet. Mirrors the image path: the meter needs the dollars even when the
+   * table is cold, and a missing rate silently bills at zero (the web-search lesson).
+   */
+  const priceVoiceCall = async ({ resource, connector, pricingDb, result }) => {
+    if (!pricingDb || !result.tokensUsed) return applyAudioPriceToTokensUsed(result.tokensUsed, null)
+    let record = await getAudioPricingRecord(pricingDb, resource.provider)
+    let price = findAudioModelPrice(record?.models || {}, result.model)
+    if (!price) {
+      try {
+        await refreshAudioPricing({ resource, pricingDb, connector, targetModel: result.model })
+        record = await getAudioPricingRecord(pricingDb, resource.provider)
+        price = findAudioModelPrice(record?.models || {}, result.model)
+      } catch (e) {
+        console.warn('Could not refresh voice pricing for', result.model, ':', e.message)
+      }
+    }
+    return applyAudioPriceToTokensUsed(result.tokensUsed, price)
+  }
+
+  /**
+   * PUT /feps/llm/transcribe — speech to text.
+   * Takes the audio through the same two transports llmAsk accepts for attachments (multipart
+   * upload, or headless `filesBase64` JSON), so a background job can call it too.
+   */
+  const llmTranscribe = async (req, res) => {
+    try {
+      res.locals.freezr.permGiven = true
+
+      const options = req.body?.options || {}
+      const provider = options.provider || req.body?.provider
+      const model = options.model || req.body?.model
+      const language = options.language || req.body?.language
+      const prompt = options.prompt || req.body?.prompt
+      const llmResources = res.locals.freezr?.llmResources || []
+      const pricingDb = res.locals.freezr?.llmPricingDb
+
+      // Both transports land in req.files: multer for a browser upload, and the route's
+      // uploadLlmIfNeeded for the headless `filesBase64` JSON a job runtime has to use (it has
+      // no multipart socket stream). Reusing that is why there is no second decode path here.
+      const audio = (req.files && req.files.length > 0) ? req.files[0] : null
+      if (!audio) return res.status(400).json({ success: false, error: 'No audio provided' })
+
+      const target = await resolveVoiceTarget({ res, llmResources, provider, capability: 'voice.stt' })
+      if (target.error) return res.status(target.error.status).json(target.error.body)
+      const { resource, connector } = target
+
+      const result = await connector.transcribe({ apiKey: resource.key, audio, model, language, prompt })
+      const pricedTokens = await priceVoiceCall({ resource, connector, pricingDb, result })
+
+      const sent = sendApiSuccess(res, {
+        success: true,
+        text: result.text,
+        meta: { provider: result.provider, model: result.model, hasKey: true },
+        tokensUsed: pricedTokens.tokensUsed,
+        cost: pricedTokens.cost
+      })
+      await meterLlmUsage(res, {
+        resource, connector, model: result.model, kind: 'transcribe',
+        tokensUsed: pricedTokens.tokensUsed, cost: pricedTokens.cost
+      })
+      return sent
+    } catch (error) {
+      console.error('Error in llmTranscribe:', error)
+      if (error.code === 'capability_unsupported' || error.code === 'capability_unsupported_on_model') {
+        return res.status(400).json({ success: false, error: error.message, code: error.code, capability: error.capability || null })
+      }
+      return res.status(error.status || 500).json({ success: false, error: error.message || 'Transcription failed' })
+    }
+  }
+
+  /** PUT /feps/llm/speak — text to speech. Returns base64 audio, like generate_image does. */
+  const llmSpeak = async (req, res) => {
+    try {
+      res.locals.freezr.permGiven = true
+
+      const options = req.body?.options || {}
+      const text = req.body?.text || req.body?.prompt
+      const provider = options.provider || req.body?.provider
+      const model = options.model || req.body?.model
+      const voice = options.voice || req.body?.voice
+      const format = options.format || req.body?.format
+      const instructions = options.instructions || req.body?.instructions
+      const llmResources = res.locals.freezr?.llmResources || []
+      const pricingDb = res.locals.freezr?.llmPricingDb
+
+      if (!text) return res.status(400).json({ success: false, error: 'No text provided' })
+
+      const target = await resolveVoiceTarget({ res, llmResources, provider, capability: 'voice.tts' })
+      if (target.error) return res.status(target.error.status).json(target.error.body)
+      const { resource, connector } = target
+
+      const result = await connector.speak({ apiKey: resource.key, text, voice, format, model, instructions })
+      const pricedTokens = await priceVoiceCall({ resource, connector, pricingDb, result })
+
+      const sent = sendApiSuccess(res, {
+        success: true,
+        format: result.format,
+        b64Data: result.b64Data,
+        meta: { provider: result.provider, model: result.model, voice: voice || null, hasKey: true },
+        tokensUsed: pricedTokens.tokensUsed,
+        cost: pricedTokens.cost
+      })
+      await meterLlmUsage(res, {
+        resource, connector, model: result.model, kind: 'speak',
+        tokensUsed: pricedTokens.tokensUsed, cost: pricedTokens.cost
+      })
+      return sent
+    } catch (error) {
+      console.error('Error in llmSpeak:', error)
+      if (error.code === 'capability_unsupported' || error.code === 'capability_unsupported_on_model') {
+        return res.status(400).json({ success: false, error: error.message, code: error.code, capability: error.capability || null })
+      }
+      return res.status(error.status || 500).json({ success: false, error: error.message || 'Speech generation failed' })
     }
   }
 
@@ -3639,6 +4325,17 @@ export const createCepsApiController = () => {
         pricedTokens = applyPriceToTokensUsed(result.tokensUsed, null)
       }
 
+      // Same tally as llmAsk, under kind 'generate_image'. Declared once because the image
+      // reply leaves by two different returns below.
+      const meterImage = () => meterLlmUsage(res, {
+        resource,
+        connector,
+        model: result.model,
+        kind: 'generate_image',
+        tokensUsed: pricedTokens.tokensUsed,
+        cost: pricedTokens.cost
+      })
+
       if (result.format === 'svg' && outputFormat === 'png') {
         const { convert } = await import('../../../common/helpers/pictures.mjs')
         const svgBuffer = Buffer.from(result.svgData, 'utf-8')
@@ -3646,7 +4343,7 @@ export const createCepsApiController = () => {
           { buffer: svgBuffer, originalname: 'image.svg' },
           { width: 1024, type: 'png' }
         )
-        return sendApiSuccess(res, {
+        const sentPng = sendApiSuccess(res, {
           success: true,
           format: 'png',
           b64Data: pngBuffer.toString('base64'),
@@ -3655,6 +4352,8 @@ export const createCepsApiController = () => {
           tokensUsed: pricedTokens.tokensUsed,
           cost: pricedTokens.cost
         })
+        await meterImage()
+        return sentPng
       }
 
       const reply = {
@@ -3670,7 +4369,9 @@ export const createCepsApiController = () => {
       } else {
         reply.b64Data = result.b64Data
       }
-      return sendApiSuccess(res, reply)
+      const sentImage = sendApiSuccess(res, reply)
+      await meterImage()
+      return sentImage
     } catch (error) {
       console.error('Error in llmGenerateImage:', error)
       return res.status(error.status || 500).json({
@@ -3887,10 +4588,13 @@ export const createCepsApiController = () => {
     CEPSValidator,
     uploadUserFileAndCreateRecord,
     sendUserFile,
+    getUserFileToken,
     restoreRecord,
     serverlessTasks,
     llmAsk,
     llmGenerateImage,
+    llmTranscribe,
+    llmSpeak,
     readUserFileTree
   }
 }

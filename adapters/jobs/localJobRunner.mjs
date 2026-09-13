@@ -16,14 +16,13 @@ import { createInternalApiClient } from './internalApiClient.mjs'
 import { createJobFreezrClient } from './jobFreezrClient.mjs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
-import { stat } from 'node:fs/promises'
+import { stat, readFile } from 'node:fs/promises'
 import { bjLog } from '../../common/debug/consoleFlags.mjs'
 
 const DEFAULT_JOBS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../../users_jobs')
 
 // Shared so the admin "trust" install writes job code to the SAME place the runner reads it.
 export const jobsBaseDir = () => process.env.FREEZR_JOBS_DIR || DEFAULT_JOBS_DIR
-export const jobCodePath = (app, name) => join(jobsBaseDir(), app, name, 'index.mjs')
 
 // Accept '30s' / '5m' / '500ms' / a number of ms. Default 30s.
 export const parseDurationMs = (v, def = 30000) => {
@@ -55,22 +54,40 @@ export function createLocalJobRunner ({ dsManager, freezrPrefs, freezrStatus, lo
   const baseDir = jobsDir || process.env.FREEZR_JOBS_DIR || DEFAULT_JOBS_DIR
 
   const segmentOk = (s) => typeof s === 'string' && /^[a-zA-Z0-9._-]+$/.test(s) && !s.includes('..')
-  const handlerPath = (app, name) => join(baseDir, app, name, 'index.mjs')
+
+  // Resolve the job's CURRENT entry file. materializeJobToCache writes each build into a
+  // content-stamped dir (<name>@<stamp>/) and flips <name>.current to the live stamp: Node's ESM
+  // cache is keyed by URL and can't be evicted, so only a never-imported dir guarantees the WHOLE
+  // import graph (index.mjs AND its ./sibling.js imports) loads fresh after a re-materialize.
+  // No pointer → legacy unversioned <name>/index.mjs (hand-placed dev jobs, pre-stamp caches).
+  async function resolveEntry (app, name) {
+    try {
+      const stamp = (await readFile(join(baseDir, app, name + '.current'), 'utf8')).trim()
+      if (/^[a-f0-9]{8,64}$/.test(stamp)) {
+        const p = join(baseDir, app, name + '@' + stamp, 'index.mjs')
+        await stat(p)
+        return { path: p, versioned: true }
+      }
+    } catch (e) { /* fall through to legacy layout */ }
+    return { path: join(baseDir, app, name, 'index.mjs'), versioned: false }
+  }
 
   async function exists (app, name) {
     if (!segmentOk(app) || !segmentOk(name)) return false
-    try { await stat(handlerPath(app, name)); return true } catch (e) { return false }
+    try { await stat((await resolveEntry(app, name)).path); return true } catch (e) { return false }
   }
 
   async function loadHandler (app, name) {
-    const p = handlerPath(app, name)
-    // Cache-bust the dynamic import by the file's mtime. Node caches an ES module by URL for the
-    // process lifetime, so without this an edited / re-materialized job keeps running the OLD code
-    // until a server restart. A distinct ?v=<mtime> forces a fresh load ONLY when the file changed
-    // (an unchanged file keeps the same URL → still cached → fast).
+    const { path: p, versioned } = await resolveEntry(app, name)
+    // A stamped dir needs no cache-busting: new content → new dir → every file gets a fresh URL.
+    // The legacy layout keeps the old ?v=<mtime> query, but that only refreshes index.mjs ITSELF —
+    // relative static imports resolve with the query stripped and stay cached, so a multi-file
+    // legacy job still needs a server restart to pick up sibling edits (stamped dirs fix this).
     let v = ''
-    try { const { mtimeMs } = await stat(p); v = '?v=' + Math.round(mtimeMs) } catch (e) { /* import will surface a clear error */ }
-    bjLog('🔎 TMPJOBLOG [LOCAL-LOAD] importing ' + app + '/' + name + ' ' + (v || '(no mtime)'))
+    if (!versioned) {
+      try { const { mtimeMs } = await stat(p); v = '?v=' + Math.round(mtimeMs) } catch (e) { /* import will surface a clear error */ }
+    }
+    bjLog('🔎 TMPJOBLOG [LOCAL-LOAD] importing ' + app + '/' + name + ' ← ' + p + (v || ''))
     const mod = await import(pathToFileURL(p).href + v)
     const handler = mod.handler || mod.default
     if (typeof handler !== 'function') {
@@ -83,7 +100,7 @@ export function createLocalJobRunner ({ dsManager, freezrPrefs, freezrStatus, lo
    * Run a local job now.
    * @returns { ok, result, error, errorCode, durationMs }
    */
-  async function run ({ app, name, token, params = {}, maxRuntime = '30s', flogger = null, deadline = null }) {
+  async function run ({ app, name, token, userId = null, params = {}, maxRuntime = '30s', flogger = null, deadline = null }) {
     const startedAt = Date.now()
     // Composition time budget: the outermost job sets the deadline (now + its maxRuntime); a nested
     // run inherits that SAME deadline, so its effective maxRuntime = min(declared, deadline − now) —
@@ -99,8 +116,13 @@ export function createLocalJobRunner ({ dsManager, freezrPrefs, freezrStatus, lo
       const handler = await loadHandler(app, name)
       // In-process transport closes over the run token; the handler never sees it. The
       // ambient flogger is threaded so the job's API calls log like any other client's.
-      const transport = (method, path, body) => internalApi.dispatch(method, path, body, token, { flogger, deadline: effectiveDeadline })
-      const freezr = createJobFreezrClient({ transport, freezrMeta: { appName: app, appToken: token } })
+      // userId is exposed via freezrMeta so job code using the browser idiom freezrMeta.userId
+      // (and messages.send, which stamps sender_id from it) works; serverAddress stays '' by
+      // design (relative paths — the transport owns routing).
+      // `job` identifies this run to middleware that treats an in-process job as a trusted
+      // origin (see fsContext.mjs localFsGate) and makes its reads attributable in the log.
+      const transport = (method, path, body) => internalApi.dispatch(method, path, body, token, { flogger, deadline: effectiveDeadline, job: { appName: app, jobName: name } })
+      const freezr = createJobFreezrClient({ transport, freezrMeta: { appName: app, appToken: token, userId } })
       result = await withTimeout(Promise.resolve().then(() => handler(freezr, params)), maxMs)
     } catch (e) {
       error = e

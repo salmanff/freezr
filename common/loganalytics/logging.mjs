@@ -53,7 +53,7 @@ export class IdleTimer {
         const idleTime = Date.now() - this.lastActivity;
 
         if (idleTime >= this.idleThreshold) {
-          // [FLUSH-DIAG] temporary: see xplanations/log_buffering.md footguns A-G
+          // [FLUSH-DIAG] temporary: see log_buffering.md footguns A-G
           if (CONSOLE_FLUSH_DIAG_ON) console.log(`[FLUSH-DIAG] idle-tick triggering flush, idleTime=${idleTime}ms, hasFlushedWhileIdle=${this.hasFlushedWhileIdle}`);
           this.flush();
         }
@@ -678,7 +678,7 @@ export class LogManager {
       const today = new Date().toISOString().split('T')[0];
       const localPath = path.join(this.localLogsDir, `${today}-${this.serverKey}.jsonl`);
 
-      // [FLUSH-DIAG] temporary: see xplanations/log_buffering.md hypothesis F (Dropbox file lock)
+      // [FLUSH-DIAG] temporary: see log_buffering.md hypothesis F (Dropbox file lock)
       if (CONSOLE_FLUSH_DIAG_ON) console.log(`[FLUSH-DIAG] write-local: appending ${content.length} bytes to ${localPath}`);
       // Append to local file (async)
       await fs.appendFile(localPath, content);

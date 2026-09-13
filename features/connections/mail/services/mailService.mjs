@@ -7,9 +7,9 @@
 // helper at features/connections/shared/services/connectorCall.mjs, so
 // contacts/calendar services get the identical handling for free.
 
-import * as gmailConnector from '../../../../adapters/connections/gmail.mjs'
-import * as imapConnector from '../../../../adapters/connections/imap.mjs'
-import * as msgraphConnector from '../../../../adapters/connections/msgraph.mjs'
+import * as gmailConnector from '../../../../adapters/connections/mail/gmail.mjs'
+import * as imapConnector from '../../../../adapters/connections/mail/imap.mjs'
+import * as msgraphConnector from '../../../../adapters/connections/mail/msgraph.mjs'
 import { callWithAutoRefresh } from '../../shared/services/connectorCall.mjs'
 import { decryptResourceSensitiveFields } from '../../../account/services/resourceCrypto.mjs'
 

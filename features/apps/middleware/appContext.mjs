@@ -86,7 +86,10 @@ export const createGetTargetManifest = (dsManager, freezrPrefs) => {
       // Determine app name from tokenInfo or request
       const requestedAppName = req.params.target_app // || req.body.targetApp
 
-      if (tokenInfo.app_name !== requestedAppName && tokenInfo.app_name !== 'info.freezr.account' && tokenInfo.app_name !== 'info.freezr.admin') {
+      // account/admin/creator are account-level system apps that manage other apps (install, permission
+      // grants, the ask-app builder), so they may read any of the user's app manifests — consistent
+      // with creator's existing cross-app file-read rights (systemAppOrTargetAppRequest).
+      if (tokenInfo.app_name !== requestedAppName && tokenInfo.app_name !== 'info.freezr.account' && tokenInfo.app_name !== 'info.freezr.admin' && tokenInfo.app_name !== 'info.freezr.creator') {
         res.locals.flogger.warn('❌ todo-modernization review if this should be permission based - ie allow others to access', { tokenInfo, requestedAppName })
         return res.status(403).json({ error: 'Unauthorized to access manofest' })
       }
@@ -426,6 +429,9 @@ export const createAddStorageLimits = (dsManager, freezrPrefs) => {
  * 
  */
 export const addDataOwnerToContext = function (req, res, next) {
+  // NOTE: never use this middleware on routes whose body IS the app's raw record data (POST
+  // /ceps/write, PUT /ceps/update use addRequestorAsDataOwner instead) — a data field that
+  // happens to be named owner / owner_id would be read as a control parameter here.
   const owner = req.body.owner_id || req.query.owner_id || req.body.owner || req.query.owner || res.locals.freezr?.tokenInfo?.owner_id
   // req.query.owner used in appPermissions
   // onsole.log('addDataOwnerToContext', { owner, tokenInfo: res.locals.freezr?.tokenInfo, req: req.body, query: req.query, freezr: res.locals.freezr })

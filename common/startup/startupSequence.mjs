@@ -22,7 +22,8 @@ import { mountAllModernRoutes } from '../../froutes/index.mjs'
 import { consoleFlogger } from './consoleFlogger.mjs'
 import { getPublicUrlFromPrefs, newFreezrSecrets, addAppUses } from './startupHelpers.mjs'
 import { createRequestLoggerMiddleware, createAddConsoleFloggerMiddleware } from '../../middleware/requestLogger.mjs'
-import { AUTH_RATE_LIMIT } from './constants.mjs'
+import { createRequestWatchdogMiddleware } from '../../middleware/requestWatchdog.mjs'
+import { AUTH_RATE_LIMIT, REQUEST_WATCHDOG } from './constants.mjs'
 
 const dnsLookup = promisify(dns.lookup)
 
@@ -169,7 +170,7 @@ export async function startupSequence (app, VERSION) {
       // Refuse to start if env DB_UNIFICATION disagrees with the strategy
       // recorded in main_prefs. Switching strategy without migrating data
       // causes silent data invisibility and per-row corruption on first edit
-      // (see xplanations/review_security_internal_2_authorization_audit.md).
+      // (see review_security_internal_2_authorization_audit.md).
       // Treat missing values on either side as 'db' so legacy installs and
       // unset env vars compare cleanly.
       const envStrat = process.env?.DB_UNIFICATION || 'db'
@@ -256,7 +257,18 @@ export async function startupSequence (app, VERSION) {
       app.use(logManager.idleTimer.middleware())
       app.use(createRequestLoggerMiddleware({ logManager, coreLogger, authRateLimiter }))
     }
-    
+
+    // Watchdog goes LAST of the pre-route middleware, so it sees every request and
+    // res.locals.flogger already exists. It names any request that stalls (the
+    // track() logs only fire on response, so a hung request logs nothing at all)
+    // and frees its connection after a timeout, so one stalled route can't exhaust
+    // the browser's ~6-connections-per-origin pool and freeze the whole app.
+    app.use(createRequestWatchdogMiddleware({
+      slowMs: REQUEST_WATCHDOG.SLOW_MS,
+      timeoutMs: REQUEST_WATCHDOG.TIMEOUT_MS,
+      longRunningPaths: REQUEST_WATCHDOG.LONG_RUNNING_PATHS
+    }))
+
     flogger.track('✅ Logging system initialized')
 
     // Step 12: Mount routes
@@ -293,6 +305,39 @@ export async function startupSequence (app, VERSION) {
 
     // Mark complete
     freezrStatus.fundamentals_okay = freezrStatus.can_write_to_user_folder && freezrStatus.can_read_write_to_db
+
+    // Step 14: Messaging sockets (live updates). Runs AFTER fundamentals_okay is
+    // computed (unlike the scheduler) because it dials external providers at once.
+    // Two parts, both fire-and-forget so boot never blocks on Slack:
+    //   (a) crash-gap reconciliation — ALWAYS (even when sockets are off now):
+    //       if the previous process died without a clean stop, the downtime is
+    //       recorded as a gap so getChanges never claims complete over a window
+    //       with silently missing events;
+    //   (b) autostart — only when the admin master pref sockets_enabled is true.
+    //       start() re-checks all three gates itself and refuses with a reason
+    //       rather than throwing. The admin Stop button therefore lasts until
+    //       the next restart; to keep sockets off, untick the pref.
+    // FREEZR_SOCKETS_AUTOSTART_OFF=true suppresses both (tests / diagnostics).
+    lastStartupStep = 'start_messaging_sockets'
+    if (process.env.FREEZR_SOCKETS_AUTOSTART_OFF !== 'true' && freezrStatus.can_read_write_to_db) {
+      try {
+        const { getOrCreateSocketManager } = await import('../../features/connections/messaging/services/socketManager.mjs')
+        const socketManager = getOrCreateSocketManager({ dsManager, freezrPrefs, logManager })
+        socketManager.reconcileCrashGaps()
+          .then((r) => { if (r && r.reconciled) flogger.info('🔌 Socket crash-gap recorded for ' + r.connections + ' connection(s) (down since ' + new Date(r.downSince).toISOString() + ')') })
+          .catch(e => flogger.warn('Socket crash-gap reconciliation failed: ' + (e && e.message)))
+          .then(() => {
+            if (freezrPrefs.sockets_enabled !== true) return
+            return socketManager.start().then(out => {
+              if (out.started) flogger.info('🔌 Messaging sockets started (' + out.sockets + ' socket(s), ' + out.routes + ' route(s))')
+              else flogger.warn('Messaging sockets not started: ' + out.reason)
+            })
+          })
+          .catch(e => flogger.warn('Could not start messaging sockets: ' + (e && e.message)))
+      } catch (e) {
+        flogger.warn('Could not init messaging socket manager: ' + (e && e.message))
+      }
+    }
 
     return {
       dsManager,

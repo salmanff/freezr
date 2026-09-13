@@ -32,7 +32,7 @@
 //     new ones, so both are emitted as { type: 'messageAdded' } — upsert semantics.
 //     410 Gone (sync state expired) → { expired: true }, caller re-lists and re-seeds.
 
-import { runConcurrent, fetchWithRetry } from './_shared.mjs'
+import { runConcurrent, fetchWithRetry } from '../_shared.mjs'
 
 const GRAPH_BASE = 'https://graph.microsoft.com/v1.0'
 

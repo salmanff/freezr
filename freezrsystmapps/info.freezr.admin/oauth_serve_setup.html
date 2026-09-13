@@ -37,6 +37,10 @@
             <div><strong>Type:</strong> <span id="type_{{_id}}">{{type}}</span></div>
             <div><strong>Key:</strong> <span id="key_{{_id}}">{{key}}</span></div>
             <div><strong>Secret:</strong> <span id="secret_{{_id}}">{{secret}}</span></div>
+            <!-- appToken MUST be rendered like key/secret: edit and enable/disable
+                 rebuild the record from these cells, so a missing cell would silently
+                 WIPE the stored app-level token on every such action. -->
+            <div><strong>App Token:</strong> <span id="appToken_{{_id}}">{{appToken}}</span></div>
           </div>
         </div>
         {{/data}}
@@ -51,11 +55,16 @@
       <h3 style="margin-bottom: 0.5rem;">Create New OAuth Configuration</h3>
       <p class="smallText" style="color: var(--freezr-text-muted); margin-top: 0; margin-bottom: 1.5rem;">
         Use this page to register OAuth credentials so users on this freezr can connect external
-        accounts (Gmail, Dropbox, etc.). Register your own credentials with each provider
+        accounts (Gmail, Outlook, Dropbox, etc.). Register your own credentials with each provider
         (recommended if you want full self-reliance — see
-        <code>freezr_own_google_oauth_setup.md</code>), or skip this entirely and users will
+        <code>mail freezr_own_oauth_setup.md</code>), or skip this entirely and users will
         authenticate through the default partner freezr (<code>www.salmanff.com</code>) or any
         other freezr they choose at <code>/connections/new</code>.
+        <br/><br/>
+        <b>Microsoft and Slack are the exceptions:</b> there is no default partner freezr
+        for <code>microsoft</code> or <code>slack</code>, so an app registration (Entra ID /
+        api.slack.com) and a row here are <i>required</i> before anyone on this freezr can
+        connect an Outlook / Microsoft 365 mailbox or a Slack workspace.
       </p>
 
       <div style="margin-bottom: 1rem;">
@@ -64,6 +73,7 @@
         <div style="font-size: 12px; color: var(--freezr-text-muted); margin-top: 0.25rem;">
           File-system providers: <code>dropbox</code>, <code>googleDrive</code>.
           Connection providers (Mail / Calendar / Contacts): <code>google</code>, <code>microsoft</code>.
+          Messaging providers: <code>slack</code>.
         </div>
       </div>
 
@@ -85,6 +95,18 @@
       <div style="margin-bottom: 1.5rem;">
         <label class="texttop">App Secret (optional)</label>
         <input type="text" class="input" id="oa_secret" name="oa_secret"/>
+      </div>
+
+      <div style="margin-bottom: 1.5rem;">
+        <label class="texttop">App-Level Token (optional — <code>slack</code> only)</label>
+        <input type="text" class="input" id="oa_appToken" name="oa_appToken" placeholder="xapp-…"/>
+        <div style="font-size: 12px; color: var(--freezr-text-muted); margin-top: 0.25rem;">
+          For live messaging sockets (Slack Socket Mode): the app-level token from the Slack app's
+          Basic Information → App-Level Tokens, with the <code>connections:write</code> scope.
+          Storing it here is credential provisioning only — sockets also need the master switch on
+          <a href="/admin/prefs">Preferences</a> and an enabled admission on
+          <a href="/admin/sockets">Messaging Sockets</a>.
+        </div>
       </div>
 
       <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 1.5rem 0;" />

@@ -141,6 +141,10 @@ const freezr = (function() {
     }
   }
 
+  // Cache of minted fileTokens, keyed by scope (app|user|'self' or app|user|file|perm). Reused
+  // until shortly before expiry so a page of <img>s mints once, not once-per-image. See §4b.
+  const _fileTokenCache = new Map()
+
   // ============================================
   // APP API - CORE CRUD
   // ============================================
@@ -567,12 +571,30 @@ const freezr = (function() {
         if (!message.recipient_id && !message.recipients) {
           throw new Error('Must include recipient_id or recipients')
         }
-        if ((!message.sharing_permission && !message.messaging_permission) || 
-            !message.contact_permission || !message.table_id || !message.record_id) {
+        // Resolve type. An explicit message_direct is a free-text / opaque-payload message (a plain
+        // reply or fresh feedback) that shares NO stored record. Otherwise message_records (shares a
+        // record). See freezr_askapp_sharing_summary.md §3.
+        // (The old sharing_permission → type share_records path was always rejected server-side —
+        // sharing_permission is now just a deprecated alias for messaging_permission.)
+        if (message.sharing_permission) {
+          console.warn('DEPRECATED: sharing_permission in messages.send() - use messaging_permission instead')
+          if (!message.messaging_permission) message.messaging_permission = message.sharing_permission
+          delete message.sharing_permission
+        }
+        if (message.type !== 'message_direct') {
+          message.type = 'message_records'
+        }
+        // contact_permission is optional; recipient_app (optional) addresses the message to a specific
+        // app's inbox on the recipient side (honored for same-user recipients).
+        if (!message.messaging_permission || !message.table_id) {
           throw new Error('Incomplete message fields')
         }
+        // A record-sharing message needs a record_id (or a message_id, to reply about a prior message).
+        // message_direct needs neither.
+        if (message.type === 'message_records' && !message.record_id && !message.message_id) {
+          throw new Error('Incomplete message fields: record_id or message_id required')
+        }
 
-        message.type = message.sharing_permission ? 'share_records' : 'message_records'
         message.app_id = freezrMeta.appName
         message.sender_id = freezrMeta.userId
         message.sender_host = freezrMeta.serverAddress
@@ -591,12 +613,22 @@ const freezr = (function() {
           throw new Error('messageIds must be an array')
         }
 
-        const body = { message_ids: messageIds, markAll }
+        const body = { message_ids: messageIds, mark_all: markAll }
         return await apiRequest('POST', '/ceps/message/mark_read', body)
       },
 
+      // Get the app's inbox messages: ones it sent plus ones addressed to it via recipient_app.
+      // options: count (default 50), skip, unread_only (boolean)
+      // Returns { messages: [...] }
       async getAppMessages(options = {}) {
-        return await apiRequest('GET', '/ceps/messages', null, options)
+        const queryParams = []
+        for (const key of ['count', 'skip', 'unread_only']) {
+          if (options[key] !== undefined && options[key] !== null) {
+            queryParams.push(encodeURIComponent(key) + '=' + encodeURIComponent(options[key]))
+          }
+        }
+        const url = '/ceps/messages' + (queryParams.length > 0 ? ('?' + queryParams.join('&')) : '')
+        return await apiRequest('GET', url)
       }
     },
 
@@ -615,6 +647,92 @@ const freezr = (function() {
           }
         }
         return dataString
+      },
+
+      // ---- Private-file access — fileTokens. See freezr_file_access_plan_v1.md §4. ----
+      // Native <img>/<video>/CSS loads cannot set an Authorization header, so private userfiles are
+      // authenticated with a short-lived, scoped fileToken in the URL (?fileToken=).
+
+      // Mint (and cache) a scoped fileToken. For an app's OWN files (permission 'self') one token
+      // covers every file, so it is cached per (app,user); named-permission tokens are per-file.
+      async getFileToken (fileId, options = {}) {
+        const app = options.requestee_app || freezrMeta.appName
+        const userId = options.requestee_user_id || freezrMeta.userId
+        const perm = options.permission_name || 'self'
+        const cleanId = fileId ? (freezr.utils.startsWith(fileId, '/') ? fileId.slice(1) : fileId) : ''
+        const isSelf = (perm === 'self')
+        const cacheKey = isSelf ? (app + '|' + userId + '|self') : (app + '|' + userId + '|' + cleanId + '|' + perm)
+        const cached = _fileTokenCache.get(cacheKey)
+        if (cached && (cached.expiry - 15000) > Date.now()) return cached.token
+        let url = '/feps/getuserfiletoken/' + encodeURIComponent(perm) + '/' + encodeURIComponent(app) + '/' + encodeURIComponent(userId)
+        if (!isSelf && cleanId) url += '?file=' + encodeURIComponent(cleanId)
+        try {
+          const resp = await apiRequest('GET', url)
+          const token = resp && resp.fileToken
+          if (token) {
+            _fileTokenCache.set(cacheKey, { token, expiry: resp.expiry || (Date.now() + 5 * 60 * 1000) })
+            return token
+          }
+        } catch (e) { console.warn('getFileToken failed', e && e.message) }
+        return null
+      },
+
+      // Full userfiles URL with ?fileToken= appended — assign straight to img.src / a <source> src.
+      async tokenizedFileUrl (fileId, options = {}) {
+        if (!fileId) return null
+        const app = options.requestee_app || freezrMeta.appName
+        const userId = options.requestee_user_id || freezrMeta.userId
+        const cleanId = freezr.utils.startsWith(fileId, '/') ? fileId.slice(1) : fileId
+        const base = '/feps/userfiles/' + app + '/' + userId + '/' + cleanId
+        const token = await freezr.utils.getFileToken(cleanId, options)
+        return token ? (base + '?fileToken=' + encodeURIComponent(token)) : base
+      },
+
+      // Parse a (relative or absolute) userfiles URL into { app, user, fileId }, or null.
+      _parseUserfileUrl (src) {
+        if (!src || typeof src !== 'string') return null
+        let path = src
+        if (freezr.utils.startsWith(src, 'http')) {
+          try { path = new URL(src).pathname } catch (e) { return null }
+        }
+        path = path.split('?')[0]
+        const parts = path.split('/') // ['', 'feps', 'userfiles', app, user, ...file]
+        if (parts[1] !== 'feps' || parts[2] !== 'userfiles' || parts.length < 6) return null
+        return { app: parts[3], user: parts[4], fileId: parts.slice(5).join('/') }
+      },
+
+      // Scan the DOM and tokenize any <img>/<video>/<audio>/<source> whose src points at a private
+      // userfiles URL (elements already carrying a fileToken, or not pointing at userfiles, are left
+      // alone — pass { force: true } to re-tokenize on refresh). Call after rendering.
+      async refreshFileTokens (options = {}) {
+        if (!freezr.app.isWebBased || typeof document === 'undefined') return
+        const tags = options.tags || ['IMG', 'VIDEO', 'AUDIO', 'SOURCE']
+        const els = []
+        tags.forEach(function (tag) {
+          const list = document.getElementsByTagName(tag)
+          for (let i = 0; i < list.length; i++) els.push(list[i])
+        })
+        await Promise.all(els.map(async function (el) {
+          const raw = el.getAttribute('src')
+          if (!raw) return
+          if (raw.indexOf('fileToken=') >= 0 && !options.force) return // already tokenized
+          const parsed = freezr.utils._parseUserfileUrl(raw)
+          if (!parsed) return
+          const url = await freezr.utils.tokenizedFileUrl(parsed.fileId, {
+            requestee_app: parsed.app, requestee_user_id: parsed.user, permission_name: options.permission_name
+          })
+          if (url) el.setAttribute('src', url)
+        }))
+      },
+
+      // Convenience: tokenize now, then tokenize newly-added <img>/<video> as they appear (childList
+      // only — no attribute-loop). Returns the MutationObserver so the caller can obs.disconnect().
+      observeFileTokens (options = {}) {
+        if (!freezr.app.isWebBased || typeof MutationObserver === 'undefined') return null
+        freezr.utils.refreshFileTokens(options)
+        const obs = new MutationObserver(function () { freezr.utils.refreshFileTokens(options) })
+        obs.observe(document.body || document.documentElement, { childList: true, subtree: true })
+        return obs
       },
 
       getCookie(name) {
@@ -667,6 +785,19 @@ const freezr = (function() {
         }
       },
 
+      // Ping the server. Anonymous → { logged_in: false, server_type, server_version }.
+      // Logged in → adds { logged_in_as_admin, user_id, storageLimits }.
+      // When the call carries a valid app token (the default for apps), the server ALSO
+      // returns app_name, permissions and capabilities:
+      //   permissions[]  — this app's permission grants, each annotated with
+      //                    { name, type, granted, usable, blocked_by } (+ type-specific fields).
+      //                    `usable` = granted AND the server can actually honor it right now
+      //                    (e.g. use_llm needs an LLM key; run_job needs a trusted local job
+      //                    or a compute credential). `blocked_by` says why not: 'not_granted',
+      //                    'no_llm_keys', 'no_compute_credential', 'job_not_trusted',
+      //                    'no_job_runtime' or 'no_matching_connection'.
+      //   capabilities   — grant-independent summary: { llm: { available }, compute:
+      //                    { available }, connections: { mail, contacts, calendar } (counts) }.
       async ping(options = {}) {
         const url = (options.server || '') + '/ceps/ping'
         const response = await apiRequest('GET', url, null, options)

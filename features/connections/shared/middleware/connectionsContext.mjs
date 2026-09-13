@@ -48,14 +48,17 @@ const matchesConnection = (perm, connectionName) => {
 /**
  * Build a per-service connection-context middleware.
  *
- * @param {string} service                  'mail' | 'contacts' | 'calendar' | …
+ * @param {string} service                  'mail' | 'contacts' | 'calendar' | 'fs' | …
+ * @param {Object} [opts]
+ * @param {string} [opts.permType]          permission type when it isn't 'use_' + service
+ *                                          (fs uses 'use_file_sys' — see permissionDefinitions)
  * @returns {(dsManager, freezrPrefs) => Function}  factory consumed by route files
  */
-export const createConnectionsContext = (service) => {
+export const createConnectionsContext = (service, { permType: permTypeOverride } = {}) => {
   if (!service || typeof service !== 'string') {
     throw new Error('createConnectionsContext: service name is required')
   }
-  const permType = 'use_' + service
+  const permType = permTypeOverride || ('use_' + service)
   const writeRequiredKey = service + 'WriteRequired'
   const permissionKey = service + 'Permission'
   const connectionKey = service + 'Connection'

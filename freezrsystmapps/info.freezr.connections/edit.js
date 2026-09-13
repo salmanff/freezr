@@ -8,7 +8,14 @@
 // listing endpoint the home page also uses.
 /* global freezr confirm */
 
-const SERVICES = ['mail', 'calendar', 'contacts']
+const SERVICES = ['mail', 'calendar', 'contacts', 'messaging']
+// Which services each provider can cover — rows for others are hidden on render.
+const SERVICES_BY_PROVIDER = {
+  google: ['mail', 'calendar', 'contacts'],
+  microsoft: ['mail', 'calendar', 'contacts'],
+  imap: ['mail'],
+  slack: ['messaging']
+}
 
 const state = {
   doc: null
@@ -51,6 +58,29 @@ freezr.initPageScripts = async function () {
   document.getElementById('button_saveAndReconnect').onclick = function () { reconnectWith({ applyChanges: true }) }
   document.getElementById('button_reconnect').onclick = function () { reconnectWith({ applyChanges: false }) }
   document.getElementById('button_disconnect').onclick = disconnectConnection
+  document.getElementById('conn_live').onchange = toggleLiveUpdates
+}
+
+// Live updates (messaging connections): applied immediately via the server —
+// unlike services/access, this needs no reconnect. The endpoint registers the
+// connection in the socket-routing registry (or removes it).
+const toggleLiveUpdates = async function () {
+  const box = document.getElementById('conn_live')
+  const statusEl = document.getElementById('live_status')
+  const wanted = box.checked
+  statusEl.innerText = 'Saving…'
+  try {
+    const res = await freezr.apiRequest('POST', '/acctapi/connection_set_live', { resource_id: state.doc._id, live: wanted })
+    if (res && res.error) throw new Error(res.error)
+    state.doc.live = wanted
+    statusEl.innerText = wanted
+      ? 'On — the server tracks activity for this connection (if the admin has sockets enabled).'
+      : 'Off.'
+  } catch (err) {
+    box.checked = !wanted // revert
+    statusEl.innerText = ''
+    showWarning('Could not change live updates: ' + (err?.message || err))
+  }
 }
 
 const renderPanel = function () {
@@ -68,11 +98,23 @@ const renderPanel = function () {
 
   const services = Array.isArray(d.services) ? d.services : []
   const access = d.access || {}
+  const available = SERVICES_BY_PROVIDER[d.provider] || SERVICES
   SERVICES.forEach(s => {
+    const row = document.getElementById('conn_service_row_' + s)
+    if (row) row.style.display = available.includes(s) ? 'flex' : 'none'
     document.getElementById('conn_service_' + s).checked = services.includes(s)
     const lvl = access[s] === 'readwrite' ? 'readwrite' : 'read'
     document.getElementById('conn_access_' + s).value = lvl
   })
+
+  // Live-updates toggle only applies to messaging connections.
+  if (services.includes('messaging')) {
+    document.getElementById('live_updates_section').style.display = 'block'
+    document.getElementById('conn_live').checked = d.live === true
+    document.getElementById('live_status').innerText = d.live === true
+      ? 'On — the server tracks activity for this connection (if the admin has sockets enabled).'
+      : ''
+  }
 
   document.getElementById('editPanel').style.display = 'block'
 }

@@ -18,14 +18,15 @@
     <div id="warnings" class="errorBox" style="display:none;"></div>
 
     <div class="freezr-card">
-      <h3 style="margin-top: 0;">Connect a new Gmail or MS Exchange account</h3>
+      <h3 style="margin-top: 0;">Connect a new account</h3>
 
       <label class="texttop">Provider</label>
       <select class="input" id="conn_provider" style="width: auto; min-width: 220px;">
         <option value="google">Google (Gmail / Calendar / Contacts)</option>
         <option value="microsoft">Microsoft (Outlook / Calendar / Contacts)</option>
+        <option value="slack">Slack (Messaging)</option>
       </select>
-      <p class="smallText">Google and Microsoft connect here via OAuth. IMAP mailboxes (Yahoo, iCloud, …) are added on <a href="/account/resources">Account Resources</a> instead.</p>
+      <p class="smallText">Google, Microsoft and Slack connect here via OAuth. IMAP mailboxes (Yahoo, iCloud, …) are added on <a href="/account/resources">Account Resources</a> instead.</p>
 
       <label class="texttop">Connection Name</label>
       <input type="text" class="input" id="conn_name" placeholder="e.g. gmailWork"/>
@@ -33,11 +34,11 @@
 
       <label class="texttop">Services to enable</label>
       <p class="smallText" style="margin-top: 0;">
-        The same OAuth grant covers all three. Each individual app still needs its own permission grant
+        The same OAuth grant covers all the chosen services. Each individual app still needs its own permission grant
         and can be capped to read-only even on a read+write connection.
       </p>
       <div style="margin: 0.25rem 0 0.75rem 0;">
-        <label style="display: flex; align-items: center; gap: 0.5rem; margin: 0.25rem 0;">
+        <label id="conn_service_row_mail" style="display: flex; align-items: center; gap: 0.5rem; margin: 0.25rem 0;">
           <input type="checkbox" id="conn_service_mail" checked />
           <span style="min-width: 90px;">Mail</span>
           <select class="input" id="conn_access_mail" style="width: auto; min-width: 140px; margin-left: 0.5rem;">
@@ -45,7 +46,7 @@
             <option value="readwrite" selected>Read + Write</option>
           </select>
         </label>
-        <label style="display: flex; align-items: center; gap: 0.5rem; margin: 0.25rem 0;">
+        <label id="conn_service_row_calendar" style="display: flex; align-items: center; gap: 0.5rem; margin: 0.25rem 0;">
           <input type="checkbox" id="conn_service_calendar" checked />
           <span style="min-width: 90px;">Calendar</span>
           <select class="input" id="conn_access_calendar" style="width: auto; min-width: 140px; margin-left: 0.5rem;">
@@ -53,10 +54,18 @@
             <option value="readwrite" selected>Read + Write</option>
           </select>
         </label>
-        <label style="display: flex; align-items: center; gap: 0.5rem; margin: 0.25rem 0;">
+        <label id="conn_service_row_contacts" style="display: flex; align-items: center; gap: 0.5rem; margin: 0.25rem 0;">
           <input type="checkbox" id="conn_service_contacts" checked />
           <span style="min-width: 90px;">Contacts</span>
           <select class="input" id="conn_access_contacts" style="width: auto; min-width: 140px; margin-left: 0.5rem;">
+            <option value="read">Read only</option>
+            <option value="readwrite" selected>Read + Write</option>
+          </select>
+        </label>
+        <label id="conn_service_row_messaging" style="display: none; align-items: center; gap: 0.5rem; margin: 0.25rem 0;">
+          <input type="checkbox" id="conn_service_messaging" />
+          <span style="min-width: 90px;">Messaging</span>
+          <select class="input" id="conn_access_messaging" style="width: auto; min-width: 140px; margin-left: 0.5rem;">
             <option value="read">Read only</option>
             <option value="readwrite" selected>Read + Write</option>
           </select>
@@ -70,7 +79,7 @@
       </p>
 
       <div style="margin: 0.5rem 0;">
-        <label style="display:flex; align-items:flex-start; gap:0.5rem; margin:0.5rem 0; cursor:pointer;">
+        <label id="auth_choice_default_label" style="display:flex; align-items:flex-start; gap:0.5rem; margin:0.5rem 0; cursor:pointer;">
           <input type="radio" name="conn_auth_choice" value="default" checked style="margin-top:0.25rem;"/>
           <div>
             <div style="font-weight:600;">Default (www.salmanff.com)</div>
@@ -101,6 +110,11 @@
         <button class="freezrButt" id="button_connConnect">Continue to provider</button>
         <a href="/account/resources" class="freezrButt" style="background:#6b7280; text-decoration: none; line-height: 1.6;">Cancel</a>
       </div>
+      <p class="smallText" id="paste_token_hint" style="display:none; margin-top:0.75rem;">
+        Alternatively, add the workspace with a User OAuth Token from
+        <a href="/account/resources">Account Resources</a> &rarr; &ldquo;Add Slack (paste token)&rdquo; —
+        useful when the OAuth round-trip isn't available (e.g. a localhost server without https).
+      </p>
     </div>
   </div>
 </div>

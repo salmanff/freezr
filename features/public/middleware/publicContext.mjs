@@ -153,15 +153,30 @@ export const createPrepUserDSsForPublicFiles = (dsManager, freezrPrefs, freezrSt
       }
 
       // Build public ID from the path
-      const publicId = req.path.startsWith('/') ? req.path.substring(1) : req.path
-      
-      if (!publicId) { //  (will be handled by controller)
+      const rawPublicId = req.path.startsWith('/') ? req.path.substring(1) : req.path
+
+      if (!rawPublicId) { //  (will be handled by controller)
         return next()
       }
 
-      // Look up the public record
-      const publicRecord = await publicRecordsDb.read_by_id(publicId)
-      
+      // Look up the public record. req.path keeps percent-encoding (unlike
+      // req.params), but a publicid is stored with the record's LITERAL
+      // characters — a file published as "hipercards screenshot.png" is stored
+      // with the space. So the browser's %20 has to be decoded or the lookup
+      // can never match, and the file 404s despite being published correctly.
+      // Raw is tried as a fallback for any id that really does contain a '%'.
+      let publicId = rawPublicId
+      try {
+        publicId = decodeURIComponent(rawPublicId)
+      } catch (e) {
+        // malformed escape sequence — the raw form is the only thing to try
+      }
+      let publicRecord = await publicRecordsDb.read_by_id(publicId)
+      if (!publicRecord && publicId !== rawPublicId) {
+        publicId = rawPublicId
+        publicRecord = await publicRecordsDb.read_by_id(rawPublicId)
+      }
+
       if (!publicRecord) {
         // Record not found, continue anyway (will be handled by controller)
         return next()

@@ -1,0 +1,33 @@
+<div style="max-width:1000px;margin:32px auto;font-family:system-ui,-apple-system,sans-serif">
+  <h1 style="font-weight:600">Messaging Sockets</h1>
+  <p style="color:#555">Server-held live connections to messaging providers (Slack today). A socket
+     runs only when <b>all three</b> are in place: the master switch on the
+     <a href="/admin/prefs">Preferences page</a>, an <b>enabled admission</b> below (the explicit
+     capability grant), and the provider's credential (for Slack: the app-level
+     <code>xapp-…</code> token on the <a href="/admin/oauth_serve_setup">OAuth setup page</a>).
+     Each user additionally opts their own connection in on Account Resources.</p>
+
+  <div id="skt-gates" style="margin:12px 0;color:#666"></div>
+
+  <div style="margin:12px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <button id="skt-start" style="font-size:15px;padding:8px 18px;border:0;border-radius:8px;background:#2b6cb0;color:#fff;cursor:pointer">Start sockets</button>
+    <button id="skt-stop" style="font-size:15px;padding:8px 18px;border:0;border-radius:8px;background:#c53030;color:#fff;cursor:pointer">Stop sockets</button>
+    <button id="skt-refresh" style="font-size:15px;padding:8px 18px;border:0;border-radius:8px;background:#e2e8f0;color:#222;cursor:pointer">Refresh status</button>
+    <label style="color:#555;font-size:14px"><input type="checkbox" id="skt-auto"/> auto-refresh (5s)</label>
+    <span id="skt-action-result" style="color:#666"></span>
+  </div>
+
+  <h3 style="margin-top:24px">Status</h3>
+  <div id="skt-status">Loading…</div>
+
+  <h3 style="margin-top:24px">Admissions</h3>
+  <p style="color:#555;font-size:14px">The explicit per-provider capability grants. Registering a
+     provider's credential deliberately does <i>not</i> enable its socket — this table does.</p>
+  <div id="skt-admissions">Loading…</div>
+  <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <select id="skt-adm-provider" style="padding:6px"><option value="slack">slack</option></select>
+    <label style="font-size:14px;color:#555">max sockets <input id="skt-adm-max" type="number" value="3" min="1" max="10" style="width:60px;padding:4px"/></label>
+    <button id="skt-adm-enable" style="font-size:14px;padding:6px 14px;border:0;border-radius:8px;background:#2f855a;color:#fff;cursor:pointer">Enable</button>
+    <button id="skt-adm-disable" style="font-size:14px;padding:6px 14px;border:0;border-radius:8px;background:#718096;color:#fff;cursor:pointer">Disable</button>
+  </div>
+</div>

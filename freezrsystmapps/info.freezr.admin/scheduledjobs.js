@@ -21,6 +21,19 @@ function statusBadge (job) {
   return '<span style="color:#888">not yet run</span>'
 }
 
+// The trust gate, joined in by the API: an untrusted job's schedule row can otherwise look
+// healthy while every local run is silently refused. Most common cause: an app re-install
+// auto-disabled the trust (reason 'code_changed') and nobody re-trusted it.
+function trustWarning (job) {
+  if (job.trusted) return ''
+  const why = job.never_trusted
+    ? 'job is not admin-trusted'
+    : ('trust was disabled' + (job.trust_disabled_reason ? ' (' + esc(job.trust_disabled_reason) + ')' : ''))
+  return '<br><small style="color:#a00">⚠ ' + why +
+    ' — local runs are refused. <a href="/admin/trustedjobs" style="color:#a00">Re-trust it on Trusted Jobs</a>' +
+    ' (cloud runs still work if the user has a serverless credential).</small>'
+}
+
 async function render () {
   const root = document.getElementById('sched-root')
   const statusEl = document.getElementById('sched-status')
@@ -52,7 +65,7 @@ async function render () {
       '<td style="padding:8px">' + esc(j.app) + '<br><small style="color:#999">' + esc(j.job) + '</small></td>' +
       '<td style="padding:8px">' + esc(j.user) + '</td>' +
       '<td style="padding:8px">' + esc(j.schedule) + '</td>' +
-      '<td style="padding:8px">' + statusBadge(j) + fails + err + '</td>' +
+      '<td style="padding:8px">' + statusBadge(j) + fails + err + trustWarning(j) + '</td>' +
       '<td style="padding:8px">' + next + '</td>' +
       '<td style="padding:8px">' + last + '</td>' +
       '</tr>'

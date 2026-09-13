@@ -1,0 +1,63 @@
+<!--
+  info.freezr.connections / messaging.html
+  Messaging viewer (Slack first): conversations sidebar + chat-bubble dialogue.
+  Styles live in messaging.css (registered in manifest.json and in
+  connectionsPageController's PAGE_MANIFESTS, the same way mail.css is).
+-->
+<div class="freezr-page">
+  <nav class="freezr-nav">
+    <span class="freezr-nav-title">Messaging</span>
+    <a href="/connections">Connections</a>
+    <a href="/account/resources">Account Resources</a>
+    <a href="/account/home">Home</a>
+    <a href="/account/logout">Log Out</a>
+  </nav>
+
+  <div class="msgr-app" id="msgrApp">
+    <div class="msgr-toolbar">
+      <select class="input" id="accountPicker" style="margin: 0;"></select>
+      <span class="msgr-meta" id="accountMeta"></span>
+      <button class="msgr-btn" id="btnSocketTest" title="Show this connection's live-updates activity index (getChanges) as raw JSON — post / edit / delete in Slack and refresh to verify the socket pipeline">⚡ Socket test</button>
+      <span class="msgr-spacer"></span>
+      <span class="msgr-spinner" id="spinner">Working…</span>
+    </div>
+
+    <div class="msgr-banner error" id="warnBanner"></div>
+    <div class="msgr-banner warn" id="reauthBanner"></div>
+    <div class="msgr-banner info" id="infoBanner"></div>
+
+    <div class="msgr-panes">
+      <aside class="msgr-sidebar">
+        <div class="msgr-filter-wrap">
+          <input type="text" class="input" id="convoFilter" placeholder="Filter conversations…" />
+        </div>
+        <div class="msgr-convos" id="convoList"></div>
+      </aside>
+
+      <section class="msgr-dialogue">
+        <div class="msgr-dialogue-header">
+          <span class="msgr-dialogue-title" id="currentConvoLabel">Pick a conversation</span>
+          <span class="msgr-spacer"></span>
+          <button class="msgr-btn msgr-btn-primary" id="btnGetNew" style="display:none;">↓ Get new</button>
+          <button class="msgr-btn" id="btnGetThreads" style="display:none;" title="Fetch every thread in the loaded messages so they are included in the archive">🧵 Get all threads</button>
+          <button class="msgr-btn" id="btnExport" style="display:none;" title="Download the loaded messages (and any fetched threads) as Markdown">⭳ Archive</button>
+          <button class="msgr-btn msgr-btn-danger" id="btnDeleteAll" style="display:none;" title="Delete the loaded messages">🗑 Delete</button>
+          <div class="msgr-dialogue-sub" id="currentConvoSub"></div>
+        </div>
+
+        <div class="msgr-messages" id="messagesPane">
+          <div class="msgr-older-wrap" id="olderWrap" style="display:none;">
+            <button class="msgr-btn" id="btnGetOlder">↑ Get older</button>
+          </div>
+          <div class="msgr-empty" id="messagesEmpty">Choose a conversation on the left to see its messages.</div>
+          <div id="messagesList"></div>
+        </div>
+
+        <div class="msgr-composer" id="composer" style="display:none;">
+          <input type="text" class="input" id="composeText" placeholder="Send a message…" />
+          <button class="msgr-btn msgr-btn-primary" id="btnSend">Send</button>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>

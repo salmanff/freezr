@@ -149,6 +149,36 @@ system-managed — freezr sets them on upload, so anything you put in \`options.
 overwrite them. Use them to filter or display files (e.g. show a PDF icon, sort by size) without
 storing that info yourself.
 
+**Displaying PRIVATE files in \`<img>\` / \`<video>\` (important).** \`freezr.getFileUrl(id)\` returns the
+bare \`/feps/userfiles/...\` path. A native \`<img>\`/\`<video>\`/CSS load can't send an auth header, so a
+private file needs a **fileToken** appended to the URL — and so does a \`fetch()\`/\`XHR\` of one, since
+that route accepts no other credential. Without it the request fails with \`401 file token missing\`.
+Use these helpers (all \`async\`):
+
+\`\`\`javascript
+// Best for <img>/<video>/<source> src, and CSS background-image (a URL works either way) —
+// appends a short-lived ?fileToken=
+img.src = await freezr.utils.tokenizedFileUrl('photos/beach.png')
+el.style.backgroundImage = \`url(\${await freezr.utils.tokenizedFileUrl('photos/beach.png')})\`
+
+// Fetching a private file's CONTENT — tokenize the URL first; a bare fetch gets a 401.
+const text = await (await fetch(await freezr.utils.tokenizedFileUrl('notes/day1.html'))).text()
+
+// One call after rendering: scan the DOM and tokenize every <img>/<video>/<audio>/<source>
+// whose src points at a userfiles URL. Re-callable; pass { force: true } to refresh before the
+// token expires (~10 min) on a long-lived page.
+await freezr.utils.refreshFileTokens()
+// Auto-tokenize images added later too (returns a MutationObserver you can .disconnect()):
+const obs = freezr.utils.observeFileTokens()
+
+// Just the raw token (advanced): freezr.utils.getFileToken(fileId, { permission_name })
+\`\`\`
+
+Guidance: for \`<img>\`/\`<video>\` tags and CSS backgrounds, set the URL via \`tokenizedFileUrl\` (or call
+\`freezr.utils.refreshFileTokens()\` once after you render a batch). Do NOT rely on the browser sending
+a cookie — that path is retired; an untokenized private-file load will fail. (For a genuinely PUBLIC
+file, share it publicly instead and use its public URL — no token needed.)
+
 ---
 
 ### Permissions
@@ -170,8 +200,11 @@ await freezr.perms.shareRecords(idOrQuery, options)
 // options: { name, table_id, grantees, action, publicid?, pubDate?, doNotList?,
 //            forcePublicIdTakeover?,   // grant: clobber a conflicting orphan public record
 //            forcePublicIdCleanup? }   // deny: delete an orphan public record when source is gone
-// grantees: array — use ['_public'] for public sharing, or usernames
+// grantees: array — use ['_public'] for public sharing, usernames, or 'app:<appName>' to share
+//           with another app of the same user (eg ['app:com.example.otherapp'])
 // action: 'grant' or 'deny'
+// An app reading records another app shared with it passes requestee_app (query) and
+// permission_name (the sharing app's permission) in the read/query options.
 
 // Share an individual file publicly.
 await freezr.perms.shareFilePublicly(fileId, options?)
@@ -196,16 +229,18 @@ await freezr.perms.validateDataOwner(options)
 ### Messages
 
 \`\`\`javascript
-// Send a message/shared record to another user.
+// Send a message/shared record to another user (or to yourself, eg app-to-app).
 await freezr.messages.send(message, options?)
-// message: { recipient_id or recipients, sharing_permission or messaging_permission,
-//            contact_permission, table_id, record_id }
+// message: { recipient_id or recipients, messaging_permission, table_id, record_id,
+//            recipient_app? (address the message to another app's inbox),
+//            contact_permission? (optional) }
 
 // Mark messages as read.
 await freezr.messages.markRead(messageIds, markAll?)
 // messageIds: array of message IDs, or null if markAll is true
 
-// Get messages for the current app.
+// Get the app's messages: ones it sent plus ones addressed to it via recipient_app.
+// options: { count?, skip?, unread_only? } — returns { messages: [...] }
 await freezr.messages.getAppMessages(options?)
 \`\`\`
 
@@ -227,8 +262,23 @@ await freezr.llm.ping(options?)
 // Send a prompt to an LLM.
 await freezr.llm.ask(prompt, options?)
 // prompt: a string, or an array of { role, content } messages for conversation
-// options: { context, provider, family, model, max_tokens, responseType, thinking, files, streamBack, onDelta, onThinking, appToken, host }
+// options: { context, provider, family, model, max_tokens, responseType, thinking, cache, files, streamBack, onDelta, onThinking, appToken, host }
 // Fallback chain: model -> family -> defaultFamily of defaultProvider
+//
+// cache (prompt caching): true for the provider's default 5-minute TTL, or { ttl: '1h' }.
+// Marks the END of the request's messages as a cache breakpoint, so a follow-up call whose
+// messages re-send the same prefix and only APPEND turns (e.g. repeated Q&A over one large
+// document sent as the first message) bills the cached span at ~10% of the input rate instead
+// of full price. The prefix must be byte-identical between calls. Claude only today; ignored
+// by providers that cache automatically (ChatGPT). Cached-token counts and their cost are
+// reported in meta.tokensUsed.other.
+// EXPLICIT placement — use when the LAST turn changes on every call (a fresh email, a new record):
+// automatic placement would cache-WRITE that turn every time (1.25x, 2x at 1h) and rarely read it
+// back. Give the STABLE turn a content-block array whose last block carries cache_control; the
+// server then adds only the system-prompt breakpoint and sends your turns exactly as given:
+//   [{ role: 'user', content: [{ type: 'text', text: stableDoc, cache_control: { type: 'ephemeral', ttl: '1h' } }] },
+//    { role: 'user', content: theVaryingPart }]
+// A 1h marker makes the system breakpoint 1h too (a 5-minute entry may not precede a 1-hour one).
 //
 // Returns:
 // {
@@ -280,7 +330,7 @@ The \`freezr.connections.mail.*\` namespace is available ONLY when the app's man
 
 Apps NEVER see the user's OAuth tokens. The freezr server holds them, refreshes them transparently, and returns a structured \`token_expired\` error if re-auth is needed (handle it with \`freezr.connections.mail.handleTokenExpired(err)\`).
 
-Today only the Gmail connector is wired up; Microsoft Graph and IMAP/SMTP are planned and the API surface won't change when they land.
+Gmail, Microsoft Graph (Outlook / Microsoft 365) and IMAP/SMTP connectors are all wired up behind the same normalized API.
 
 \`\`\`javascript
 // List the connections this app is allowed to see (filtered server-side by
@@ -387,6 +437,116 @@ try {
 
 ---
 
+### Messaging APIs — freezr.connections.messaging
+
+The \`freezr.connections.messaging.*\` namespace is available ONLY when the app's manifest declares a \`use_messaging\` permission (see the use_messaging section below). Slack is the first provider; the API is provider-neutral — no Slack-shaped parameters, so code written against it will work when other providers land.
+
+\`\`\`javascript
+// List messaging-enabled connections this app may use.
+await freezr.connections.messaging.listAccounts()
+// accounts[i]: { connectionName, provider, account_email, services, access, status, live }
+// access.messaging: 'read' | 'readwrite' — gates writes user-side.
+// live: true when the user opted this connection into socket-fed live updates.
+
+// Conversations the connected user is a member of (channels, private channels,
+// group DMs, DMs), paginated.
+await freezr.connections.messaging.listConversations({ connectionName, limit, cursor, types, includeArchived })
+// → { conversations: [{ id, name, type, isMember, isArchived, topic, purpose,
+//      memberCount, counterpartUserId }], nextCursor }
+// type: 'channel' | 'private_channel' | 'group_dm' | 'dm'.
+// DMs have name: null — resolve counterpartUserId via getUsers. Group-DM names
+// are machine strings — resolve members via getConversationMembers + getUsers.
+
+// Messages in one conversation, NEWEST FIRST; the cursor pages OLDER.
+await freezr.connections.messaging.getMessages({ connectionName, conversationId, limit, cursor, oldest, latest })
+// → { messages, nextCursor }
+// message: { id, conversationId, threadParentId, sender: { id, type: 'user'|'bot' },
+//   sentAt /* ms */, text, replyCount, edited, subtype,
+//   reactions: [{ name, count }], files: [{ id, filename, mimeType, sizeBytes }] }
+// \`id\` is the provider's message id (Slack: its ts string) — treat it as OPAQUE
+// and pass it back verbatim (threads, markRead, delete). \`text\` is raw provider
+// markup (Slack mrkdwn: <@U123>, <#C1|general>, <https://url|label>) — resolve
+// user mentions via getUsers before display.
+// IMPORTANT: thread REPLIES do not appear in getMessages — only the parent (with
+// replyCount > 0). Fetch replies per-thread:
+await freezr.connections.messaging.getThread({ connectionName, conversationId, threadId, limit, cursor })
+// threadId = the parent message's id. Returns parent + replies, oldest first.
+
+// Per-conversation incremental sync (first call without lastToken seeds and
+// returns { messages: [], nextToken }).
+await freezr.connections.messaging.getNewer({ connectionName, conversationId, lastToken, limit })
+// → { messages, nextToken, expired }
+
+// Resolve user ids to names — paged directory, or batch by ids (array/CSV, ≤100).
+await freezr.connections.messaging.getUsers({ connectionName, limit, cursor, ids })
+// → { users: [{ id, name, displayName, realName, email, isBot, deleted, avatar }], nextCursor }
+
+await freezr.connections.messaging.getConversationMembers({ connectionName, conversationId, limit, cursor })
+// → { memberIds, nextCursor }
+
+// The connected account's own identity — sender.id === profile.userId identifies
+// the user's own messages.
+await freezr.connections.messaging.getProfile({ connectionName })
+// → { profile: { userId, teamId, teamName, email, displayName } }
+
+// LIVE UPDATES — the socket-fed activity index. Answers "which conversations
+// changed since X?" without polling them all. Metadata only, NEVER message
+// content: follow up with getNewer/getMessages using the user's own access.
+await freezr.connections.messaging.getChanges({ connectionName, since /* ms */ })
+// → { changes: [{ conversationId, lastActivityTs, lastEventAt,
+//       edited: [{ id, at }], deleted: [{ id, at }], changesOverflowed }],
+//     gaps: [{ from, to /* null = ongoing */ }], gapSince, complete, retentionMs }
+// lastActivityTs: newest message id in the conversation (monotonic high-water mark).
+// lastEventAt: ms when the server indexed the last event.
+// edited/deleted: message ids changed after \`since\`, each with WHEN (\`at\`) —
+//   tombstone deleted ids; re-fetch edited ones (getMessages with
+//   oldest=id, latest=id, inclusive:true fetches exactly one message).
+// complete: false → the index cannot be trusted for your window (socket downtime
+//   gap, since older than ~30d retention, or an overflowed change list). The
+//   remedy is always a wider getNewer sweep. gapSince non-null → socket down NOW.
+
+// Writes — need 'write' scope AND connection access.messaging === 'readwrite':
+await freezr.connections.messaging.sendMessage({ connectionName, conversationId, text, threadId })
+// threadId (a parent message id) replies in-thread.
+await freezr.connections.messaging.markRead({ connectionName, conversationId, ts })
+// Read state is a per-conversation CURSOR: marks everything at/before ts as read.
+// There is no per-message unread flag.
+await freezr.connections.messaging.deleteMessage({ connectionName, conversationId, messageId })
+// Providers only allow deleting the user's OWN messages — anything else throws
+// with err.data.providerError set (e.g. Slack's 'cant_delete_message').
+
+freezr.connections.messaging.handleTokenExpired(resOrErr) // same pattern as mail
+\`\`\`
+
+**RECOMMENDED background-sync pattern** — check the live-updates capability first, fall back to polling:
+
+\`\`\`javascript
+const status = await freezr.utils.ping()
+const live = status.capabilities?.messaging_live
+if (live?.active && live.live_connections.includes(connectionName)) {
+  // Efficient path: ask what changed, fetch only that.
+  const res = await freezr.connections.messaging.getChanges({ connectionName, since: lastSyncMs })
+  const targets = res.complete
+    ? res.changes.map(c => c.conversationId)   // exactly what changed
+    : myTrackedConversationIds                 // index untrustworthy for window → wider sweep
+  for (const conversationId of targets) { /* getNewer({ connectionName, conversationId, lastToken }) */ }
+  /* also: tombstone res.changes[].deleted ids; re-fetch res.changes[].edited ids */
+} else {
+  // Sockets not set up on this server / connection not opted in: plain polling
+  // of the conversations the user chose to track.
+  for (const conversationId of myTrackedConversationIds) { /* getNewer(...) */ }
+}
+lastSyncMs = Date.now()
+\`\`\`
+
+**Messaging pitfalls — please respect:**
+- Rate limits are shared per Slack app per workspace (~50 history calls/min on internal apps). Sync a bounded set of conversations; never "all channels every cycle."
+- Message ids look like timestamps (Slack) but MUST be treated as opaque strings.
+- An edit/delete of an OLD message never shows up in getNewer — that is exactly what getChanges' edited/deleted lists are for.
+- \`complete: false\` from getChanges is normal after server downtime — handle it with the wider sweep, don't treat it as an error.
+
+---
+
 ### Utilities
 
 \`\`\`javascript
@@ -398,12 +558,61 @@ freezr.utils.publicPathFromId(fileId, requesteeApp, userId) // Build a public UR
 freezr.utils.appFilePathFrom(relativePath) // Build an app file URL from a relative path
 
 await freezr.utils.getManifest(appName?)  // Fetch an app's manifest.json
-await freezr.utils.ping(options?)         // Ping the server; returns { server_type, ... }
+await freezr.utils.ping(options?)         // Ping the server — see below
 await freezr.utils.getHtml(partPath, appName?) // Fetch an HTML file as text
 await freezr.utils.getAllAppList()         // Get list of all installed apps
 await freezr.utils.getPrefs()             // Get user preferences
 await freezr.utils.getAppResourceUsage(appName?) // Get storage/usage stats for an app
 \`\`\`
+
+**freezr.utils.ping()** — one call that tells the app where it stands. Anonymous callers get
+\`{ logged_in: false, server_type, server_version }\`. Logged-in callers also get
+\`logged_in_as_admin\`, \`user_id\` and \`storageLimits\`. When the call carries the app's token
+(the default inside an app), the response ALSO includes the app's permissions — each annotated
+with whether the server can actually honor it right now — plus a capability summary:
+
+\`\`\`javascript
+const status = await freezr.utils.ping()
+// status.app_name      — the calling app
+// status.permissions[] — this app's permission grants, each:
+//   { name, type, granted,
+//     usable,       // granted AND the server has what it needs to run it right now
+//     blocked_by }  // null when usable, else why not:
+//                   //   'not_granted'            — user hasn't granted (or revoked) it
+//                   //   'no_llm_keys'            — use_llm but no LLM API key in Account Resources
+//                   //   'no_compute_credential'  — job/function needs the user's cloud but no
+//                   //                              serverless credential is set up
+//                   //   'job_not_trusted'        — grant says run locally but admin hasn't trusted the job
+//                   //   'no_job_runtime'         — job location 'auto' but neither local trust nor compute
+//                   //   'no_matching_connection' — use_mail/contacts/calendar/messaging but no covered connection
+//                   //   'socket_not_admitted'    — socket_connect granted but not admin-admitted (not yet executable)
+//   // plus type-specific fields when present: table_id(s), job_name, location, connection_names, scopes
+// status.capabilities  — grant-independent facts about the user's setup:
+//   { llm: { available }, compute: { available },
+//     connections: { mail, contacts, calendar, messaging },  // counts of working connections
+//     messaging_live: {          // is the push-based messaging sync WORKING right now?
+//       active,                  // the full setup chain is in place for ≥1 connection
+//       blocked_by,              // null when active, else the FIRST missing link:
+//                                //   'server_sockets_not_enabled' — admin prefs switch off   } ask the
+//                                //   'no_provider_admitted'       — no /admin/sockets grant  } server
+//                                //   'sockets_not_running'        — manager not started      } admin
+//                                //   'no_live_connections'        — USER fix: turn on "Live updates"
+//                                //                                  on the connection at /account/resources
+//       sockets_running,         // the server currently holds provider socket(s)
+//       prefs_enabled,           // the admin master switch
+//       admitted_providers,      // e.g. ['slack']
+//       live_connections } }     // connectionNames opted into live updates
+\`\`\`
+
+When \`messaging_live.active\` is false, show the user the right fix from \`blocked_by\` — the first
+three need the server admin; only \`no_live_connections\` is something the user fixes themselves.
+
+Use \`permissions[].usable\` (not just \`granted\`) to decide whether to enable a feature:
+a granted \`use_llm\` with no LLM key, or a granted \`run_job\` with nowhere to run, will fail at
+call time. When \`usable\` is false, use \`blocked_by\` to show the user the right fix (grant the
+permission in Settings, add an LLM key or compute credential in Account Resources, connect an
+account, or ask the admin to trust the job). For deeper, feature-specific detail keep using
+\`freezr.llm.ping()\` (models/pricing) and \`freezr.jobs.ping()\` (per-job schedule state).
 
 ---
 

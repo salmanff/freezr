@@ -53,14 +53,19 @@ export const writeConnectionRecord = async (args) => {
   } = args
 
   if (!userId) return { ok: false, code: 'not_logged_in', message: 'Must be logged in to write a connection record' }
-  if (!accessToken || !refreshToken) {
-    return { ok: false, code: 'incomplete_tokens', message: 'Both accessToken and refreshToken are required to persist a connection' }
-  }
   if (!connectionName) return { ok: false, code: 'no_name', message: 'connectionName is required' }
 
   const provider = OAUTH_PROVIDERS[providerType]
   if (!provider) {
     return { ok: false, code: 'unknown_provider', message: 'Unknown OAuth provider type: ' + providerType }
+  }
+
+  // Providers whose tokens never expire (e.g. Slack with token rotation off)
+  // legitimately issue no refresh token — they export refreshTokenOptional.
+  // Everyone else must supply both tokens or the connection would die at the
+  // first expiry.
+  if (!accessToken || (!refreshToken && !provider.refreshTokenOptional)) {
+    return { ok: false, code: 'incomplete_tokens', message: 'Both accessToken and refreshToken are required to persist a connection' }
   }
 
   // Reconcile requested vs actually granted (MIN per service). Services not granted at all

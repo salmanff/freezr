@@ -5,6 +5,7 @@
 // to the async versions for backward compatibility with the auto-promisifier
 // in userDsMgr.mjs.
 
+import crypto from 'crypto'
 import { startsWith } from '../../../common/helpers/utils.mjs'
 import { MongoClient, ObjectId } from 'mongodb'
 import { fullOACName, hasUnifiedStrategy, getRevisedIdWithOatAdded } from './mongo_utils.mjs'
@@ -13,6 +14,39 @@ import { acquire, getStats as getRegistryStats } from './mongoClientRegistry.mjs
 export const version = '0.0.210'
 
 const ARBITRARY_FIND_COUNT_DEFAULT = 100
+
+// Collections whose _date_modified index this PROCESS has already created.
+//
+// createIndex on an index that already exists does NOT rebuild it - mongo skips
+// the recreate - so a repeat call is only a metadata round trip. That is cheap
+// on real mongo, but on Cosmos metadata operations are charged against a
+// SYSTEM-RESERVED budget that raising the collection's RU/s does not increase,
+// so a burst of them (a cold start opening many tables at once) can throttle.
+// Microsoft's guidance for exactly this is to do such initialisation once per
+// application lifetime; the same pattern is why mongoose recommends autoIndex:
+// false in production.
+//
+// Keyed by connection + database + collection, NOT by app table, which gives
+// the right behaviour for both unification strategies without special-casing:
+//   - 'all'  -> every table resolves to the one UNIFIED_COLLECTION_NAME, so the
+//               whole install makes ONE call per process instead of one per
+//               table-open.
+//   - 'db'   -> each table is its own collection, so each still gets its one
+//               call. That matters: freezr creates app tables dynamically and
+//               table-open is the only hook there is.
+// The connection is part of the key so one BYO user's index can never suppress
+// the call for another user's separate database. It is hashed so a credentialed
+// URI is not held in a long-lived set.
+const indexedCollections = new Set()
+
+const indexMemoKey = function (self) {
+  const { dbName, collName } = targetNamesFor(self)
+  const uriFingerprint = crypto.createHash('sha256')
+    .update(dbConnectionString(self.env))
+    .digest('hex')
+    .slice(0, 16)
+  return uriFingerprint + '|' + dbName + '|' + collName
+}
 
 // When true, falls back to old per-operation MongoClient (no registry).
 // Set MONGO_DO_NOT_USE_REGISTRY=true in env to disable the registry.
@@ -56,15 +90,47 @@ MONGO_FOR_FREEZR.prototype.createIndex_async = async function (indexParams, inde
   }
 }
 
-MONGO_FOR_FREEZR.prototype.initDB_async = async function () {
-  if (this.env.dbParams.choice !== 'cosmosForMongoString') return null
-  const { coll, collName, release } = await getMongoContext(this)
+/**
+ * Create the _date_modified index, treating failure as non-fatal.
+ *
+ * The index is an OPTIMISATION, not a precondition: the collection reads and
+ * writes correctly without it - only that sort stops being served from an index.
+ * This used to rethrow, which made initOacDB treat it as a failed table open, so
+ * a throttled metadata call against a collection that ALREADY HAD the index
+ * failed a user request that had nothing wrong with it. Throttling also arrives
+ * in bursts, so a cold start opening many tables produced a wave of them at once.
+ *
+ * Split out from initDB_async so it can be tested without a live connection.
+ * @returns {Promise<boolean>} true if the index is now known to exist
+ */
+export const ensureDateModifiedIndex = async function (coll, collName) {
   try {
     await coll.createIndex({ _date_modified: -1 }, { background: true, unique: false })
-    return null
+    return true
   } catch (err) {
-    console.warn('got err in initDB in mongo db ', { collName, err })
-    throw err
+    console.warn('could not create the _date_modified index - continuing without it ',
+      { collName, message: err?.message, code: err?.code })
+    return false
+  }
+}
+
+MONGO_FOR_FREEZR.prototype.initDB_async = async function () {
+  if (this.env.dbParams.choice !== 'cosmosForMongoString') return null
+
+  // Already done for this collection in this process - skip the whole round trip.
+  const memoKey = indexMemoKey(this)
+  if (indexedCollections.has(memoKey)) return null
+
+  // NOTE: getMongoContext is deliberately OUTSIDE the tolerant path below. Not
+  // being able to connect means the store genuinely cannot serve anything, and
+  // that must still fail the table open - same distinction as the nedb executor
+  // guard: "cannot execute" fails loudly, "an optional extra didn't happen" does not.
+  const { coll, collName, release } = await getMongoContext(this)
+  try {
+    // Only memoised on success, so a throttled attempt is retried by the next
+    // table-open rather than being silently skipped for the life of the process.
+    if (await ensureDateModifiedIndex(coll, collName)) indexedCollections.add(memoKey)
+    return null
   } finally {
     release()
   }
@@ -412,16 +478,24 @@ const getMongoContext = async function (self) {
     release = acquired.release
   }
 
+  const { dbName, collName } = targetNamesFor(self)
+  const database = client.db(dbName)
+  return { client, release, collName, coll: database.collection(collName), dbName, database }
+}
+
+// Which physical database + collection this OAC resolves to. Extracted from
+// getMongoContext so the index memo can compute the same target WITHOUT opening
+// a connection - the whole point is to skip the round trip.
+const targetNamesFor = function (self) {
   const useUnifiedDbName = hasUnifiedStrategy(self.env.dbParams, self.oat.owner) || self.env.dbParams.unifiedDbName || !self.env.dbParams.useUserIdsAsDbName
   const dbName = useUnifiedDbName
     ? (process?.env?.UNIFIED_DB_NAME || self.env.dbParams.unifiedDbName || DEFAULT_UNIFIED_DB_NAME)
     : self.oat.owner
-  const database = client.db(dbName)
   const useUnifiedCollName = hasUnifiedStrategy(self.env.dbParams, self.oat.owner)
   const collName = useUnifiedCollName
     ? UNIFIED_COLLECTION_NAME
     : fullOACName(self.oat, useUnifiedDbName)
-  return { client, release, collName, coll: database.collection(collName), dbName, database }
+  return { dbName, collName, useUnifiedDbName }
 }
 
 const dbConnectionString = function (envParams) {
@@ -506,6 +580,9 @@ const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
 // Exposed for the DB-migration service's "same physical database" guard (mongo→mongo).
 export { dbConnectionString }
+
+// Exposed for unit tests only - see test/unit/datastore/cosmosIndexMemo.test.mjs
+export const __indexMemoInternals = { indexedCollections, indexMemoKey, targetNamesFor }
 
 // Interface
 export default MONGO_FOR_FREEZR

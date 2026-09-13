@@ -168,6 +168,9 @@ const EXPIRY_DEFAULT_FOR_APPS = 6 * 30 * 24 * 60 * 60 * 1000 // 6 months
  *   Server caps this at `now + EXPIRY_DEFAULT_FOR_APPS` — caller can request shorter,
  *   never longer.
  * @param {boolean} [options.oneDevice=true] - Whether password is for one device only
+ * @param {boolean} [options.readOnly=false] - If true, the token is marked read_only and mutating
+ *   ceps/feps routes reject it (see rejectWritesForReadOnlyTokens in basicAuth.mjs). Used for
+ *   inspection tokens handed to LLMs/agents (freezr_creator_selfcheck_plan_v1.md §A2).
  * @returns {Promise<Object>} Result with app_password and app_name
  */
 export const generateAndSaveAppPasswordForUser = async (tokenDb, userId, appName, options = {}) => {
@@ -178,7 +181,8 @@ export const generateAndSaveAppPasswordForUser = async (tokenDb, userId, appName
   const {
     deviceCode,
     expiry: callerExpiry,
-    oneDevice = false
+    oneDevice = false,
+    readOnly = false
   } = options
   // Cap caller-requested expiry at server policy. Caller may request shorter,
   // but cannot exceed `now + EXPIRY_DEFAULT_FOR_APPS`. Also fixes a latent bug
@@ -217,6 +221,7 @@ export const generateAndSaveAppPasswordForUser = async (tokenDb, userId, appName
     app_password,
     app_token,
     expiry,
+    read_only: !!readOnly,
     one_device: oneDevice,
     user_device: null,
     date_used: null

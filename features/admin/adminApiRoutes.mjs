@@ -82,7 +82,7 @@ export const createAdminApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, log
    */
   router.get('/:action',
     (req, res, next) => {
-      const allowed = ['getuserappresources', 'list_users', 'get_cache_prefs', 'get_cache_stats', 'get_mongo_connection_stats', 'list_app_jobs', 'list_scheduled_jobs', 'get_console_flags']
+      const allowed = ['getuserappresources', 'get_usage_tallies', 'list_users', 'get_cache_prefs', 'get_cache_stats', 'get_mongo_connection_stats', 'list_app_jobs', 'list_scheduled_jobs', 'get_console_flags', 'sse_stream_test', 'get_socket_status', 'list_socket_admissions']
       if (!allowed.includes(req.params.action)) {
         return res.status(400).json({ success: false, error: 'Invalid admin GET action - internal error' })
       }
@@ -102,7 +102,7 @@ export const createAdminApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, log
  */
   router.post('/:action', 
     (req, res, next) => {
-      const allowed = ['change_main_prefs', 'reset_user_password', 'update_user_limits', 'change_user_rights', 'delete_users', 'set_cache_prefs', 'clear_all_caches', 'trust_job', 'untrust_job', 'run_scheduler_now', 'set_console_flags']
+      const allowed = ['change_main_prefs', 'reset_user_password', 'update_user_limits', 'change_user_rights', 'delete_users', 'set_cache_prefs', 'clear_all_caches', 'trust_job', 'untrust_job', 'run_scheduler_now', 'set_console_flags', 'set_socket_admission', 'sockets_start', 'sockets_stop']
       if (!allowed.includes(req.params.action)) {
         return res.status(400).json({ success: false, error: 'Invalid admin POST action - internal error' })
       }

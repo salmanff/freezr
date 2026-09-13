@@ -1,7 +1,7 @@
 // Unit tests for the cloud job-source loader + deploy-identity marker (Tier-2 reliability).
 import { expect } from 'chai'
 import { zipSync, strToU8 } from 'fflate'
-import { loadJobCodeFromAppFS, loadJobIdentitySource, readDeployedId, writeDeployedId } from '../../../features/jobs/services/cloudJobSource.mjs'
+import { loadJobCodeFromAppFS, loadJobIdentitySource, jobCodeIdentity, readDeployedId, writeDeployedId } from '../../../features/jobs/services/cloudJobSource.mjs'
 
 // In-memory appFS: text files stored as strings, binary as Uint8Array. readAppFile honours
 // doNotToString (returns bytes) vs text (returns string), and throws ENOENT for missing files —
@@ -52,6 +52,45 @@ describe('cloudJobSource.loadJobCodeFromAppFS', function () {
   it('returns null when nothing usable is present (clean error, not a crash)', async function () {
     const fs = fakeAppFS({}, { 'jobs/doit/index.mjs': '<html>error</html>' })
     expect(await loadJobCodeFromAppFS(fs, 'doit')).to.equal(null)
+  })
+})
+
+describe('cloudJobSource identity covers the WHOLE bundle (not just index.mjs)', function () {
+  // The trust gate and stale-deploy check both hash this identity. It must change when ANY job
+  // file changes (else a sibling-module edit runs un-reviewed / never redeploys), stay stable for
+  // identical content (zip bytes vary per rebuild — timestamps), and ignore node_modules.
+  const bundle = ({ sib = 'export const V = 1', dep = 'module.exports = 1', mtime }) => zipSync({
+    'index.mjs': [strToU8('export async function handler () { return 1 }'), { mtime }],
+    'package.json': [strToU8('{"name":"x"}'), { mtime }],
+    'reconcile.js': [strToU8(sib), { mtime }],
+    'node_modules/dep/index.js': [strToU8(dep), { mtime }]
+  })
+
+  it('is stable across zip rebuilds of identical content (different zip bytes)', async function () {
+    const z1 = bundle({ mtime: new Date('2026-01-01') })
+    const z2 = bundle({ mtime: new Date('2026-02-02') })
+    expect(Buffer.from(z1).equals(Buffer.from(z2))).to.equal(false) // bytes differ…
+    const id1 = await jobCodeIdentity(fakeAppFS({ 'jobs/doit.zip': z1 }), 'doit')
+    const id2 = await jobCodeIdentity(fakeAppFS({ 'jobs/doit.zip': z2 }), 'doit')
+    expect(id1).to.equal(id2) // …identity doesn't
+  })
+
+  it('changes when a SIBLING module changes, with index.mjs untouched', async function () {
+    const idOld = await jobCodeIdentity(fakeAppFS({ 'jobs/doit.zip': bundle({}) }), 'doit')
+    const idNew = await jobCodeIdentity(fakeAppFS({ 'jobs/doit.zip': bundle({ sib: 'export const V = 2' }) }), 'doit')
+    expect(idOld).to.not.equal(idNew)
+  })
+
+  it('ignores node_modules-only differences', async function () {
+    const id1 = await jobCodeIdentity(fakeAppFS({ 'jobs/doit.zip': bundle({}) }), 'doit')
+    const id2 = await jobCodeIdentity(fakeAppFS({ 'jobs/doit.zip': bundle({ dep: 'module.exports = 999' }) }), 'doit')
+    expect(id1).to.equal(id2)
+  })
+
+  it('falls back to the legacy text identity when the bundle is an HTML stub', async function () {
+    const fs = fakeAppFS({ 'jobs/doit/index.mjs': 'CODE' }, { 'jobs/doit.zip': '<!DOCTYPE html>err' })
+    const id = await loadJobIdentitySource(fs, 'doit')
+    expect(id).to.contain('CODE')
   })
 })
 

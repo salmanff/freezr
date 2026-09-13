@@ -38,7 +38,7 @@ export const getAccountPageManifest = (params) => {
       page_url: 'account_home.html',
       app_name: 'info.freezr.account',
       script_files: ['account_home.js'],
-      initial_query_func: 'listAllUserApps'
+      initial_query_func: 'listAllUserAppsNoAskApps' // hide ask-apps from the home grid (managed in /creator/ask)
     },
 
     settings: {
@@ -98,7 +98,8 @@ export const getAccountPageManifest = (params) => {
       page_title: 'Resource Usage (freezr)',
       css_files: [
         '/app/info.freezr.public/public/freezr_style.css',
-        'account_home.css'
+        'account_home.css',
+        'account_resourceusage.css'
       ],
       page_url: 'account_resourceusage.html',
       app_name: 'info.freezr.account',
@@ -106,7 +107,11 @@ export const getAccountPageManifest = (params) => {
         'account_resourceusage.js',
         '/app/info.freezr.public/public/mustache.js'
       ],
-      initial_query_func: 'getAppResources'
+      // No initial_query_func: getAppResources runs the full storage calculation, which can
+      // take many seconds and was delaying the HTML itself — and the page never read the
+      // result (it has no mustache tags). The Storage tab now fetches it after the page is
+      // up, so nothing blocks first paint.
+      initial_query_func: null
     },
 
     logviewer: {

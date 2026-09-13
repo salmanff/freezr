@@ -20,14 +20,14 @@ import {
   createAddLogManager } from './middleware/accountContext.mjs'
 import { createAddPublicRecordsDB } from '../public/middleware/publicContext.mjs'
 import { createAddOwnerPermsDbForLoggedInuser } from '../../middleware/permissions/permissionContext.mjs'
-import { isLoggedInAccountAppRequest, isLoggedInAccountorAdminAppRequest, noCheckNeeded } from '../../middleware/permissions/permissionCheckers.mjs'
+import { isLoggedInAccountAppRequest, isLoggedInAccountorAdminAppRequest, isLoggedInConnectionMgmtRequest, noCheckNeeded } from '../../middleware/permissions/permissionCheckers.mjs'
 import { createAddUserDs } from '../../features/apps/middleware/appContext.mjs'
 import { createAddTrustedJobsDbIfAdmin } from '../jobs/middleware/jobsContext.mjs'
 import { generateLoginPage } from './controllers/loginController.mjs'
 import { createLoginApiController } from './controllers/loginApiController.mjs'
 // import { createLoginPageController } from './controllers/loginPageController.mjs' // Using existing loginController.mjs instead
 import { createAccountPageController } from './controllers/accountPageController.mjs'
-import { createAccountApiController, createConnectionDisconnectHandler } from './controllers/accountApiController.mjs'
+import { createAccountApiController, createConnectionDisconnectHandler, createConnectionSetLiveHandler } from './controllers/accountApiController.mjs'
 import { createFsMigrationController, ACTIONS_REQUIRING_USERSDB } from './controllers/fsMigrationController.mjs'
 import { createDbMigrationController } from './controllers/dbMigrationController.mjs'
 import { createAccountRemoveController } from './controllers/accountRemoveController.mjs'
@@ -234,10 +234,21 @@ export const createAcctApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
   router.post('/app_install_from_url', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addFreezrAccountAsReqParam, addUserDSAndAppFS, addOwnerPermsDb, addPublicRecordsDB, isLoggedInAccountAppRequest, accountApiController.installAppFromUrlController)
   router.post('/app_install_served', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addFreezrAccountAsReqParam, addUserDSAndAppFS, addOwnerPermsDb, addPublicRecordsDB, isLoggedInAccountAppRequest, accountApiController.installServedAppController)
 
+  // Connection-management endpoints accept the CONNECTIONS app's token too:
+  // /connections/edit is the natural place to manage a connection, and its token
+  // is bound to info.freezr.connections — the account-app-only guard was why
+  // Disconnect 403'd from that page.
+  const getAndCheckConnectionMgmtTokenInfo = createGetAppTokenInfoFromheaderForApi(dsManager, { ensureAppNames: ['info.freezr.account', 'info.freezr.creator', 'info.freezr.connections'] })
+
   // Connection disconnect — best-effort revoke at provider + delete resource record.
   // Mounted BEFORE the generic /:action catch-all so the specific path wins.
   const connectionDisconnectHandler = createConnectionDisconnectHandler({ dsManager, freezrPrefs })
-  router.post('/connection_disconnect', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addFreezrAccountAsReqParam, addUserDSAndAppFS, isLoggedInAccountAppRequest, connectionDisconnectHandler)
+  router.post('/connection_disconnect', setupGuard, loggedInGuard, getAndCheckConnectionMgmtTokenInfo, addFreezrAccountAsReqParam, addUserDSAndAppFS, isLoggedInConnectionMgmtRequest, connectionDisconnectHandler)
+
+  // Live-updates opt-in/out for messaging connections (socket routing registry).
+  // Same guard chain as connection_disconnect; same reason for the specific mount.
+  const connectionSetLiveHandler = createConnectionSetLiveHandler({ dsManager, freezrPrefs })
+  router.post('/connection_set_live', setupGuard, loggedInGuard, getAndCheckConnectionMgmtTokenInfo, addFreezrAccountAsReqParam, addUserDSAndAppFS, isLoggedInConnectionMgmtRequest, connectionSetLiveHandler)
 
   router.put('/:action', setupGuard, loggedInGuard, getAndCheckAccountAppTokenInfo, addFreezrAccountAsReqParam, addAllUsersDb, addTokenDb, addUserDSAndAppFS, addPublicRecordsDB, addPublicManifestsDb, isLoggedInAccountAppRequest, accountApiController.handleAccountActions)
   router.get('/:getAction', setupGuard, loggedInGuard, getAndCheckAccountOrAmdinAppTokenInfo, addUserDs, isLoggedInAccountorAdminAppRequest, addLogManagerIfNeedBe, accountApiController.handleGettingAccountInfo)

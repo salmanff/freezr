@@ -8,7 +8,14 @@
 /* global freezr */
 
 const CONNECTION_NAME_RX = /^[A-Za-z0-9_-]+$/
-const SERVICES = ['mail', 'calendar', 'contacts']
+const SERVICES = ['mail', 'calendar', 'contacts', 'messaging']
+// Which services each provider's OAuth grant can cover. Rows for other
+// services are hidden (and excluded from submit) when the provider changes.
+const SERVICES_BY_PROVIDER = {
+  google: ['mail', 'calendar', 'contacts'],
+  microsoft: ['mail', 'calendar', 'contacts'],
+  slack: ['messaging']
+}
 
 const state = {
   existingConnections: [],
@@ -19,6 +26,10 @@ freezr.initPageScripts = async function () {
   document.getElementById('button_connConnect').onclick = submit
   document.querySelectorAll('input[name="conn_auth_choice"]').forEach(r => {
     r.addEventListener('change', syncCustomEnabled)
+  })
+  document.getElementById('conn_provider').addEventListener('change', () => {
+    syncAuthChoicesForProvider()
+    syncServicesForProvider()
   })
 
   // Preload existing connections so we can block name collisions client-side.
@@ -36,11 +47,59 @@ freezr.initPageScripts = async function () {
   // (see FREEZR_DEFAULT_AUTH_PROVIDER). Future polish: expose an /acctapi endpoint that
   // returns whether a direct google client is registered.
   syncCustomEnabled()
+  syncAuthChoicesForProvider()
+  syncServicesForProvider()
+}
+
+// Show only the service rows the chosen provider can cover, and (re)check the
+// visible ones so switching providers never leaves everything unchecked.
+// Also toggles the "paste a token instead" hint, which only Slack supports.
+const syncServicesForProvider = function () {
+  const provider = document.getElementById('conn_provider').value
+  const available = SERVICES_BY_PROVIDER[provider] || []
+  SERVICES.forEach(s => {
+    const row = document.getElementById('conn_service_row_' + s)
+    const box = document.getElementById('conn_service_' + s)
+    const isAvailable = available.includes(s)
+    if (row) row.style.display = isAvailable ? 'flex' : 'none'
+    if (box) box.checked = isAvailable
+  })
+  // The token-paste alternative (on /account/resources) is Slack-only.
+  document.getElementById('paste_token_hint').style.display = (provider === 'slack') ? 'block' : 'none'
 }
 
 const syncCustomEnabled = function () {
   const chosen = document.querySelector('input[name="conn_auth_choice"]:checked')?.value
   document.getElementById('conn_custom_url').disabled = (chosen !== 'custom')
+}
+
+// No shared default authenticator exists for Microsoft or Slack (nobody hosts a
+// public Entra/Slack app for freezr — each server registers its own; see the oauth
+// setup guide). Picking "Default" with those providers would 404 at oauth start,
+// so grey it out instead.
+const DEFAULT_AUTH_DESC_GOOGLE = 'Use the freezr.info–blessed provider.'
+const DEFAULT_AUTH_DESC_BY_PROVIDER = {
+  microsoft: 'Not available for Microsoft — there is no shared default authenticator. Each freezr server registers its own (free) app with Microsoft, so your credentials stay under your control. See the <a href="https://freezr.info/oauth-setup" target="_blank">setup guide</a>, or pick another option below.',
+  slack: 'Not available for Slack — there is no shared default authenticator. Each freezr server registers its own (free) Slack app in the workspace it connects to, so your credentials stay under your control. See the <a href="https://freezr.info/oauth-setup" target="_blank">setup guide</a>, or pick another option below.'
+}
+
+const syncAuthChoicesForProvider = function () {
+  const provider = document.getElementById('conn_provider').value
+  const noDefault = !!DEFAULT_AUTH_DESC_BY_PROVIDER[provider]
+  const defaultRadio = document.querySelector('input[name="conn_auth_choice"][value="default"]')
+  const defaultLabel = document.getElementById('auth_choice_default_label')
+  const defaultDesc = document.getElementById('auth_choice_default_desc')
+
+  defaultRadio.disabled = noDefault
+  defaultLabel.style.opacity = noDefault ? '0.55' : ''
+  defaultLabel.style.cursor = noDefault ? 'not-allowed' : 'pointer'
+  defaultDesc.innerHTML = noDefault ? DEFAULT_AUTH_DESC_BY_PROVIDER[provider] : DEFAULT_AUTH_DESC_GOOGLE
+
+  if (noDefault && defaultRadio.checked) {
+    defaultRadio.checked = false
+    document.querySelector('input[name="conn_auth_choice"][value="local"]').checked = true
+    syncCustomEnabled()
+  }
 }
 
 const showWarning = function (msg) {

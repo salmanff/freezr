@@ -47,7 +47,8 @@
     "test:coreApiV1": "mocha test/integration/coreApiV1/coreApiV1.test.mjs",
     "test:coreApiV2": "mocha test/integration/coreApiV1/coreApiV2.test.mjs",
     "test:e2e": "mocha test/e2e/**/*.test.mjs",
-    "test:watch": "mocha --watch test/**/*.test.mjs"
+    "test:watch": "mocha --watch test/**/*.test.mjs",
+    "probe:slack": "node test/manual/slack-socket-probe.mjs"
   },
   "optional_dependencies": {
     "explanation": "Cut and paste these above if you want to use the specific technologies"

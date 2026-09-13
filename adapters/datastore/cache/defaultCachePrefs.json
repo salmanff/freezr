@@ -5,7 +5,10 @@
     }, 
     "info_freezr_account_permissions": {
       "cacheAll": true
-    }, 
+    },
+    "info_freezr_account_resources": {
+      "cachePatterns": ["type"]
+    },
     "dev_ceps_contacts": {
       "cacheAll": true
     },
@@ -34,6 +37,12 @@
       },
       "info_freezr_admin_public_manifests": {
         "cachePatterns": [["user_id", "app_name"]]
+      },
+      "info_freezr_admin_trusted_jobs": {
+        "cacheAll": true
+      },
+      "info_freezr_admin_scheduled_jobs": {
+        "cacheAll": true
       }
     },
     "public": {

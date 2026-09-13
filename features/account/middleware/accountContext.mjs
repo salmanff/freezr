@@ -237,7 +237,8 @@ export const createAddMessageDb = (dsManager, freezrPrefs, freezrStatus) => {
       
       res.locals.freezr.userMessagesGotDb = userMessagesGotDb
 
-      if (req.params.action === 'mark_read') {
+      if (req.params.action === 'mark_read' || req.params.action === 'get') {
+        // mark_read and get operate on the requestor's own message DBs only - no recipient context needed
         next()
         return
       } else {

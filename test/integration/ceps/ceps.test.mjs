@@ -126,10 +126,38 @@ describe('CEPS Endpoints Integration Tests', function () {
       const response = await auth.get('/ceps/ping')
 
       console.log('      🔑 ceps.test.mjs should return ping response when authenticated - response', response)
-      
+
       expect(response.ok).to.be.true
       expect(response.status).to.equal(200)
       expect(response.data).to.be.an('object')
+    })
+
+    it('should include annotated permissions and capabilities for an app-token caller', async function () {
+      const response = await auth.get('/ceps/ping')
+
+      expect(response.ok).to.be.true
+      expect(response.data.logged_in).to.be.true
+      expect(response.data.app_name).to.equal(auth.appName)
+      expect(response.data.permissions).to.be.an('array')
+      expect(response.data.capabilities).to.be.an('object')
+
+      // Capability summary shape — coarse booleans/counts only
+      expect(response.data.capabilities.llm).to.have.property('available').that.is.a('boolean')
+      expect(response.data.capabilities.compute).to.have.property('available').that.is.a('boolean')
+      expect(response.data.capabilities.connections).to.include.keys('mail', 'contacts', 'calendar')
+
+      // Every permission carries the usability annotation and no sensitive internals
+      for (const perm of response.data.permissions) {
+        expect(perm).to.include.keys('name', 'type', 'granted', 'usable', 'blocked_by')
+        expect(perm.usable).to.be.a('boolean')
+        if (perm.usable) {
+          expect(perm.granted).to.be.true
+          expect(perm.blocked_by).to.equal(null)
+        } else {
+          expect(perm.blocked_by).to.be.a('string')
+        }
+        if (!perm.granted) expect(perm.blocked_by).to.equal('not_granted')
+      }
     })
   })
 

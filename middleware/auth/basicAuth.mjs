@@ -7,6 +7,7 @@
 import { getAppTokenFromHeaderAndDoMinimalChecks, getOrSetAppTokenForLoggedInUser, getAndCheckCookieTokenForLoggedInUser } from '../tokens/tokenHandler.mjs'
 import { sendAuthFailure } from '../../adapters/http/responses.mjs'
 import { APP_TOKEN_OAC } from '../../common/helpers/config.mjs'
+import { fileTokenStore } from '../tokens/fileTokenStore.mjs'
 import { parseSetupToken, tokenExpired } from '../../features/register/services/registerServices.mjs'
 import { buildLoginRedirectUrl } from '../../common/helpers/utils.mjs'
 /**
@@ -412,8 +413,131 @@ export const createGetAppTokenInfoFromCookieForFiles = (dsManager, options = {})
   }
 }
 
+/**
+ * File auth for /feps/userfiles. A private userfile is served ONLY when the request carries a valid
+ * scoped `?fileToken=` (for native <img>/<video>/CSS loads, which cannot set headers — minted via
+ * GET /feps/getuserfiletoken, itself Bearer-authenticated). The ambient path-scoped cookie is NOT
+ * accepted: it is auto-attached by the browser on cross-SITE and cross-APP requests, so honouring it
+ * leaked private files (see freezr_file_access_plan_v1.md §3). A request with no valid fileToken →
+ * 401 (genuinely public files are served via the public route, not here).
+ *
+ * fileTokens live only in an IN-MEMORY store (fileTokenStore), never in any token DB, so a low-trust,
+ * URL-visible fileToken can never be replayed as an app/validation token.
+ *
+ * A direct `Authorization: Bearer <app_token>` fallback was built and then DELIBERATELY CLOSED OFF
+ * (see the commented-out branch below): audited and found to have ZERO real callers — every current
+ * client (browser or otherwise) can already mint a fileToken with its own Bearer token via
+ * GET /feps/getuserfiletoken and then use it here, so accepting Bearer directly on THIS route added a
+ * second credential type for no actual capability, widening the surface of a security-sensitive
+ * endpoint for nothing. Left in place (commented) as a documented, reversible option — re-enable only
+ * if a genuine caller emerges that needs to skip the extra mint round-trip (e.g. a bulk non-browser
+ * fetch), not speculatively.
+ */
+export const createGetFileTokenInfo = (dsManager, options = {}) => {
+  return async (req, res, next) => {
+    const sessionUserId = req.session?.logged_in_user_id
 
+    // Scoped fileToken in the URL (?fileToken=) — for native <img>/<video>/CSS loads that cannot
+    // set headers. Minted short-TTL + scoped by GET /feps/getuserfiletoken. See plan §4b.
+    const fileToken = req.query && req.query.fileToken
+    if (fileToken && typeof fileToken === 'string') {
+      try {
+        const rec = fileTokenStore.get(fileToken) // null if missing OR expired
+        if (!rec) {
+          return sendAuthFailure(res, { req, type: 'Unauthorized', user_id: sessionUserId, error: 'invalid or expired file token' })
+        }
+        // Scope: token must match the requested app + owner, and — if file-scoped — the exact file.
+        const reqFilePath = decodeURI(req.path.split('/').slice(4).join('/'))
+        if (rec.app_name !== req.params.app_name || rec.user_id !== req.params.user_id ||
+            (rec.file_path && rec.file_path !== reqFilePath)) {
+          return sendAuthFailure(res, { req, type: 'Unauthorized', user_id: sessionUserId, error: 'file token scope mismatch' })
+        }
+        // Synthesise a tokenInfo the sendUserFile owner/grantee check re-verifies (defence in depth).
+        if (!res.locals.freezr) res.locals.freezr = {}
+        res.locals.freezr.tokenInfo = {
+          requestor_id: rec.requestor_id,
+          owner_id: rec.owner_id,
+          app_name: rec.app_name,
+          requestor_app: rec.requestor_app, // the CONSUMING app captured at mint (may differ from app_name for app-scoped grants)
+          token_type: 'file'
+        }
+        return next()
+      } catch (error) {
+        return sendAuthFailure(res, { req, type: 'Unauthorized', user_id: sessionUserId, error: 'file token error' })
+      }
+    }
 
+    // No fileToken → block. Public files are served via the public route, not here.
+    return sendAuthFailure(res, { req, type: 'Unauthorized', user_id: sessionUserId, error: 'file token missing', function: 'getFileTokenInfo', statusCode: 401 })
+
+    /* ---- CLOSED OFF (see doc comment above) — Bearer <app_token> fallback on THIS route ----
+    const authHeader = (typeof req.header === 'function') ? req.header('Authorization') : null
+    if (!authHeader || authHeader.length <= 10) {
+      return sendAuthFailure(res, { req, type: 'Unauthorized', error: 'file token or bearer required', function: 'getFileTokenInfo', statusCode: 401 })
+    }
+    const userId = req.session?.logged_in_user_id
+    try {
+      const tokenDb = dsManager.getDB(APP_TOKEN_OAC)
+      // Same validation the API uses: token exists, not expired, browser-token session binding
+      // (requestor_id === session user + matching device). Throws on expiry / mismatch.
+      const tokenInfo = await getAppTokenFromHeaderAndDoMinimalChecks(tokenDb, req.session, req.headers)
+
+      if (!tokenInfo || !tokenInfo.app_token) {
+        return sendAuthFailure(res, { req, type: 'Unauthorized', user_id: userId, error: 'tokenNotFound', shouldBeAlertedToFailure: true })
+      }
+      if (tokenInfo.app_name !== req.params.app_name) {
+        return sendAuthFailure(res, { req, type: 'Unauthorized', user_id: userId, error: 'tokenMismatch', shouldBeAlertedToFailure: true })
+      }
+      // Belt-and-suspenders: pin to the logged-in session user (getAppTokenFromHeaderAndDoMinimalChecks
+      // already enforces this for browser tokens; explicit here for any non-browser token type).
+      if (userId && tokenInfo.requestor_id !== userId) {
+        return sendAuthFailure(res, { req, type: 'Unauthorized', user_id: userId, error: 'userIdMismatch', shouldBeAlertedToFailure: true })
+      }
+
+      if (!res.locals.freezr) res.locals.freezr = {}
+      res.locals.freezr.tokenInfo = tokenInfo
+      res.locals.freezr.appToken = tokenInfo.app_token
+      if (res.locals.flogger) res.locals.flogger.setTokenParams({ app: tokenInfo.app_name })
+      return next()
+    } catch (error) {
+      return sendAuthFailure(res, {
+        req,
+        type: (error.code === 'expired' ? 'expired' : 'Unauthorized'),
+        msg: error.message,
+        error,
+        user_id: userId,
+        shouldBeAlertedToFailure: false,
+        redirectUrl: '/account/home'
+      })
+    }
+    ---- end closed-off branch ---- */
+  }
+}
+
+/**
+ * Reject mutating requests made with a read-only token.
+ *
+ * Inspection tokens (freezr_creator_selfcheck_plan_v1.md §A2) are minted with `read_only: true`
+ * so a user can hand one to an LLM/agent with the guarantee "it can look, not touch". This guard
+ * sits AFTER getAppTokenInfo on mutating ceps/feps routes (write/update/delete/restore/upload,
+ * share_records, message initiation, validation-token minting, serverless and llm calls — the
+ * last two because they spend the user's compute/LLM budget). Read routes are untouched, and
+ * tokens without the flag are unaffected.
+ */
+export const rejectWritesForReadOnlyTokens = (req, res, next) => {
+  if (res.locals.freezr?.tokenInfo?.read_only) {
+    return sendAuthFailure(res, {
+      req,
+      message: 'This token is read-only — it cannot write data or trigger actions',
+      error: 'readOnlyToken - rejectWritesForReadOnlyTokens',
+      type: 'readOnlyToken',
+      path: req.path,
+      statusCode: 403,
+      shouldBeAlertedToFailure: false
+    })
+  }
+  next()
+}
 
 /**
  * Middleware to handle logged-in user page requests with setting or updating a validation token

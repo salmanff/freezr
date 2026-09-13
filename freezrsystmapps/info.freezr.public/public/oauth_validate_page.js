@@ -24,16 +24,14 @@ freezr.initPageScripts = async function () {
   }
 
   try {
-    // Build URL with query parameters
-    const queryParams = new URLSearchParams()
-    queryParams.set('state', state)
-    if (code) queryParams.set('code', code)
-    if (accessToken) queryParams.set('accessToken', accessToken)
-    
-    const url = '/oauth/validate_state?' + queryParams.toString()
-    
-    // Call the OAuth API to validate the state and get credentials
-    const response = await freezr.apiRequest('GET', url)
+    // Strip the callback params from the address bar before calling the API.
+    // Microsoft Entra auth codes are ~2-3KB; leaving them in the URL puts the
+    // whole blob in the Referer header of every subsequent request (and in
+    // browser history), which can trip header-size limits (431) upstream.
+    window.history.replaceState(null, '', window.location.pathname)
+
+    // POST the code in the body rather than the query string — same reason.
+    const response = await freezr.apiRequest('POST', '/oauth/validate_state', { state, code, accessToken })
     
     console.log('OAuth validate response:', { 
       success: response.success, 

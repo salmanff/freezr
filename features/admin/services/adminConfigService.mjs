@@ -31,7 +31,7 @@ export const getOrSetPrefs = async (paramsDb, prefName, prefsToSet, doSet) => {
         // legacy main_prefs rows (written before the field existed) are
         // still locked in to their original strategy. Changing strategy
         // requires manual data migration (see
-        // xplanations/review_security_internal_2_authorization_audit.md).
+        // review_security_internal_2_authorization_audit.md).
         if (prefName === 'main_prefs') {
           const oldStrat = prefOnDb.dbUnificationStrategy || 'db'
           const newStrat = prefsToSet.dbUnificationStrategy || 'db'
@@ -77,8 +77,24 @@ export const DEFAULT_PREFS = {
   blockMsgsFromNonContacts: false,
   scheduler_disabled: false, // scheduled jobs run by default; admin can pause them on the prefs page
   // (a DISABLE flag so existing servers — where the field is absent/null — keep scheduling ON)
-  serverless_callback_url: '' // public freezr base URL a deployed serverless job calls back to
+  sockets_enabled: false, // server-held outbound sockets (messaging live updates) are OPT-IN:
+  // an ENABLE flag so existing servers — where the field is absent — stay OFF. Master switch
+  // only; each provider additionally needs an enabled admission row (/admin/sockets) and a
+  // credential (e.g. the Slack app-level token). See socketManager.mjs.
+  local_llm_cli_enabled: false, // local-CLI LLM connectors (ClaudeLocal / CodexLocal): lets
+  // ADMIN users route LLM calls through this machine's logged-in `claude` / `codex` CLI,
+  // spending the owner's Claude / ChatGPT subscription. OPT-IN (existing servers stay off).
+  // Master switch only — the admin user must also complete the attestation on Account
+  // Resources, and a working logged-in CLI must exist on this host.
+  local_fs_access_enabled: false, // local file-store connections (use_file_sys on a
+  // { type: 'local' } store): lets ADMIN users grant apps scoped access to a local
+  // folder. OPT-IN (existing servers stay off). Master switch only — the server's own
+  // fs must be local, the requesting user must be an admin, and requests must arrive
+  // on localhost; all four are re-checked per request in fsContext.mjs (localFsGate).
+  serverless_callback_url: '', // public freezr base URL a deployed serverless job calls back to
   // (e.g. https://my.freezr.me). Empty => cloud jobs without a request-derived URL can't run.
+  apiRateLimitPerUserMinute: null // max authenticated API requests per user per minute;
+  // null => built-in default (API_RATE_LIMIT.MAX_REQUESTS_PER_USER in constants.mjs)
 }
 
 

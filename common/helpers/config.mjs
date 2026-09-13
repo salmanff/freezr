@@ -107,6 +107,16 @@ export const isSystemApp = (appName) => {
   })
 }
 
+// Ask-apps (LLM-generated data pages — see freezr_askapps_plan_v1.md) live in the reserved
+// reverse-domain namespace `ask-app.`. A ask-app IS a normal app: it satisfies validAppName and
+// installs through the normal pipeline. isAskAppName is a *flag* (used to keep the app name and
+// the manifest's app_type:'askapp' consistent), NOT a validity gate. The reservation is enforced
+// where it matters, not in validAppName: the user-facing "create app" flow refuses ask-app.*
+// names, and the installer warns if the name and app_type disagree. `ask-app` can never collide
+// with a real TLD (delegated TLDs are letters-only ASCII or xn-- IDN — never an internal hyphen).
+export const ASK_APP_PREFIX = 'ask-app.'
+export const isAskAppName = (appName) => typeof appName === 'string' && appName.startsWith(ASK_APP_PREFIX)
+
 export const validAppName = (appName) => {
   if (!appName) return false
   if (appName.length < 1) return false
@@ -125,11 +135,24 @@ export const validAppName = (appName) => {
   if (appName.includes('}')) return false
   if (appName.includes('..')) return false
   if (appName.endsWith('.')) return false
-  
+
   const appSegments = appName.split('.')
   if (appSegments.length < 3) return false
-  
+
   return true
+}
+
+// Turns free text (a chat question / display name) into the middle segment of a ask-app name:
+// lowercase, alphanumerics and single hyphens only. Never empty. Callers cap the length so the
+// full `ask-app.{slug}.{suffix}` stays within MAX_USER_NAME_LEN.
+export const askAppSlug = (text) => {
+  const base = String(text || '')
+    .toLowerCase()
+    .replace(/[_\s]+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return base || 'app'
 }
 
 export const userIdIsValid = (uid) => {
@@ -362,6 +385,36 @@ export const DB_MIGRATIONS_OAC = {
   collection_name: 'db_migrations'
 }
 
+/**
+ * Socket Admissions OAC - the admin's EXPLICIT capability grants for server-held
+ * outbound sockets (Slack Socket Mode today). Registering a provider credential
+ * (e.g. the Slack app-level token on the oauth config row) deliberately does NOT
+ * enable a socket — an enabled admission row here is the second, distinct act.
+ * Row shape: { kind: 'provider'|'app', provider?, app_name?, enabled, maxSockets, notes }.
+ * See features/connections/messaging/services/socketAdmissions.mjs.
+ */
+export const SOCKET_ADMISSIONS_OAC = {
+  owner: 'fradmin',
+  app_name: 'info.freezr.admin',
+  collection_name: 'socket_admissions'
+}
+
+/**
+ * Messaging Live-Connections OAC - ONE server-wide registry of connections whose
+ * users opted into live (socket-fed) updates, mirroring SCHEDULED_JOBS_OAC's reason
+ * for existing: the socket manager must never iterate per-user datastores to
+ * discover work. One row per opted-in connection:
+ * { owner_id, connection_name, provider, team_id, provider_user_id, live }.
+ * team_id + provider_user_id are the ROUTING KEY events are matched against —
+ * an event that matches no row is counted and dropped (fail-closed).
+ * See features/connections/messaging/services/messagingRegistry.mjs.
+ */
+export const MESSAGING_LIVE_OAC = {
+  owner: 'fradmin',
+  app_name: 'info.freezr.admin',
+  collection_name: 'messaging_live_connections'
+}
+
 // Migration statuses during which a user is fully offline-locked: ALL data access to
 // that user's own data store (reads AND writes, via any app/route) is refused, so the
 // copy gets a consistent snapshot. The account app is exempted at the gate so the
@@ -391,6 +444,25 @@ export const userAppListOAC = (userId) => {
     owner: userId,
     app_name: 'info.freezr.account',
     collection_name: 'app_list'
+  }
+}
+// Chat threads for ask-apps (see freezr_askapps_plan_v1.md §5c). Owned by the creator app so it
+// can read/write freely; ask-apps append their own `user` records via a granted cross-app
+// write_own and read their thread back via write_own's read-own scoping.
+export const userAskAppChatsOAC = (userId) => {
+  return {
+    owner: userId,
+    app_name: 'info.freezr.creator',
+    collection_name: 'askAppChats'
+  }
+}
+// Per-source-app "learnings": short notes the ask-app builder accumulates about how a user phrases
+// questions about a given app's data (e.g. "best fund" usually means TVPI). Owned by the creator app.
+export const userAskLearningsOAC = (userId) => {
+  return {
+    owner: userId,
+    app_name: 'info.freezr.creator',
+    collection_name: 'askLearnings'
   }
 }
 
@@ -472,6 +544,9 @@ export default {
   // Validation functions
   isSystemApp,
   validAppName,
+  ASK_APP_PREFIX,
+  isAskAppName,
+  askAppSlug,
   userIdIsValid,
   userIdFromUserInput,
   validFilename,
@@ -496,6 +571,8 @@ export default {
   VALIDATION_TOKEN_OAC,
   userPERMS_OAC,
   userAppListOAC,
+  userAskAppChatsOAC,
+  userAskLearningsOAC,
   userContactsOAC,
   userGroupsOAC,
   SYSTEM_PERMS

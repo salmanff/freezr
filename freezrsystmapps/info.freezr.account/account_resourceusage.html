@@ -1,12 +1,13 @@
 <!--
 freezr Account Resource usage
-  resource_usage: {
+  resourceusage: {
     page_title: 'Resource Usage (freezr)',
-    css_files: ['/app/info.freezr.public/public/freezr_style.css', 'account_home.css'],
+    css_files: ['/app/info.freezr.public/public/freezr_style.css', 'account_home.css', 'account_resourceusage.css'],
     page_url: 'account_resourceusage.html',
-    script_files: ['account_resourceusage.js', '/app/info.freezr.public/public/mustache.js'],
-    initial_query_func: 'getAppResources'
+    script_files: ['account_resourceusage.js', '/app/info.freezr.public/public/mustache.js']
   }
+  No initial_query_func on purpose: the storage calculation is slow, so it is not allowed to
+  hold up the page render. Both tabs fetch their own data after the page is up.
 -->
 <div class="freezr-page">
   <nav class="freezr-nav" id="adminFunctions">
@@ -21,10 +22,36 @@ freezr Account Resource usage
     <div id="errorBox" class="errorBox"></div>
 
     <div class="freezr-card" id="resource_usage_card">
-      <h3>Storage Usage by App</h3>
-      <p id="resource_usage_intro">View the storage your apps are using on this server.</p>
-      <div id="resource_usage_user_label" style="display: none; margin-bottom: 0.5rem; font-weight: 600; color: var(--freezr-accent);"></div>
-      <div id="app_list" style="margin-top: 1rem; position: relative; min-height: 60px;"></div>
+      <div id="resource_usage_user_label" class="fz-user-label" style="display: none;"></div>
+
+      <div class="tab">
+        <button class="tablinks" id="button_tabs_llm" type="button">AI &amp; LLM Costs</button>
+        <button class="tablinks" id="button_tabs_storage" type="button">Storage</button>
+      </div>
+
+      <div id="tab_llm" class="tabcontent">
+        <h3>AI &amp; LLM Costs</h3>
+        <div class="fz-usage-toolbar">
+          <p class="fz-note" id="metered_usage_intro" style="max-width: 46rem;">
+            Tokens and estimated cost of the LLM calls your apps made with your API keys, tallied by app, key and day.
+          </p>
+          <div>
+            <label for="usage_range">Period</label>
+            <select id="usage_range">
+              <option value="30" selected>Last 30 days</option>
+              <option value="90">Last 90 days</option>
+              <option value="month">This month</option>
+            </select>
+          </div>
+        </div>
+        <div id="metered_usage" class="fz-pane-body"></div>
+      </div>
+
+      <div id="tab_storage" class="tabcontent">
+        <h3>Storage Usage by App</h3>
+        <p class="fz-note">Disk used by each app's files and database tables on this server. Click a row to see its tables.</p>
+        <div id="app_list" class="fz-pane-body"></div>
+      </div>
     </div>
 
   </div>

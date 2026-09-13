@@ -38,6 +38,23 @@ const resolveRedirectUrl = (context) => {
  * @param {Object} res - Express response object
  * @returns {Object|null} - Express response object or null if permission is given
  */
+/**
+ * True once this response has already gone out - normally because the request
+ * watchdog (middleware/requestWatchdog.mjs) gave up on a stalled route and
+ * answered 503 to free the browser connection. Writing a second time throws
+ * ERR_HTTP_HEADERS_SENT from inside an async route handler, i.e. an unhandled
+ * rejection, so the senders below bail out quietly instead.
+ */
+const alreadyAnswered = (res) => {
+  if (!res || !(res.headersSent || res.writableEnded)) return false
+  if (res.locals?.freezrTimedOut) {
+    const msg = '🛑 [WATCHDOG] route finished after the watchdog had already answered - response dropped'
+    if (res.locals?.flogger?.warn) res.locals.flogger.warn(msg)
+    else console.warn(msg)
+  }
+  return true
+}
+
 const checkPermGiven = (res) => {
   if (res.locals?.freezr?.permGiven) return null
   res.locals.flogger.error('perm Not set up - dev error');
@@ -54,6 +71,7 @@ const checkPermGiven = (res) => {
  * @param {number} statusCode - HTTP status code (default: 200)
  */
 export function sendApiSuccess(res, data = {}, statusCode = 200) {
+  if (alreadyAnswered(res)) return res
   // onsole.log('sendApiSuccess called with app_name: ', res.locals?.freezr?.tokenInfo?.app_name);
   res.locals.flogger.track('api', { app_name: res.locals?.freezr?.tokenInfo?.app_name });
   res.status(statusCode)
@@ -68,6 +86,7 @@ export function sendApiSuccess(res, data = {}, statusCode = 200) {
  * @param {number} statusCode - HTTP status code (default: 200)
  */
 export function sendContent(res, textContent = '', type) {
+  if (alreadyAnswered(res)) return res
   res.locals.flogger.track('page', { app_name: res.locals?.freezr?.tokenInfo?.app_name });
   // example of dev debug logging:
   // res.locals.flogger.debug('sendContent captured for app ', { app_name: res.locals?.freezr?.tokenInfo?.app_name });
@@ -84,6 +103,7 @@ export function sendContent(res, textContent = '', type) {
  * @param {number} statusCode - HTTP status code (default: 200)
  */
 export function sendFile(res, localPath = '', statusCode = 200) {
+  if (alreadyAnswered(res)) return res
   res.locals.flogger?.track?.('file'); // "?" needed for when freezr is not set up
   res.status(statusCode)
   return checkPermGiven(res) ||  res.sendFile(localPath)
@@ -97,6 +117,7 @@ export function sendFile(res, localPath = '', statusCode = 200) {
  * @param {number} statusCode - HTTP status code (default: 200)
  */
 export function sendStream(res, streamOrFile, statusCode = 200) {
+  if (alreadyAnswered(res)) return res
   res.locals.flogger.track('file');
   res.status(statusCode)
   return checkPermGiven(res) || res.send(streamOrFile)
@@ -112,6 +133,7 @@ export function sendStream(res, streamOrFile, statusCode = 200) {
  * @param {number} statusCode - HTTP status code (default: 200)
  */
 export function pipeStream(res, stream, statusCode = 200) {
+  if (alreadyAnswered(res)) return res
   res.locals.flogger.track('file');
   res.status(statusCode)
   return checkPermGiven(res) ||  stream.pipe(res)
@@ -138,6 +160,8 @@ export function sendFailure(res, err, context = 'unknown', statusCode = 500) {
   }
 
   res.locals.flogger.error(message, context);
+
+  if (alreadyAnswered(res)) return res
 
   if (context.redirectUrl && wantsPageResponse(context)) {
     res.redirect(resolveRedirectUrl(context))
@@ -202,7 +226,9 @@ export function sendAuthFailure(res, context = {}) {
     res.locals.authGuard.recordFailure(type)
   }
   res.locals.flogger.auth(type, { user_id, error })
-  
+
+  if (alreadyAnswered(res)) return res
+
   // Send standardized error response
   if (context.redirectUrl && wantsPageResponse(context)) {
     res.redirect(resolveRedirectUrl(context))

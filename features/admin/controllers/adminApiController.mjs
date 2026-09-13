@@ -12,17 +12,15 @@ import { escapeRegex } from '../../../common/helpers/utils.mjs'
 import { oneUserInstallationProcess } from '../../account/services/appInstallService.mjs'
 import { setUserPasswordAsAdmin, deleteAllAppTokensForUser } from '../../account/services/passwordService.mjs'
 import { removeUserFromServer } from '../../account/services/accountRemoveService.mjs'
-import { userPERMS_OAC, userAppListOAC, PUBLIC_MANIFESTS_OAC, PUBLIC_RECORDS_OAC, USER_DB_OAC, APP_TOKEN_OAC, PARAMS_OAC, TRUSTED_JOBS_OAC, SCHEDULED_JOBS_OAC } from '../../../common/helpers/config.mjs'
+import { userPERMS_OAC, userAppListOAC, PUBLIC_MANIFESTS_OAC, PUBLIC_RECORDS_OAC, USER_DB_OAC, APP_TOKEN_OAC, PARAMS_OAC, TRUSTED_JOBS_OAC, SCHEDULED_JOBS_OAC, constructAppIdStringFrom } from '../../../common/helpers/config.mjs'
 import User from '../../../common/misc/userObj.mjs'
 import { getOrSetPrefs, DEFAULT_PREFS } from '../services/adminConfigService.mjs'
 import { getConnectionStats } from '../../../adapters/datastore/dbConnectors/dbApi_mongodb.mjs'
 import { listTrustedJobs, trustJob, untrustJob } from '../../jobs/services/trustedJobService.mjs'
-import { jobCodePath } from '../../../adapters/jobs/localJobRunner.mjs'
-import { rm } from 'node:fs/promises'
-import { dirname } from 'node:path'
-import { materializeJobToCache } from '../../jobs/services/localJobCache.mjs'
+import { materializeJobToCache, removeLocalJobCache } from '../../jobs/services/localJobCache.mjs'
 import { jobCodeIdentity } from '../../jobs/services/cloudJobSource.mjs'
 import { freezrConsole, CONSOLE_CATEGORIES, bjLog } from '../../../common/debug/consoleFlags.mjs'
+import { queryTallies, summarizeTallies, resolveRange } from '../../account/services/usageTallyService.mjs'
 
 /**
  * Handle get user app resources action
@@ -31,6 +29,42 @@ import { freezrConsole, CONSOLE_CATEGORIES, bjLog } from '../../../common/debug/
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
+/**
+ * Metered-resource usage (LLM cost/token tallies) for ANY user — the admin twin of
+ * /acctapi/getUsageTallies, reached from /admin/resourceusage?user=<id>.
+ *
+ * GET /adminapi/get_usage_tallies?user=<id>&from=&to=&resource=&app_name=
+ * Reads that user's own info.freezr.account.usageTallies and rolls it up with the same
+ * shared functions the account page uses, so both pages always agree.
+ */
+const handleGetUsageTallies = async (req, res) => {
+  try {
+    const user = req.query?.user
+    if (!user || typeof user !== 'string') {
+      return sendFailure(res, 'User parameter is required', 'handleGetUsageTallies', 400)
+    }
+
+    const dsManager = res.locals.freezr?.dsManager
+    const freezrPrefs = res.locals.freezr?.freezrPrefs
+    if (!dsManager || !freezrPrefs) {
+      return sendFailure(res, 'dsManager or freezrPrefs not available', 'handleGetUsageTallies', 500)
+    }
+
+    const { from, to } = resolveRange({ from: req.query?.from, to: req.query?.to, days: req.query?.days })
+    const resource = (typeof req.query?.resource === 'string' && req.query.resource) ? req.query.resource : 'llm'
+    const appName = (typeof req.query?.app_name === 'string' && req.query.app_name) ? req.query.app_name : null
+
+    const userDS = await dsManager.getOrSetUserDS(user, { freezrPrefs })
+    const tallyDb = await userDS.getorInitDb('info.freezr.account.usageTallies')
+    const rows = await queryTallies(tallyDb, { resource, from, to, appName })
+
+    return sendApiSuccess(res, { rows, summary: summarizeTallies(rows), from, to, resource, user })
+  } catch (error) {
+    console.error('❌ Error in handleGetUsageTallies:', error)
+    return sendFailure(res, error, 'handleGetUsageTallies', 500)
+  }
+}
+
 const handleGetUserAppResources = async (req, res) => {
   try {
     const user = req.query?.user
@@ -674,6 +708,17 @@ const handleChangeMainPrefs = async (req, res) => {
     if (newPrefs.public_landing_app) {
       newPrefs.public_landing_app = newPrefs.public_landing_app.trim()
     }
+
+    // Validate API rate limit (blank/null => built-in default)
+    if (newPrefs.apiRateLimitPerUserMinute !== null && newPrefs.apiRateLimitPerUserMinute !== undefined) {
+      const rateLimit = parseInt(newPrefs.apiRateLimitPerUserMinute, 10)
+      if (isNaN(rateLimit) || rateLimit < 30) {
+        return sendFailure(res, 'API rate limit must be a number of at least 30 requests per minute, or left blank for the default', 'handleChangeMainPrefs', 400)
+      }
+      newPrefs.apiRateLimitPerUserMinute = rateLimit
+    } else {
+      newPrefs.apiRateLimitPerUserMinute = null
+    }
     
     // 5. Save preferences to database
     const paramsDb = fradminDS.getDB(PARAMS_OAC)
@@ -698,7 +743,8 @@ const handleChangeMainPrefs = async (req, res) => {
     }
     
     // 7. Update response locals with new preferences
-    newPrefs.freezrVersion = newPrefs.freezrVersion
+    // carry over the running version — newPrefs was rebuilt from DEFAULT_PREFS keys, which exclude it
+    newPrefs.freezrVersion = currentPrefs.freezrVersion
     
     // Clear existing properties and copy new ones (mutate in place)
 
@@ -960,6 +1006,23 @@ const handleTrustJob = async (req, res) => {
     const codeId = await jobCodeIdentity(appFS, jobName)
     const trustedJobsDb = await dsManager.getorInitDb(TRUSTED_JOBS_OAC, { freezrPrefs })
     const rec = await trustJob(trustedJobsDb, { appName, jobName, audience, installedBy: adminId, codeId })
+
+    // The "code changed → re-trust" warning was persisted on the admin's app-list record at
+    // regenerate time and the Settings page re-renders it from there — re-trusting is what
+    // resolves it, so clear it here or it lingers until the next regenerate. Best effort.
+    try {
+      const appListDb = await dsManager.getorInitDb(userAppListOAC(adminId), { freezrPrefs })
+      const appNameId = constructAppIdStringFrom(adminId, appName)
+      const appEntity = await appListDb.read_by_id(appNameId)
+      if (appEntity && Array.isArray(appEntity.warnings)) {
+        const kept = appEntity.warnings.filter(w =>
+          !(w && w.code === 'trusted_job_code_changed' && typeof w.message === 'string' && w.message.includes('"' + jobName + '"')))
+        if (kept.length !== appEntity.warnings.length) {
+          await appListDb.update(appNameId, { warnings: kept }, { replaceAllFields: false })
+        }
+      }
+    } catch (e) { bjLog('🔎 TMPJOBLOG ⚠️ could not clear code-changed warning for ' + appName + '/' + jobName + ': ' + (e && e.message)) }
+
     bjLog('🔎 TMPJOBLOG 🔒 trusted ' + appName + '/' + jobName + ' (' + (usedZip ? 'full folder' : 'index.mjs only') + ', ' + filesWritten + ' file(s)) audience=' + rec.audience + ' codeId=' + (codeId ? codeId.slice(0, 8) : 'n/a'))
     return sendApiSuccess(res, { trusted: true, app_name: appName, job_name: jobName, audience: rec.audience, files: filesWritten, withDeps: usedZip })
   } catch (error) {
@@ -983,7 +1046,7 @@ const handleUntrustJob = async (req, res) => {
 
     const trustedJobsDb = await dsManager.getorInitDb(TRUSTED_JOBS_OAC, { freezrPrefs })
     await untrustJob(trustedJobsDb, appName, jobName)
-    try { await rm(dirname(jobCodePath(appName, jobName)), { recursive: true, force: true }) } catch (e) { /* best effort */ }
+    try { await removeLocalJobCache(appName, jobName) } catch (e) { /* best effort */ }
     return sendApiSuccess(res, { untrusted: true, app_name: appName, job_name: jobName })
   } catch (error) {
     console.error('❌ Error in handleUntrustJob:', error)
@@ -1004,22 +1067,41 @@ const handleListScheduledJobs = async (req, res) => {
     if (!dsManager || !freezrPrefs) return sendFailure(res, 'dsManager or freezrPrefs not available', 'handleListScheduledJobs', 500)
     const db = await dsManager.getorInitDb(SCHEDULED_JOBS_OAC, { freezrPrefs })
     const rows = (await db.query({}, {})) || []
+    // Join the trust registry: a schedule row can look perfectly healthy ("waiting" / "not yet
+    // run") while the job's trust was auto-revoked (e.g. disabled_reason 'code_changed' after an
+    // app re-install) — in which case every local run is silently refused. The page must say so,
+    // or the admin stares at a live-looking schedule that never actually runs.
+    const trustedJobsDb = await dsManager.getorInitDb(TRUSTED_JOBS_OAC, { freezrPrefs })
+    const trustRows = (await listTrustedJobs(trustedJobsDb)) || []
+    const trustOf = (app, job) => trustRows.find(t => t.app_name === app && t.job_name === job) || null
     const now = Date.now()
-    const jobs = rows.map(r => ({
-      user: r.owner_id,
-      app: r.app_name,
-      job: r.job_name,
-      schedule: r.schedule,
-      enabled: r.enabled !== false,
-      last_status: r.last_status || null,
-      last_error: r.last_error || null,
-      consecutive_failures: r.consecutive_failures || 0,
-      maxRuntime: r.maxRuntime || null,
-      next_run_at: r.next_run_at || null,
-      next_run_iso: r.next_run_at ? new Date(r.next_run_at).toISOString() : null,
-      due_in_seconds: (typeof r.next_run_at === 'number') ? Math.round((r.next_run_at - now) / 1000) : null,
-      last_run_iso: r.last_run_at ? new Date(r.last_run_at).toISOString() : null
-    })).sort((a, b) => (a.next_run_at || 0) - (b.next_run_at || 0))
+    const jobs = rows.map(r => {
+      const trust = trustOf(r.app_name, r.job_name)
+      return {
+        user: r.owner_id,
+        app: r.app_name,
+        job: r.job_name,
+        schedule: r.schedule,
+        enabled: r.enabled !== false,
+        last_status: r.last_status || null,
+        last_error: r.last_error || null,
+        consecutive_failures: r.consecutive_failures || 0,
+        maxRuntime: r.maxRuntime || null,
+        next_run_at: r.next_run_at || null,
+        next_run_iso: r.next_run_at ? new Date(r.next_run_at).toISOString() : null,
+        due_in_seconds: (typeof r.next_run_at === 'number') ? Math.round((r.next_run_at - now) / 1000) : null,
+        last_run_iso: r.last_run_at ? new Date(r.last_run_at).toISOString() : null,
+        // trust state (the local-run gate; a user with their own compute credential can still
+        // run on cloud, so untrusted ≠ guaranteed-dead — but it IS the common silent killer):
+        //   trusted: true                        — admin-trusted, local runs allowed
+        //   trusted: false + trust_disabled_reason — trust record exists but was disabled
+        //                                          (e.g. 'code_changed' after a re-install)
+        //   trusted: false + never_trusted: true — no trust record at all
+        trusted: !!(trust && trust.trusted),
+        trust_disabled_reason: (trust && !trust.trusted && (trust.disabled_reason || 'disabled')) || null,
+        never_trusted: !trust
+      }
+    }).sort((a, b) => (a.next_run_at || 0) - (b.next_run_at || 0))
     return sendApiSuccess(res, { scheduler_disabled: !!freezrPrefs.scheduler_disabled, now, jobs })
   } catch (error) {
     console.error('❌ Error in handleListScheduledJobs:', error)
@@ -1046,6 +1128,134 @@ const handleRunSchedulerNow = async (req, res) => {
   }
 }
 
+// ============================================================
+// Messaging sockets (live updates) — admin controls
+// The manager is a module singleton (it must survive across requests);
+// handlers pass the request's dsManager/freezrPrefs, used only on first create.
+// ============================================================
+
+const getSocketManagerCtx = (res) => ({
+  dsManager: res.locals.freezr?.dsManager,
+  freezrPrefs: res.locals.freezr?.freezrPrefs,
+  logManager: res.locals.freezr?.logManager
+})
+
+/**
+ * GET /adminapi/get_socket_status — the admin "probe view": manager state,
+ * per-socket stats (events by channel type, reconnects — the host-stability
+ * signal), routing/unrouted counters. Tokens are never returned (redacted hint only).
+ */
+const handleGetSocketStatus = async (req, res) => {
+  try {
+    const { getOrCreateSocketManager } = await import('../../connections/messaging/services/socketManager.mjs')
+    const mgr = getOrCreateSocketManager(getSocketManagerCtx(res))
+    const { listAdmissions } = await import('../../connections/messaging/services/socketAdmissions.mjs')
+    const admissions = await listAdmissions(getSocketManagerCtx(res))
+    return sendApiSuccess(res, { status: mgr.getStats(), admissions, now: Date.now() })
+  } catch (error) {
+    console.error('❌ Error in handleGetSocketStatus:', error)
+    return sendFailure(res, error, 'handleGetSocketStatus', 500)
+  }
+}
+
+const handleListSocketAdmissions = async (req, res) => {
+  try {
+    const { listAdmissions } = await import('../../connections/messaging/services/socketAdmissions.mjs')
+    const admissions = await listAdmissions(getSocketManagerCtx(res))
+    return sendApiSuccess(res, { admissions })
+  } catch (error) {
+    console.error('❌ Error in handleListSocketAdmissions:', error)
+    return sendFailure(res, error, 'handleListSocketAdmissions', 500)
+  }
+}
+
+/**
+ * POST /adminapi/set_socket_admission  body: { provider, enabled, maxSockets, notes }
+ * The EXPLICIT capability grant (Tier 1) — distinct from registering the
+ * provider credential on the oauth config page.
+ */
+const handleSetSocketAdmission = async (req, res) => {
+  try {
+    const { setProviderAdmission } = await import('../../connections/messaging/services/socketAdmissions.mjs')
+    const row = await setProviderAdmission({
+      ...getSocketManagerCtx(res),
+      provider: req.body?.provider,
+      enabled: req.body?.enabled === true,
+      maxSockets: Number(req.body?.maxSockets),
+      notes: req.body?.notes
+    })
+    return sendApiSuccess(res, { admission: row })
+  } catch (error) {
+    if (error?.code === 'unknown_provider') return sendFailure(res, error.message, 'handleSetSocketAdmission', 400)
+    console.error('❌ Error in handleSetSocketAdmission:', error)
+    return sendFailure(res, error, 'handleSetSocketAdmission', 500)
+  }
+}
+
+/**
+ * POST /adminapi/sockets_start / sockets_stop — phase-1 manual lifecycle.
+ * start() re-checks all three gates itself (prefs, admission, credential) and
+ * reports a distinct reason for whichever is missing.
+ */
+const handleSocketsStart = async (req, res) => {
+  try {
+    const { getOrCreateSocketManager } = await import('../../connections/messaging/services/socketManager.mjs')
+    const out = await getOrCreateSocketManager(getSocketManagerCtx(res)).start()
+    return sendApiSuccess(res, out)
+  } catch (error) {
+    console.error('❌ Error in handleSocketsStart:', error)
+    return sendFailure(res, error, 'handleSocketsStart', 500)
+  }
+}
+
+const handleSocketsStop = async (req, res) => {
+  try {
+    const { getOrCreateSocketManager } = await import('../../connections/messaging/services/socketManager.mjs')
+    const out = await getOrCreateSocketManager(getSocketManagerCtx(res)).stop()
+    return sendApiSuccess(res, out)
+  } catch (error) {
+    console.error('❌ Error in handleSocketsStop:', error)
+    return sendFailure(res, error, 'handleSocketsStop', 500)
+  }
+}
+
+// Transport diagnostic for streamed (SSE) responses — GET /adminapi/sse_stream_test?secs=300&pad=true
+// Reproduces the quiet windows of a long /feps/llm/ask call (prompt prefill, model reasoning)
+// WITHOUT paying a provider: it emits one small tick event every 15s over `secs` seconds of
+// deliberate silence, padded past the ~4KB buffer of front-end proxies (Azure App Service kills
+// idle connections at ~230s; Azure LB at 4 min — and both can hold small chunks in a buffer so
+// tiny heartbeats never reset their idle timers). Run from an admin page console via the
+// freezrSseStreamTest global (consolelogs.js): a padded run that survives while a pad=false run
+// dies at ~230s proves the buffering diagnosis on the host.
+const handleSseStreamTest = async (req, res) => {
+  const secs = Math.min(parseInt(req.query.secs, 10) || 300, 900)
+  const pad = !(req.query.pad === 'false' || req.query.pad === '0')
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('X-Accel-Buffering', 'no')
+  res.flushHeaders()
+  const PAD_LINE = ': ' + '.'.repeat(4096) + '\n\n'
+  if (pad) res.write(PAD_LINE)
+  const TICK_MS = 15000
+  const startedAt = Date.now()
+  let ticks = 0
+  let closed = false
+  res.on('close', () => { closed = true })
+  const timer = setInterval(() => {
+    if (closed || res.writableEnded) return clearInterval(timer)
+    const elapsedMs = Date.now() - startedAt
+    if (elapsedMs >= secs * 1000) {
+      clearInterval(timer)
+      res.write('data: ' + JSON.stringify({ type: 'done', ticks, elapsedMs, padded: pad }) + '\n\n')
+      return res.end()
+    }
+    ticks++
+    res.write('data: ' + JSON.stringify({ type: 'tick', n: ticks, elapsedMs }) + '\n\n')
+    if (pad) res.write(PAD_LINE)
+  }, TICK_MS)
+  if (timer.unref) timer.unref()
+}
+
 const handleAdminAction = async (req, res) => {
   try {
     const action = req.params.action
@@ -1069,6 +1279,8 @@ const handleAdminAction = async (req, res) => {
     switch (action) {
       case 'getuserappresources':
         return await handleGetUserAppResources(req, res)
+      case 'get_usage_tallies':
+        return await handleGetUsageTallies(req, res)
       case 'list_users':
         return await handleListUsers(req, res)
       case 'install_app_for_users':
@@ -1107,6 +1319,18 @@ const handleAdminAction = async (req, res) => {
         return await handleListScheduledJobs(req, res)
       case 'run_scheduler_now':
         return await handleRunSchedulerNow(req, res)
+      case 'get_socket_status':
+        return await handleGetSocketStatus(req, res)
+      case 'list_socket_admissions':
+        return await handleListSocketAdmissions(req, res)
+      case 'set_socket_admission':
+        return await handleSetSocketAdmission(req, res)
+      case 'sockets_start':
+        return await handleSocketsStart(req, res)
+      case 'sockets_stop':
+        return await handleSocketsStop(req, res)
+      case 'sse_stream_test':
+        return await handleSseStreamTest(req, res)
       default:
         return sendFailure(res, `Unknown action: ${action}`, 'handleAdminAction', 404)
     }

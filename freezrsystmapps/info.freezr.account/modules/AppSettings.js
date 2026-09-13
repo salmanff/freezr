@@ -251,9 +251,16 @@ const createPermissionsDiv = function (outerPermissions, currentAppName) {
     return dg.div('This App is not asking for any permissions.')
   }
 }
-const CAPABILITY_TYPES = ['external_scripts', 'external_fetch', 'unsafe_eval', 'use_serverless', 'use_llm', 'use_mail', 'use_3pFunction', 'auto_update_local_3pFunction', 'allow_self_frames', 'run_job', 'schedule_job']
+const CAPABILITY_TYPES = ['external_scripts', 'external_fetch', 'unsafe_eval', 'use_serverless', 'use_llm', 'use_mail', 'use_messaging', 'use_file_sys', 'socket_connect', 'use_3pFunction', 'auto_update_local_3pFunction', 'allow_self_frames', 'run_job', 'schedule_job']
 // Job permissions show a "where should this run?" location picker on grant (like use_mail's scopes).
 const JOB_PERM_TYPES = ['run_job', 'schedule_job']
+// Connection-scoped perm types that get the inline connection picker, mapped to
+// the connection services[] entry they cover and the noun shown in the UI.
+const CONNECTION_PICKER_TYPES = {
+  use_mail: { service: 'mail', noun: 'mail accounts' },
+  use_messaging: { service: 'messaging', noun: 'messaging accounts' },
+  use_file_sys: { service: 'fs', noun: 'file stores' }
+}
 const RESOURCES_TABLE = 'info.freezr.account.resources'
 function groupPermissions (permList, appName) {
   const groupedPermissions = {
@@ -358,21 +365,45 @@ const getPermSentence = function (aPerm, currentAppName) {
     sentence += 'use your <b>AI / LLM API keys</b> to make requests to AI services.'
     risk = 'This uses your API quota and may incur costs. The app can send prompts using your credentials.'
 
-  } else if (aPerm.type === 'use_mail') {
+  } else if (aPerm.type === 'use_mail' || aPerm.type === 'use_messaging') {
     // Describe scope based on whatever the manifest declared (or the user has narrowed via the picker).
-    // connection_names: missing / empty / ['*'] all mean "all the user's mail-enabled connections".
+    // connection_names: missing / empty / ['*'] all mean "all the user's <service>-enabled connections".
+    const noun = CONNECTION_PICKER_TYPES[aPerm.type].noun
     const connNames = aPerm.connection_names || []
     const all = connNames.length === 0 || connNames.includes('*')
     const scopes = aPerm.scopes || ['read']
     const canWrite = scopes.includes('write')
     const accessText = canWrite ? '<b>read and write</b>' : '<b>read</b>'
     const targetText = all
-      ? '<b>all your connected mail accounts</b>'
-      : ('the following mail accounts: <b>' + connNames.join(', ') + '</b>')
+      ? ('<b>all your connected ' + noun + '</b>')
+      : ('the following ' + noun + ': <b>' + connNames.join(', ') + '</b>')
     sentence += accessText + ' messages from ' + targetText + '.'
     if (canWrite) {
-      risk = 'The app will be able to modify and send mail using your credentials.'
+      risk = aPerm.type === 'use_messaging'
+        ? 'The app will be able to send messages and mark them read using your credentials.'
+        : 'The app will be able to modify and send mail using your credentials.'
     }
+
+  } else if (aPerm.type === 'use_file_sys') {
+    const connNames = aPerm.connection_names || []
+    const all = connNames.length === 0 || connNames.includes('*')
+    const scopes = aPerm.scopes || ['read']
+    const canWrite = scopes.includes('write')
+    const accessText = canWrite ? 'browse, <b>read and write</b>' : 'browse and <b>read</b>'
+    const targetText = all
+      ? '<b>all your connected file stores</b>'
+      : ('the following file stores: <b>' + connNames.join(', ') + '</b>')
+    sentence += accessText + ' files on ' + targetText + '.'
+    risk = 'The app can see every file inside the granted store(s), including their names and contents' +
+      (canWrite ? ', and can create, overwrite and delete files there' : '') +
+      '. Only grant this if you trust the app with everything in those folders.'
+
+  } else if (aPerm.type === 'socket_connect') {
+    const domains = aPerm.domains || []
+    sentence += 'have the server hold a <b>persistent live connection</b> to ' +
+      (domains.length ? ('<b>' + domains.join(', ') + '</b>') : 'an external service') +
+      ' on your behalf, delivering its data to this app.'
+    risk = 'The connection runs even when you are offline. It also requires this server\'s admin to explicitly admit it — granting alone does not activate it.'
 
   } else if (aPerm.type === 'run_job') {
     const jn = aPerm.job_name || aPerm.name
@@ -433,12 +464,12 @@ const makePermissionElementFrom = function (permissionObject, currentAppName, me
     }
   )
 
-  // For use_mail, an inline picker lets the user narrow which mail accounts and the
-  // access level before clicking Accept. The picker reads existing values from the
-  // permission record and seeds the controls; changePermission below reads back the
-  // current control state at submit time.
-  const extraControls = permissionObject.type === 'use_mail'
-    ? buildUseMailPicker(permissionObject)
+  // For connection-scoped perms (use_mail / use_messaging), an inline picker lets the
+  // user narrow which accounts and the access level before clicking Accept. The picker
+  // reads existing values from the permission record and seeds the controls;
+  // changePermission below reads back the current control state at submit time.
+  const extraControls = CONNECTION_PICKER_TYPES[permissionObject.type]
+    ? buildConnectionPicker(permissionObject, currentAppName)
     : (JOB_PERM_TYPES.includes(permissionObject.type) ? buildLocationPicker(permissionObject) : null)
 
   // On a granted job permission, let the user change where it runs: when the location dropdown
@@ -468,36 +499,39 @@ const makePermissionElementFrom = function (permissionObject, currentAppName, me
   )
 }
 
-// Inline picker shown on use_mail permission rows. Renders synchronously with a
-// "Loading…" placeholder, then async-fills with the user's mail-enabled connections.
-// User selections are read back by changePermission() at submit time via stable DOM ids.
+// Inline picker shown on connection-scoped permission rows (use_mail / use_messaging).
+// Renders synchronously with a "Loading…" placeholder, then async-fills with the
+// user's connections that carry the matching services[] entry. User selections are
+// read back by changePermission() at submit time via stable DOM ids.
 //
 // Per the doc spec we query all the user's resources and filter in JS, rather than
 // passing a complex query to the server.
-const buildUseMailPicker = function (permissionObject) {
+const buildConnectionPicker = function (permissionObject, currentAppName) {
+  const { service, noun } = CONNECTION_PICKER_TYPES[permissionObject.type]
   const safeName = (permissionObject.name || 'unnamed').replace(/[^A-Za-z0-9_-]/g, '_')
   const containerId = 'pickerFor_' + safeName
   const allId = 'pickerAll_' + safeName
   const indClass = 'pickerConn_' + safeName
   const scopeName = 'pickerScope_' + safeName
+  const statusId = 'pickerStatus_' + safeName
 
   const container = dg.div({
     id: containerId,
     'data-perm-name': permissionObject.name,
-    'data-perm-type': 'use_mail',
+    'data-perm-type': permissionObject.type,
     style: { border: '1px solid #e2e8f0', padding: '0.75rem', margin: '0.5rem 0', 'border-radius': '4px', 'background-color': '#f8fafc' }
   })
-  container.innerHTML = '<em style="color:#64748b;">Loading mail accounts…</em>'
+  container.innerHTML = '<em style="color:#64748b;">Loading ' + noun + '…</em>'
 
   ;(async () => {
     let resources = []
     try {
       resources = await freezr.query(RESOURCES_TABLE) || []
     } catch (e) {
-      console.warn('Could not load mail connections for picker:', e)
+      console.warn('Could not load connections for picker:', e)
     }
-    const mailConnections = resources.filter(r =>
-      r && r.type === 'connection' && Array.isArray(r.services) && r.services.includes('mail')
+    const matchingConnections = resources.filter(r =>
+      r && r.type === 'connection' && Array.isArray(r.services) && r.services.includes(service)
     )
 
     const existingNames = permissionObject.connection_names || []
@@ -515,12 +549,12 @@ const buildUseMailPicker = function (permissionObject) {
     html += '</div>'
 
     html += '<div style="margin-bottom:0.5rem;">'
-    html += `<label><input type="checkbox" id="${allId}" ${allByDefault ? 'checked' : ''}/> <b>Include all</b> mail accounts (current and future)</label>`
+    html += `<label><input type="checkbox" id="${allId}" ${allByDefault ? 'checked' : ''}/> <b>Include all</b> ${noun} (current and future)</label>`
     html += '</div>'
 
-    if (mailConnections.length > 0) {
+    if (matchingConnections.length > 0) {
       html += '<div style="margin-left:1.5rem;font-size:0.9em;">'
-      for (const c of mailConnections) {
+      for (const c of matchingConnections) {
         const cn = c.connectionName || ''
         const labelExtra = c.account_email || c.provider || ''
         const checked = allByDefault || existingNames.includes(cn)
@@ -528,31 +562,80 @@ const buildUseMailPicker = function (permissionObject) {
       }
       html += '</div>'
     } else {
-      html += '<div style="margin-left:1.5rem;font-size:0.85em;color:#64748b;"><em>No mail accounts connected yet. <a href="/account/resources">Connect one</a> first to grant access to specific accounts. Granting now means &quot;all future mail accounts&quot;.</em></div>'
+      html += '<div style="margin-left:1.5rem;font-size:0.85em;color:#64748b;"><em>No ' + noun + ' connected yet. <a href="/account/resources">Connect one</a> first to grant access to specific accounts. Granting now means &quot;all future ' + noun + '&quot;.</em></div>'
     }
+
+    html += `<div id="${statusId}" style="margin-top:0.5rem;font-size:0.85em;"></div>`
 
     container.innerHTML = html
 
-    // When "Include all" is checked, individual checkboxes are forced on + disabled.
     const allCb = container.querySelector('#' + allId)
     const indCbs = container.querySelectorAll('.' + indClass)
-    const syncIndividualState = () => {
-      const disable = !!allCb && allCb.checked
-      indCbs.forEach(cb => {
-        cb.disabled = disable
-        if (disable) cb.checked = true
-      })
+    const statusEl = container.querySelector('#' + statusId)
+
+    // On an already-granted permission, any picker change is applied to the server
+    // immediately (a re-Accept carrying the new scoping) — no need to press the button
+    // again. On a not-yet-granted permission the picker just holds state until Accept.
+    let applySeq = 0 // last-write-wins guard for rapid clicking
+    const applyImmediately = async () => {
+      if (!permissionObject.granted || permissionObject.outDated) return
+      if (freezrMeta.appName !== 'info.freezr.account') return
+      const state = readConnectionPickerState(permissionObject)
+      if (!state) return
+      if (state.connection_names.length === 0) {
+        if (statusEl) statusEl.innerHTML = '<span style="color:#c62828;">Select at least one account (or &quot;Include all&quot;) — or press Deny to revoke access entirely.</span>'
+        return
+      }
+      const seq = ++applySeq
+      if (statusEl) statusEl.innerHTML = '<span style="color:#64748b;">Saving…</span>'
+      try {
+        await freezr.apiRequest('PUT', '/feps/permissions/change', {
+          change: {
+            requestor_app: permissionObject.requestor_app,
+            table_id: permissionObject.table_id,
+            action: ACCEPT,
+            name: permissionObject.name,
+            connection_names: state.connection_names,
+            scopes: state.scopes
+          },
+          targetApp: currentAppName
+        })
+        permissionObject.connection_names = state.connection_names
+        permissionObject.scopes = state.scopes
+        if (statusEl && seq === applySeq) statusEl.innerHTML = '<span style="color:#2e7d32;">Saved.</span>'
+      } catch (e) {
+        console.warn('Could not update mail permission scoping:', e)
+        if (statusEl && seq === applySeq) statusEl.innerHTML = '<span style="color:#c62828;">Could not save the change — please try again.</span>'
+      }
     }
-    if (allCb) allCb.addEventListener('change', syncIndividualState)
-    syncIndividualState()
+
+    // "Include all" checks every individual box (they stay clickable). Unchecking an
+    // individual box while "Include all" is on switches to an explicit list: "Include
+    // all" turns off, the clicked account is excluded, the others stay selected.
+    if (allCb) {
+      allCb.addEventListener('change', () => {
+        if (allCb.checked) indCbs.forEach(cb => { cb.checked = true })
+        applyImmediately()
+      })
+      if (allCb.checked) indCbs.forEach(cb => { cb.checked = true })
+    }
+    indCbs.forEach(cb => {
+      cb.addEventListener('change', () => {
+        if (allCb && allCb.checked && !cb.checked) allCb.checked = false
+        applyImmediately()
+      })
+    })
+    container.querySelectorAll('input[name="' + scopeName + '"]').forEach(radio => {
+      radio.addEventListener('change', applyImmediately)
+    })
   })()
 
   return container
 }
 
-// Read the current state of the use_mail picker for a given permission record.
+// Read the current state of the connection picker for a given permission record.
 // Returns { connection_names, scopes } or null if no picker is present.
-const readUseMailPickerState = function (permissionObject) {
+const readConnectionPickerState = function (permissionObject) {
   const safeName = (permissionObject.name || 'unnamed').replace(/[^A-Za-z0-9_-]/g, '_')
   const picker = document.getElementById('pickerFor_' + safeName)
   if (!picker) return null
@@ -624,15 +707,21 @@ const changePermission = async function (evt, permissionObject, currentAppName, 
       name: permissionObject.name
     }
 
-    // For use_mail: include the user's picker selections only on Accept actions.
-    // On Deny we don't carry connection_names/scopes — the server flips granted=false
-    // and the existing scoping fields stay on the record (so they're still there if
-    // the user later re-accepts).
-    if (permissionObject.type === 'use_mail' && action === ACCEPT) {
-      const pickerState = readUseMailPickerState(permissionObject)
-      if (pickerState) {
-        change.connection_names = pickerState.connection_names
-        change.scopes = pickerState.scopes
+    // For connection-scoped perms (use_mail / use_messaging): include the user's picker
+    // selections only on Accept actions. On Deny we don't carry connection_names/scopes —
+    // the server flips granted=false and the existing scoping fields stay on the record
+    // (so they're still there if the user later re-accepts).
+    let mailPickerState = null
+    if (CONNECTION_PICKER_TYPES[permissionObject.type] && action === ACCEPT) {
+      mailPickerState = readConnectionPickerState(permissionObject)
+      if (mailPickerState) {
+        if (mailPickerState.connection_names.length === 0) {
+          const err = new Error('no accounts selected')
+          err.userMessage = 'Select at least one account (or "Include all") before accepting.'
+          return callback(err, null, permissionObject, currentAppName, evt, {})
+        }
+        change.connection_names = mailPickerState.connection_names
+        change.scopes = mailPickerState.scopes
       }
     }
 
@@ -643,7 +732,7 @@ const changePermission = async function (evt, permissionObject, currentAppName, 
     const data = { change, targetApp: currentAppName }
 
     const returnJson = await freezr.apiRequest('PUT', url, data)
-    callback(null, returnJson, permissionObject, currentAppName, evt, { action, location: (isJob ? pickerLoc : undefined) })
+    callback(null, returnJson, permissionObject, currentAppName, evt, { action, location: (isJob ? pickerLoc : undefined), mailPickerState })
   } catch (error) {
     callback(error, null, permissionObject, currentAppName, evt, {})
   }
@@ -654,7 +743,7 @@ const changePermissionCallBack = function (error, returnJson, permissionObject, 
   let message = ''
   if (error) {
     console.warn(error)
-    message = 'There was an error changing this permission.'
+    message = error.userMessage || 'There was an error changing this permission.'
   } else {
     // Set granted from the action that was performed (not a blind toggle), so a re-Accept that only
     // updates the location keeps the permission granted instead of flipping it off.
@@ -668,6 +757,12 @@ const changePermissionCallBack = function (error, returnJson, permissionObject, 
       // Persist the chosen location onto the object so the re-render seeds the picker with the value we
       // just saved on the server — otherwise the dropdown snaps back to "Automatic" after accepting.
       if (info.location) permissionObject.location = info.location
+      // Same for the use_mail picker: without this, the re-rendered picker seeds from the stale
+      // record and snaps back to "all accounts checked" even though the server saved a subset.
+      if (info.mailPickerState) {
+        permissionObject.connection_names = info.mailPickerState.connection_names
+        permissionObject.scopes = info.mailPickerState.scopes
+      }
       message = (wasGranted && info.location) ? 'Updated where this job runs.' : 'You have granted this permission'
     }
   }

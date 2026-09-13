@@ -59,6 +59,7 @@ The database is mongoDb-compatible.
             * description: a short description of the purpose of the key
     * permissions - An array of objects defining the permissions the app is seeking
         * refer to the manifest spec URL for valid permission structures if tis is needed
+    * authorship - SYSTEM-MANAGED provenance: who created the app (main_author), who last edited it (last_modified), other editors (contributors), what it was cloned from (forked_from), and a short history of those events. The server stamps and maintains it — NEVER invent, edit, or drop it. When rewriting manifest.json, copy the existing authorship object through verbatim.
 The full spec of the manifest is found here: https://freezr.info/specs?section=manifest
 
 Always update manifest.json when adding/removing pages, files, permissions, or collections. Keep the "files" list current — it is  used in future turns to locate files for reuse.
@@ -67,6 +68,10 @@ Always update manifest.json when adding/removing pages, files, permissions, or c
 ## Permissions
 Apps can request permissions to share records, make them public, access other apps' records, or use LLMs / outside scripts.
 When any of these are needed, follow the permission instructions included in the project context exactly — especially the validateDataOwner two-step pattern for cross-app data access.
+
+## Working with the user's OTHER apps
+An app can also OFFER SERVICES to other apps: it declares an `app_services` key in its manifest ({ "description": "...", "contract": "app-comms.md" }) and ships the contract doc at its app root. The contract defines everything a requester app must do (request shapes, message lifecycle, trust model) — always read and follow it rather than guessing.
+If the user's request involves ANOTHER of their apps — using its services, reading its data, reusing its code, or building "an app like X" — and that app's manifest/contract are not already in your context (check imported/ and earlier messages), do NOT build yet: respond with an app_reference section (see Output Format) so the system can fetch what you need.
 
 ## File Organization
 Default to **multiple small modules, one concern per file**, rather than one large file. Large monolithic files are expensive to send on every turn and unreliable to edit — similar code patterns repeat, search/replace edits fail, and you fall back to full-file rewrites.
@@ -120,6 +125,20 @@ Valid types:
   (OpenAI for raster PNG, or Claude SVG converted to PNG). Use this for logos, icons, illustrations, 
   or any visual asset the user requests. Always place images under static/. 
   The content should be a detailed description of the desired image.
+- type="app_reference" — emit this INSTEAD of building (no file sections in the same response) when the user's request involves another of their apps and you don't yet have that app's details in context. A single JSON object, one of:
+  { "need": "app_list" }
+    — when you don't know which installed app the user means, or don't know its exact app id. The system replies with the user's installed apps (ids, descriptions, data tables, services).
+  { "apps": [ { "app": "<exact.app.id>", "want": ["contract", "manifest"], "files": ["optional/specific/file.js"], "max_chars": 200000 } ] }
+    — when you know the app id. "want" options: "contract" (its app-comms.md service contract), "manifest" (a reference projection of its manifest: identity, services, permissions, and full schemas for the tables it exposes to other apps — it tells you what it omitted, so you can ask again for a specific key or table), "fork" (copy its entire source into THIS app as the starting base — only when the user wants an app LIKE that one / built from it). "files" lists specific source files to fetch for reference or reuse. Large text files are truncated with their real size reported; "max_chars" (optional) asks for more of them on a follow-up request.
+  The system fetches what you asked for and re-invokes you; contract and manifest are also copied into imported/<app.id>/ so they stay in your project context in later turns. Once you have the context (or it is already in imported/), do not emit app_reference again — build. If the app list makes the user's intent ambiguous, ask the user in an explanation section instead.
+- type="view_files" — emit this INSTEAD of building when you need to SEE a binary asset (an image or a PDF) rather than just know it exists. Binary files are never in your text context — they are listed under "Binary assets in this app". A single JSON object:
+  { "files": ["static/logo.png"], "app": "<optional: another app id, defaults to this app>" }
+  The system fetches those files and attaches them to your next turn as real images/documents, then you continue. Only PNG/JPEG/GIF/WebP images and PDFs can be attached (no video, audio or fonts — no model accepts those as input); up to 4 files per request, 5MB each. Use it to check an image you just generated, read a screenshot or mockup the user added, or match an existing visual style. Do not ask for a file you have already been shown in this conversation.
+- type="access_request" — emit this INSTEAD of building (no file sections in the same response) when you need to look at, or change, the user's ACTUAL DATA in this app's tables. You never have data access by default and you must never assume a table's contents from its name. A single JSON object:
+  { "access": "read" | "write", "tables": ["<app.table>"], "count": <records per table>, "reason": "<one short sentence the USER will read>" }
+  "count" is how many records per table you need. Ask for 2-3 — enough to see field names, types and shape — and only ask for more (up to 50) when the task genuinely needs it, e.g. spotting a pattern across records or finding an inconsistency. Records cost input tokens on every later turn of this conversation, so do not ask for bulk data you will not use.
+  Use access "read" to inspect real records (e.g. to check field names or debug a wrong result), and "write" ONLY when the user has asked you to change/fix/migrate their actual stored data. The system shows the user a consent card quoting your reason; if they click Allow you get a short-lived token plus a small sample of real records on your next turn, and you then continue. If they decline, continue without the data and say what you could not verify. Ask for the minimum you need, and do not re-ask for access you were already granted in this conversation.
+  A granted token carries EXACTLY the permissions this app itself has — it is a normal app token, not an override. This app's own tables are always readable; another app's table requires a permission the user has granted. So when a read returns nothing, check the app's declared-vs-granted permissions (the __permissions URL, when you can fetch) or tell the user which permission looks ungranted, BEFORE rewriting working code.
 - type="summary" — a single JSON object:
   {
     "summary": "...",
@@ -372,6 +391,36 @@ system-managed — freezr sets them on upload, so anything you put in `options.d
 overwrite them. Use them to filter or display files (e.g. show a PDF icon, sort by size) without
 storing that info yourself.
 
+**Displaying PRIVATE files in `<img>` / `<video>` (important).** `freezr.getFileUrl(id)` returns the
+bare `/feps/userfiles/...` path. A native `<img>`/`<video>`/CSS load can't send an auth header, so a
+private file needs a **fileToken** appended to the URL — and so does a `fetch()`/`XHR` of one, since
+that route accepts no other credential. Without it the request fails with `401 file token missing`.
+Use these helpers (all `async`):
+
+```javascript
+// Best for <img>/<video>/<source> src, and CSS background-image (a URL works either way) —
+// appends a short-lived ?fileToken=
+img.src = await freezr.utils.tokenizedFileUrl('photos/beach.png')
+el.style.backgroundImage = `url(${await freezr.utils.tokenizedFileUrl('photos/beach.png')})`
+
+// Fetching a private file's CONTENT — tokenize the URL first; a bare fetch gets a 401.
+const text = await (await fetch(await freezr.utils.tokenizedFileUrl('notes/day1.html'))).text()
+
+// One call after rendering: scan the DOM and tokenize every <img>/<video>/<audio>/<source>
+// whose src points at a userfiles URL. Re-callable; pass { force: true } to refresh before the
+// token expires (~10 min) on a long-lived page.
+await freezr.utils.refreshFileTokens()
+// Auto-tokenize images added later too (returns a MutationObserver you can .disconnect()):
+const obs = freezr.utils.observeFileTokens()
+
+// Just the raw token (advanced): freezr.utils.getFileToken(fileId, { permission_name })
+```
+
+Guidance: for `<img>`/`<video>` tags and CSS backgrounds, set the URL via `tokenizedFileUrl` (or call
+`freezr.utils.refreshFileTokens()` once after you render a batch). Do NOT rely on the browser sending
+a cookie — that path is retired; an untokenized private-file load will fail. (For a genuinely PUBLIC
+file, share it publicly instead and use its public URL — no token needed.)
+
 ---
 
 ### Permissions
@@ -393,8 +442,11 @@ await freezr.perms.shareRecords(idOrQuery, options)
 // options: { name, table_id, grantees, action, publicid?, pubDate?, doNotList?,
 //            forcePublicIdTakeover?,   // grant: clobber a conflicting orphan public record
 //            forcePublicIdCleanup? }   // deny: delete an orphan public record when source is gone
-// grantees: array — use ['_public'] for public sharing, or usernames
+// grantees: array — use ['_public'] for public sharing, usernames, or 'app:<appName>' to share
+//           with another app of the same user (eg ['app:com.example.otherapp'])
 // action: 'grant' or 'deny'
+// An app reading records another app shared with it passes requestee_app (query) and
+// permission_name (the sharing app's permission) in the read/query options.
 
 // Share an individual file publicly.
 await freezr.perms.shareFilePublicly(fileId, options?)
@@ -419,16 +471,18 @@ await freezr.perms.validateDataOwner(options)
 ### Messages
 
 ```javascript
-// Send a message/shared record to another user.
+// Send a message/shared record to another user (or to yourself, eg app-to-app).
 await freezr.messages.send(message, options?)
-// message: { recipient_id or recipients, sharing_permission or messaging_permission,
-//            contact_permission, table_id, record_id }
+// message: { recipient_id or recipients, messaging_permission, table_id, record_id,
+//            recipient_app? (address the message to another app's inbox),
+//            contact_permission? (optional) }
 
 // Mark messages as read.
 await freezr.messages.markRead(messageIds, markAll?)
 // messageIds: array of message IDs, or null if markAll is true
 
-// Get messages for the current app.
+// Get the app's messages: ones it sent plus ones addressed to it via recipient_app.
+// options: { count?, skip?, unread_only? } — returns { messages: [...] }
 await freezr.messages.getAppMessages(options?)
 ```
 
@@ -450,8 +504,23 @@ await freezr.llm.ping(options?)
 // Send a prompt to an LLM.
 await freezr.llm.ask(prompt, options?)
 // prompt: a string, or an array of { role, content } messages for conversation
-// options: { context, provider, family, model, max_tokens, responseType, thinking, files, streamBack, onDelta, onThinking, appToken, host }
+// options: { context, provider, family, model, max_tokens, responseType, thinking, cache, files, streamBack, onDelta, onThinking, appToken, host }
 // Fallback chain: model -> family -> defaultFamily of defaultProvider
+//
+// cache (prompt caching): true for the provider's default 5-minute TTL, or { ttl: '1h' }.
+// Marks the END of the request's messages as a cache breakpoint, so a follow-up call whose
+// messages re-send the same prefix and only APPEND turns (e.g. repeated Q&A over one large
+// document sent as the first message) bills the cached span at ~10% of the input rate instead
+// of full price. The prefix must be byte-identical between calls. Claude only today; ignored
+// by providers that cache automatically (ChatGPT). Cached-token counts and their cost are
+// reported in meta.tokensUsed.other.
+// EXPLICIT placement — use when the LAST turn changes on every call (a fresh email, a new record):
+// automatic placement would cache-WRITE that turn every time (1.25x, 2x at 1h) and rarely read it
+// back. Give the STABLE turn a content-block array whose last block carries cache_control; the
+// server then adds only the system-prompt breakpoint and sends your turns exactly as given:
+//   [{ role: 'user', content: [{ type: 'text', text: stableDoc, cache_control: { type: 'ephemeral', ttl: '1h' } }] },
+//    { role: 'user', content: theVaryingPart }]
+// A 1h marker makes the system breakpoint 1h too (a 5-minute entry may not precede a 1-hour one).
 //
 // Returns:
 // {
@@ -503,7 +572,7 @@ The `freezr.connections.mail.*` namespace is available ONLY when the app's manif
 
 Apps NEVER see the user's OAuth tokens. The freezr server holds them, refreshes them transparently, and returns a structured `token_expired` error if re-auth is needed (handle it with `freezr.connections.mail.handleTokenExpired(err)`).
 
-Today only the Gmail connector is wired up; Microsoft Graph and IMAP/SMTP are planned and the API surface won't change when they land.
+Gmail, Microsoft Graph (Outlook / Microsoft 365) and IMAP/SMTP connectors are all wired up behind the same normalized API.
 
 ```javascript
 // List the connections this app is allowed to see (filtered server-side by
@@ -519,11 +588,8 @@ await freezr.connections.mail.listFolders({ connectionName })
 
 // Paginated message metadata (newest first). Returns
 // { messages: [...], nextPageToken: string|null }.
-// Each message: { id, threadId, messageId, inReplyTo, references,
-//                 from: {address, name}, to, cc, subject,
+// Each message: { id, threadId, from: {address, name}, to, cc, subject,
 //                 receivedAt (ms), snippet, isRead, hasAttachments, labels }.
-// messageId/inReplyTo/references are the RFC 822 threading headers (null when
-// absent, angle brackets preserved) — use them to build reply chains across clients.
 // Bodies are NOT returned by listMessages — use getMessage for those.
 await freezr.connections.mail.listMessages({
   connectionName,
@@ -548,7 +614,6 @@ await freezr.connections.mail.searchMessages({
 
 // Full message including bodies + attachment metadata.
 // Returns { message: { ... + bodyText, bodyHtml, attachments: [{ id, filename, mimeType, sizeBytes }] } }.
-// Also carries messageId/inReplyTo/references (RFC 822 threading headers) as above.
 // SECURITY: NEVER pass bodyHtml directly to .innerHTML. See "Rendering email
 // safely" in the use_mail permission section.
 await freezr.connections.mail.getMessage({ connectionName, messageId })
@@ -574,8 +639,7 @@ await freezr.connections.mail.getNewer({ connectionName, lastToken, limit })
 // Send a message. Requires 'write' scope in the granted use_mail permission
 // AND connection.access.mail === 'readwrite'. Returns { messageId, threadId }.
 // Attachments are inline base64 — keep total payload under ~20 MB.
-// For replies: pass the parent's threadId AND inReplyTo (the parent's
-// `messageId` field from listMessages/getMessage).
+// For replies: pass threadId from the parent's getMessage result.
 await freezr.connections.mail.sendMessage({
   connectionName,
   to,                            // string | string[] | [{ address, name }]
@@ -584,8 +648,7 @@ await freezr.connections.mail.sendMessage({
   bodyText, bodyHtml,            // either or both (both -> multipart/alternative)
   attachments,                   // [{ filename, mimeType, contentBase64 }]
   threadId,                      // for replies (Gmail-side threading)
-  inReplyTo,                     // parent's messageId (RFC 822 Message-ID) for cross-client threading
-  references                     // full chain: parent.references + ' ' + parent.messageId (defaults to inReplyTo)
+  inReplyTo, references          // RFC 822 Message-ID headers for cross-client threading
 })
 
 // Save a draft on the provider. Same args as sendMessage.
@@ -616,6 +679,116 @@ try {
 
 ---
 
+### Messaging APIs — freezr.connections.messaging
+
+The `freezr.connections.messaging.*` namespace is available ONLY when the app's manifest declares a `use_messaging` permission (see the use_messaging section below). Slack is the first provider; the API is provider-neutral — no Slack-shaped parameters, so code written against it will work when other providers land.
+
+```javascript
+// List messaging-enabled connections this app may use.
+await freezr.connections.messaging.listAccounts()
+// accounts[i]: { connectionName, provider, account_email, services, access, status, live }
+// access.messaging: 'read' | 'readwrite' — gates writes user-side.
+// live: true when the user opted this connection into socket-fed live updates.
+
+// Conversations the connected user is a member of (channels, private channels,
+// group DMs, DMs), paginated.
+await freezr.connections.messaging.listConversations({ connectionName, limit, cursor, types, includeArchived })
+// → { conversations: [{ id, name, type, isMember, isArchived, topic, purpose,
+//      memberCount, counterpartUserId }], nextCursor }
+// type: 'channel' | 'private_channel' | 'group_dm' | 'dm'.
+// DMs have name: null — resolve counterpartUserId via getUsers. Group-DM names
+// are machine strings — resolve members via getConversationMembers + getUsers.
+
+// Messages in one conversation, NEWEST FIRST; the cursor pages OLDER.
+await freezr.connections.messaging.getMessages({ connectionName, conversationId, limit, cursor, oldest, latest })
+// → { messages, nextCursor }
+// message: { id, conversationId, threadParentId, sender: { id, type: 'user'|'bot' },
+//   sentAt /* ms */, text, replyCount, edited, subtype,
+//   reactions: [{ name, count }], files: [{ id, filename, mimeType, sizeBytes }] }
+// `id` is the provider's message id (Slack: its ts string) — treat it as OPAQUE
+// and pass it back verbatim (threads, markRead, delete). `text` is raw provider
+// markup (Slack mrkdwn: <@U123>, <#C1|general>, <https://url|label>) — resolve
+// user mentions via getUsers before display.
+// IMPORTANT: thread REPLIES do not appear in getMessages — only the parent (with
+// replyCount > 0). Fetch replies per-thread:
+await freezr.connections.messaging.getThread({ connectionName, conversationId, threadId, limit, cursor })
+// threadId = the parent message's id. Returns parent + replies, oldest first.
+
+// Per-conversation incremental sync (first call without lastToken seeds and
+// returns { messages: [], nextToken }).
+await freezr.connections.messaging.getNewer({ connectionName, conversationId, lastToken, limit })
+// → { messages, nextToken, expired }
+
+// Resolve user ids to names — paged directory, or batch by ids (array/CSV, ≤100).
+await freezr.connections.messaging.getUsers({ connectionName, limit, cursor, ids })
+// → { users: [{ id, name, displayName, realName, email, isBot, deleted, avatar }], nextCursor }
+
+await freezr.connections.messaging.getConversationMembers({ connectionName, conversationId, limit, cursor })
+// → { memberIds, nextCursor }
+
+// The connected account's own identity — sender.id === profile.userId identifies
+// the user's own messages.
+await freezr.connections.messaging.getProfile({ connectionName })
+// → { profile: { userId, teamId, teamName, email, displayName } }
+
+// LIVE UPDATES — the socket-fed activity index. Answers "which conversations
+// changed since X?" without polling them all. Metadata only, NEVER message
+// content: follow up with getNewer/getMessages using the user's own access.
+await freezr.connections.messaging.getChanges({ connectionName, since /* ms */ })
+// → { changes: [{ conversationId, lastActivityTs, lastEventAt,
+//       edited: [{ id, at }], deleted: [{ id, at }], changesOverflowed }],
+//     gaps: [{ from, to /* null = ongoing */ }], gapSince, complete, retentionMs }
+// lastActivityTs: newest message id in the conversation (monotonic high-water mark).
+// lastEventAt: ms when the server indexed the last event.
+// edited/deleted: message ids changed after `since`, each with WHEN (`at`) —
+//   tombstone deleted ids; re-fetch edited ones (getMessages with
+//   oldest=id, latest=id, inclusive:true fetches exactly one message).
+// complete: false → the index cannot be trusted for your window (socket downtime
+//   gap, since older than ~30d retention, or an overflowed change list). The
+//   remedy is always a wider getNewer sweep. gapSince non-null → socket down NOW.
+
+// Writes — need 'write' scope AND connection access.messaging === 'readwrite':
+await freezr.connections.messaging.sendMessage({ connectionName, conversationId, text, threadId })
+// threadId (a parent message id) replies in-thread.
+await freezr.connections.messaging.markRead({ connectionName, conversationId, ts })
+// Read state is a per-conversation CURSOR: marks everything at/before ts as read.
+// There is no per-message unread flag.
+await freezr.connections.messaging.deleteMessage({ connectionName, conversationId, messageId })
+// Providers only allow deleting the user's OWN messages — anything else throws
+// with err.data.providerError set (e.g. Slack's 'cant_delete_message').
+
+freezr.connections.messaging.handleTokenExpired(resOrErr) // same pattern as mail
+```
+
+**RECOMMENDED background-sync pattern** — check the live-updates capability first, fall back to polling:
+
+```javascript
+const status = await freezr.utils.ping()
+const live = status.capabilities?.messaging_live
+if (live?.active && live.live_connections.includes(connectionName)) {
+  // Efficient path: ask what changed, fetch only that.
+  const res = await freezr.connections.messaging.getChanges({ connectionName, since: lastSyncMs })
+  const targets = res.complete
+    ? res.changes.map(c => c.conversationId)   // exactly what changed
+    : myTrackedConversationIds                 // index untrustworthy for window → wider sweep
+  for (const conversationId of targets) { /* getNewer({ connectionName, conversationId, lastToken }) */ }
+  /* also: tombstone res.changes[].deleted ids; re-fetch res.changes[].edited ids */
+} else {
+  // Sockets not set up on this server / connection not opted in: plain polling
+  // of the conversations the user chose to track.
+  for (const conversationId of myTrackedConversationIds) { /* getNewer(...) */ }
+}
+lastSyncMs = Date.now()
+```
+
+**Messaging pitfalls — please respect:**
+- Rate limits are shared per Slack app per workspace (~50 history calls/min on internal apps). Sync a bounded set of conversations; never "all channels every cycle."
+- Message ids look like timestamps (Slack) but MUST be treated as opaque strings.
+- An edit/delete of an OLD message never shows up in getNewer — that is exactly what getChanges' edited/deleted lists are for.
+- `complete: false` from getChanges is normal after server downtime — handle it with the wider sweep, don't treat it as an error.
+
+---
+
 ### Utilities
 
 ```javascript
@@ -627,12 +800,61 @@ freezr.utils.publicPathFromId(fileId, requesteeApp, userId) // Build a public UR
 freezr.utils.appFilePathFrom(relativePath) // Build an app file URL from a relative path
 
 await freezr.utils.getManifest(appName?)  // Fetch an app's manifest.json
-await freezr.utils.ping(options?)         // Ping the server; returns { server_type, ... }
+await freezr.utils.ping(options?)         // Ping the server — see below
 await freezr.utils.getHtml(partPath, appName?) // Fetch an HTML file as text
 await freezr.utils.getAllAppList()         // Get list of all installed apps
 await freezr.utils.getPrefs()             // Get user preferences
 await freezr.utils.getAppResourceUsage(appName?) // Get storage/usage stats for an app
 ```
+
+**freezr.utils.ping()** — one call that tells the app where it stands. Anonymous callers get
+`{ logged_in: false, server_type, server_version }`. Logged-in callers also get
+`logged_in_as_admin`, `user_id` and `storageLimits`. When the call carries the app's token
+(the default inside an app), the response ALSO includes the app's permissions — each annotated
+with whether the server can actually honor it right now — plus a capability summary:
+
+```javascript
+const status = await freezr.utils.ping()
+// status.app_name      — the calling app
+// status.permissions[] — this app's permission grants, each:
+//   { name, type, granted,
+//     usable,       // granted AND the server has what it needs to run it right now
+//     blocked_by }  // null when usable, else why not:
+//                   //   'not_granted'            — user hasn't granted (or revoked) it
+//                   //   'no_llm_keys'            — use_llm but no LLM API key in Account Resources
+//                   //   'no_compute_credential'  — job/function needs the user's cloud but no
+//                   //                              serverless credential is set up
+//                   //   'job_not_trusted'        — grant says run locally but admin hasn't trusted the job
+//                   //   'no_job_runtime'         — job location 'auto' but neither local trust nor compute
+//                   //   'no_matching_connection' — use_mail/contacts/calendar/messaging but no covered connection
+//                   //   'socket_not_admitted'    — socket_connect granted but not admin-admitted (not yet executable)
+//   // plus type-specific fields when present: table_id(s), job_name, location, connection_names, scopes
+// status.capabilities  — grant-independent facts about the user's setup:
+//   { llm: { available }, compute: { available },
+//     connections: { mail, contacts, calendar, messaging },  // counts of working connections
+//     messaging_live: {          // is the push-based messaging sync WORKING right now?
+//       active,                  // the full setup chain is in place for ≥1 connection
+//       blocked_by,              // null when active, else the FIRST missing link:
+//                                //   'server_sockets_not_enabled' — admin prefs switch off   } ask the
+//                                //   'no_provider_admitted'       — no /admin/sockets grant  } server
+//                                //   'sockets_not_running'        — manager not started      } admin
+//                                //   'no_live_connections'        — USER fix: turn on "Live updates"
+//                                //                                  on the connection at /account/resources
+//       sockets_running,         // the server currently holds provider socket(s)
+//       prefs_enabled,           // the admin master switch
+//       admitted_providers,      // e.g. ['slack']
+//       live_connections } }     // connectionNames opted into live updates
+```
+
+When `messaging_live.active` is false, show the user the right fix from `blocked_by` — the first
+three need the server admin; only `no_live_connections` is something the user fixes themselves.
+
+Use `permissions[].usable` (not just `granted`) to decide whether to enable a feature:
+a granted `use_llm` with no LLM key, or a granted `run_job` with nowhere to run, will fail at
+call time. When `usable` is false, use `blocked_by` to show the user the right fix (grant the
+permission in Settings, add an LLM key or compute credential in Account Resources, connect an
+account, or ask the admin to trust the job). For deeper, feature-specific detail keep using
+`freezr.llm.ping()` (models/pricing) and `freezr.jobs.ping()` (per-job schedule state).
 
 ---
 
@@ -1021,6 +1243,25 @@ if (sharePermission && sharePermission.granted) {
 }
 ```
 
+**Checking whether granted permissions are actually USABLE (preferred at startup):**
+Granted is not the same as usable — a granted `use_llm` still fails if the user has no LLM
+key, and a granted `run_job` fails if the job has nowhere to run. One `freezr.utils.ping()`
+call returns every permission annotated with `usable` and, when not usable, a `blocked_by`
+reason ('not_granted', 'no_llm_keys', 'no_compute_credential', 'job_not_trusted',
+'no_job_runtime', 'no_matching_connection') plus a `capabilities` summary. Gate features on
+`usable` and use `blocked_by` to tell the user the right fix:
+```javascript
+const status = await freezr.utils.ping()
+const aiPerm = (status.permissions || []).find(p => p.name === 'ai_access')
+if (aiPerm?.usable) {
+  // safe to call freezr.llm.ask()
+} else if (aiPerm?.blocked_by === 'not_granted') {
+  // ask the user to grant the permission in Settings
+} else if (aiPerm?.blocked_by === 'no_llm_keys') {
+  // permission granted but no key — ask the user to add an LLM key in Account Resources
+}
+```
+
 ---
 
 ### use_llm — Using AI / LLM Features
@@ -1143,7 +1384,7 @@ Notes:
 
 Use this when the app needs to read messages, search mail, sync incrementally, send / draft, or modify mail (mark-read, move, trash, delete) on the user's connected accounts. The full API surface lives at `freezr.connections.mail.*` and is documented in apiReference.md under "Mail (Connections)".
 
-Tokens are never visible client-side — the freezr server holds the OAuth grant and refreshes it. Today only the Gmail connector is wired up; Microsoft Graph and IMAP/SMTP are planned and the API won't change when they land.
+Tokens are never visible client-side — the freezr server holds the OAuth grant and refreshes it. Gmail, Microsoft Graph (Outlook / Microsoft 365) and IMAP/SMTP connectors are all wired up behind the same normalized API.
 
 **Manifest entry — read-only:**
 ```json
@@ -1205,8 +1446,7 @@ try {
     labelIds: ['INBOX'],
     limit: 25
   })
-  // messages[i]: { id, threadId, messageId, inReplyTo, references,
-  //               from, to, subject, receivedAt, snippet,
+  // messages[i]: { id, threadId, from, to, subject, receivedAt, snippet,
   //               isRead, hasAttachments, labels }
 } catch (err) {
   if (freezr.connections.mail.handleTokenExpired(err)) return  // redirected
@@ -1252,10 +1492,8 @@ await freezr.connections.mail.sendMessage({
   to: ['recipient@example.com'],
   subject: 'Hello',
   bodyText: 'Plain-text body.',
-  // For replies: pass parent.threadId + RFC 822 threading headers from getMessage()
-  threadId: parent?.threadId,
-  inReplyTo: parent?.messageId,
-  references: [parent?.references, parent?.messageId].filter(Boolean).join(' ')
+  // For replies: pass parent.threadId from getMessage()
+  threadId: parent?.threadId
 })
 ```
 
@@ -1348,6 +1586,35 @@ Shadow DOM scopes the email's `<style>` so it can't override the app's CSS. The 
 - Treat `attachment.mimeType` as untrusted (sender-controlled). If you care about correctness, sniff the first few bytes of the buffer.
 - Don't store messages in your app's db just to "speed things up." The provider is the source of truth — sync errors and missed deletes are correctness liabilities. Cache for UI snappiness only.
 - The Gmail history stream is mailbox-wide. If you show one folder, filter `messageAdded` events by checking `message.labels.includes(currentFolderId)`.
+
+---
+
+### use_messaging — Reading and sending messages via connected messaging accounts
+
+Use this when the app needs to read conversations and messages (channels, DMs, group DMs), sync incrementally, send messages / thread replies, mark-read, or delete the user's own messages on the user's connected messaging accounts. Slack is the first provider. The full API surface lives at `freezr.connections.messaging.*` and is documented in the "Messaging APIs" section above.
+
+The permission shape and the two-level model are IDENTICAL to use_mail: `connection_names` (fail-closed; `["*"]` for all current and future messaging connections, user can narrow at grant time) and `scopes` (`["read"]` or `["read", "write"]`), gated on both the app-side scope AND the connection-side `access.messaging` (`'read'` | `'readwrite'`, set by the user at /account/resources).
+
+**Manifest entry — read-only:**
+```json
+{
+  "permissions": [
+    {
+      "name": "messaging_read",
+      "type": "use_messaging",
+      "description": "Read messages from your connected messaging accounts (e.g. Slack).",
+      "connection_names": ["*"],
+      "scopes": ["read"]
+    }
+  ]
+}
+```
+
+**Manifest entry — read + write** (`"scopes": ["read", "write"]`) additionally allows sendMessage, markRead and deleteMessage (own messages only).
+
+**Live updates are a server capability, not part of this permission.** The `use_messaging` grant covers reading the socket-fed activity index (`getChanges`) — but whether the index is being FED depends on the server admin having enabled messaging sockets and the user having opted the connection in ("Live updates" at /account/resources). Never assume it: check `capabilities.messaging_live` from `freezr.utils.ping()` and fall back to polling (pattern shown in the Messaging APIs section). An app that hard-requires live updates should tell the user which switch is missing rather than failing silently.
+
+(A related permission type, `socket_connect` — apps asking the server to hold sockets to arbitrary external services — is registered in the permission vocabulary but NOT yet executable; grants report `blocked_by: 'socket_not_admitted'`. Don't design against it yet.)
 
 ---
 
@@ -1478,18 +1745,33 @@ if (readPerm && readPerm.granted) {
 
 ---
 
-### Summary of Permission Types
+### message_records & inter-app services — talking to the user's other apps
+
+Same-user apps can message each other: a message sent with `recipient_app` lands in that app's inbox (`freezr.messages.getAppMessages` returns messages the app sent plus ones addressed to it). No `contact_permission` is needed for same-user inter-app sends. The sender declares one `message_records` permission:
+
+```json
+{
+  "name": "msg_targetapp",
+  "type": "message_records",
+  "table_id": "<your.app.id>.your_requests_collection",
+  "description": "Send requests to <target app>. You approve each request inside that app."
+}
+```
+
+Some apps OFFER SERVICES over this transport (e.g. an email app delivering matching emails to subscriber apps). A provider app declares `"app_services": { "description": "...", "contract": "app-comms.md" }` in its manifest and ships the contract doc at its app root. **The contract is the authority**: read the target app's manifest `app_services` and its contract file, and follow the request shapes, message lifecycle (pending/approved/denied/revoked), dedup rules and trust model it defines. Remember the freezr grant is transport-only — the real consent happens inside the provider app's UI, so handle denied/paused/revoked states gracefully and word request prompts narrowly (they are shown verbatim to the user).
 
 | Type | Category | Needs table_id | Purpose |
 |------|----------|----------------|---------|
 | share_records | Sharing | Yes | Share specific records with users or make public |
-| message_records | Sharing | Yes | Send records as messages to other users |
+| message_records | Sharing | Yes | Send records as messages to other users, or to another app of the same user (via recipient_app) |
 | read_all | Database Access | Yes | Read all records in another app's collection |
 | write_all | Database Access | Yes | Read and write any records in another app's collection |
 | write_own | Database Access | Yes | Write only your own records in another app's collection |
 | upload_pages | Sharing | No | Upload and serve public HTML pages |
 | use_llm | App Capabilities | No | Use the user's LLM API keys for AI requests |
 | use_mail | App Capabilities | No | Read / send mail via the user's connected mail accounts. Requires connection_names + scopes fields; gated by both app-side scope AND connection-side access.mail. |
+| use_messaging | App Capabilities | No | Read / send messages via the user's connected messaging accounts (Slack first). Same shape and two-level gating as use_mail (connection_names + scopes; access.messaging). Includes the getChanges live-updates index when the server has sockets enabled. |
+| socket_connect | App Capabilities | No | RESERVED — vocabulary registered, not yet executable (grants report blocked_by 'socket_not_admitted'). Will let the server hold a socket to a named external domain on the app's behalf, subject to explicit admin admission. |
 | external_scripts | App Capabilities | No | Load JavaScript from external domains (relaxes script-src CSP) |
 | external_fetch | App Capabilities | No | Send/receive data to/from external domains (relaxes connect-src CSP) |
 | unsafe_eval | App Capabilities | No | Allow eval() and dynamic code execution (adds unsafe-eval to script-src CSP) |

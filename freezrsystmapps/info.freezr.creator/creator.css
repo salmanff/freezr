@@ -304,6 +304,8 @@ body {
 .welcome-create-btn-wrap {
   display: flex;
   justify-content: center;
+  align-items: center;
+  gap: 8px;
   margin-top: 6px;
 }
 
@@ -1470,6 +1472,50 @@ a.panel-cta:visited {
   gap: 6px;
   flex-shrink: 0;
 }
+
+/* Data-access consent card (the assistant asking to read/change the user's records).
+   Rendered INSIDE .chat-messages, directly under the message that asked, so it reads as part
+   of the conversation rather than a page-level banner. */
+.chat-access-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  background: rgba(30, 64, 120, 0.18);
+  color: #cfe0fb;
+  border-radius: 4px;
+}
+.chat-access-banner-write {
+  border-color: rgba(239, 68, 68, 0.45);
+  background: rgba(120, 30, 30, 0.18);
+  color: #fbd5d5;
+}
+.chat-access-banner-text {
+  flex: 1;
+  line-height: 1.4;
+}
+.chat-access-tables {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  opacity: 0.9;
+  margin-top: 2px;
+}
+.chat-access-reason {
+  font-style: italic;
+  margin-top: 3px;
+}
+.chat-access-note {
+  opacity: 0.75;
+  margin-top: 3px;
+}
+.chat-access-banner-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
 .panel-cta-secondary {
   background: transparent;
   border-color: var(--border, #333);
@@ -1675,6 +1721,100 @@ a.panel-cta:visited {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Web search toggle + its two escalation prompts.
+   Deliberately sitting next to Send rather than hidden in settings: switching it on adds cost
+   to every message in the conversation, so its state should be visible while typing. */
+
+.chat-input-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.chat-web-toggle {
+  flex-shrink: 0;
+  padding: 5px 10px;
+  font-size: 0.85em;
+  line-height: 1.2;
+  cursor: pointer;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted, #888);
+  opacity: 0.75;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+
+.chat-web-toggle:hover:not(:disabled) { opacity: 1; }
+
+.chat-web-toggle-on {
+  opacity: 1;
+  color: #fff;
+  background: #2d7ff9;
+  border-color: #2d7ff9;
+}
+
+.chat-web-toggle:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Dictation. Shares the web toggle's shape so the two read as one row of input controls. */
+.chat-mic-btn {
+  flex-shrink: 0;
+  padding: 5px 10px;
+  font-size: 0.85em;
+  line-height: 1.2;
+  cursor: pointer;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted, #888);
+  opacity: 0.75;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  /* Held down, not clicked: stop the press turning into a text selection or an iOS callout. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.chat-mic-btn:hover:not(:disabled) { opacity: 1; }
+
+/* Recording is the one state that MUST be unmistakable — an open mic the user has forgotten
+   about is the failure mode worth designing against, so it pulses rather than just colouring. */
+.chat-mic-btn-live {
+  opacity: 1;
+  color: #fff;
+  background: #d93636;
+  border-color: #d93636;
+  animation: chat-mic-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes chat-mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(217, 54, 54, 0.55); }
+  50% { box-shadow: 0 0 0 5px rgba(217, 54, 54, 0); }
+}
+
+/* Respect a user who has asked for less motion; the colour still carries the state. */
+@media (prefers-reduced-motion: reduce) {
+  .chat-mic-btn-live { animation: none; }
+}
+
+.chat-mic-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.chat-web-prompt {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 8px 0;
+  padding: 8px 12px;
+  font-size: 0.9em;
+  border: 1px solid #2d7ff9;
+  border-radius: 6px;
+  background: rgba(45, 127, 249, 0.08);
+}
+
+.chat-web-prompt em { opacity: 0.85; }
 
 /* Launch App footer button */
 

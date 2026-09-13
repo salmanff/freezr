@@ -44,6 +44,12 @@ const PAGE_MANIFESTS = {
     page_url: 'calendar.html',
     script_files: ['calendar.js']
   },
+  messaging: {
+    page_title: 'Messaging (Connections)',
+    css_files: ['/app/info.freezr.public/public/freezr_style.css', 'messaging.css'],
+    page_url: 'messaging.html',
+    script_files: ['messaging.js']
+  },
   new: {
     page_title: 'Connect a New Account',
     css_files: ['/app/info.freezr.public/public/freezr_style.css'],

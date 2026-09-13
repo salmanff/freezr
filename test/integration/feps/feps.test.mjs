@@ -15,9 +15,10 @@
  *   DELETE /feps/delete/:app_table/:start/*     - Delete a record with path ID
  *   POST   /feps/restore/:app_table             - Restore a deleted record
  *   PUT    /feps/upload/:app_name               - Upload a file
- *   GET    /feps/getuserfiletoken/:perm/:app/:user/* - Get file token
- *   GET    /feps/userfiles/:app/:user/*        - Serve file with token
- *   GET    /feps/fetchuserfiles/:app/:user/*   - Fetch file with app token
+ *   GET    /feps/getuserfiletoken/:permission_name/:app_name/:user_id?file= - Mint a scoped fileToken
+ *   GET    /feps/userfiles/:app/:user/*?fileToken=  - Serve a file (fileToken required; the ambient
+ *                                                      cookie and a raw Bearer app_token are NOT
+ *                                                      accepted — see basicAuth.mjs createGetFileTokenInfo)
  * 
  * Prerequisites: 
  *   1. Server must be running on the configured URL
@@ -34,6 +35,15 @@ import fetch from 'node-fetch'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
+
+// Mint a self-scoped fileToken (Bearer-authenticated mint call) and return the fileToken string, or
+// null on failure. Mirrors freezr.utils.getFileToken in the client SDK. Userfiles no longer accepts a
+// raw Bearer app_token (see basicAuth.mjs createGetFileTokenInfo) — every fetch needs one of these.
+async function mintFileToken (auth, appName, userId, filePath) {
+  const url = `/feps/getuserfiletoken/self/${appName}/${userId}` + (filePath ? `?file=${encodeURIComponent(filePath)}` : '')
+  const res = await auth.get(url)
+  return (res.ok && res.data && res.data.fileToken) ? res.data.fileToken : null
+}
 
 // Load test configuration
 let testConfig
@@ -989,9 +999,10 @@ describe('FEPS Endpoints Integration Tests', function () {
         this.skip()
       }
       
-      // Get original file size
+      // Get original file size (userfiles requires a fileToken — Bearer alone is no longer accepted)
       const originalFileId = originalData._id
-      const originalFileResponse = await auth.get(`/feps/userfiles/${appName}/${auth.userId}/${originalFileId}`)
+      const originalFileToken = await mintFileToken(auth, appName, auth.userId, originalFileId)
+      const originalFileResponse = await auth.get(`/feps/userfiles/${appName}/${auth.userId}/${originalFileId}?fileToken=${encodeURIComponent(originalFileToken || '')}`)
       const originalSize = originalFileResponse.data ? Buffer.from(originalFileResponse.data).length : originalFileBuffer.length
       
       // Now upload with conversion
@@ -1034,7 +1045,8 @@ describe('FEPS Endpoints Integration Tests', function () {
       
       if (result.ok && result.data._id) {
         // Get converted file and verify it's smaller (converted image should be smaller)
-        const convertedFileResponse = await auth.get(`/feps/userfiles/${appName}/${auth.userId}/${result.data._id}`)
+        const convertedFileToken = await mintFileToken(auth, appName, auth.userId, result.data._id)
+        const convertedFileResponse = await auth.get(`/feps/userfiles/${appName}/${auth.userId}/${result.data._id}?fileToken=${encodeURIComponent(convertedFileToken || '')}`)
         if (convertedFileResponse.ok && convertedFileResponse.data) {
           const convertedSize = Buffer.from(convertedFileResponse.data).length
           console.log(`      ✓ File converted: original=${originalSize} bytes, converted=${convertedSize} bytes`)
@@ -1323,10 +1335,9 @@ describe('FEPS Endpoints Integration Tests', function () {
       // First, get a file token
       const appName = testConfig.testAppConfig.appName
       const userId = auth.userId
-      const permissionName = 'read_files'
       const filePath = uploadedFileId
-      
-      const tokenResponse = await auth.get(`/feps/getuserfiletoken/${permissionName}/${appName}/${userId}/${filePath}`)
+
+      const tokenResponse = await auth.get(`/feps/getuserfiletoken/self/${appName}/${userId}?file=${encodeURIComponent(filePath)}`)
       
       if (!tokenResponse.ok || !tokenResponse.data.fileToken) {
         console.log('      ⚠ Could not get file token, skipping file serving test')
@@ -1387,28 +1398,24 @@ describe('FEPS Endpoints Integration Tests', function () {
     })
   })
 
-  describe('GET /feps/userfiles/:app_name/:user_id/*', function () {
-    it('should fetch a file using app token', async function () {
+  describe('GET /feps/userfiles/:app_name/:user_id/* (Bearer app_token alone is closed off)', function () {
+    it('should REJECT a userfiles request authenticated with only a Bearer app_token (no fileToken)', async function () {
+      // Verifies the deliberate design decision in basicAuth.mjs createGetFileTokenInfo: userfiles
+      // only accepts a fileToken. A Bearer app_token was found to have no real caller (any client can
+      // mint a fileToken with that same token) and was closed off to avoid a redundant credential
+      // path on this security-sensitive route. auth.get() sends Authorization: Bearer + Cookie —
+      // neither should be honoured here.
       if (!auth || !uploadedFileId) {
         this.skip()
       }
-      
+
       const appName = testConfig.testAppConfig.appName
       const userId = auth.userId
       const filePath = uploadedFileId
-      
-      const response = await auth.get(`/feps/userfiles/${appName}/${userId}/${filePath}`)
-      
-      // File fetching shluld succeed
-      // console.log('      🔑 fetchuserfiles response with App creds', { response })
 
-      expect(response.status).to.equal(200)
-      
-      if (response.ok) {
-        // Response should be file content (not JSON)
-        expect(response.data).to.exist
-        console.log(`      ✓ File fetched successfully using app token`)
-      }
+      const response = await auth.get(`/feps/userfiles/${appName}/${userId}/${filePath}`)
+
+      expect(response.status).to.equal(401)
     })
   })
 
@@ -1441,6 +1448,50 @@ describe('FEPS Endpoints Integration Tests', function () {
       } else {
         console.log(`      ⚠ Path-based update returned status ${response.status}`)
       }
+    })
+  })
+
+  // fileToken minting + userfiles validation (freezr_file_access_plan_v1.md §4b).
+  describe('GET /feps/getuserfiletoken (fileToken round-trip)', function () {
+    it('mints a self fileToken that serves the file as the SOLE credential, and blocks otherwise', async function () {
+      if (!auth || !uploadedFileId) this.skip()
+      const appName = testConfig.testAppConfig.appName
+      const userId = auth.userId
+
+      // 1. Mint a self fileToken (Bearer-authed as the app).
+      const mintRes = await auth.get(`/feps/getuserfiletoken/self/${appName}/${userId}`)
+      expect(mintRes.status).to.equal(200)
+      expect(mintRes.data).to.have.property('fileToken')
+      const fileToken = mintRes.data.fileToken
+      expect(fileToken).to.be.a('string').with.length.greaterThan(20)
+
+      const fileUrl = `${serverUrl}/feps/userfiles/${appName}/${userId}/${uploadedFileId}`
+
+      // 2. Fetch with the token ALONE — no Authorization, no Cookie → 200.
+      const withToken = await fetch(`${fileUrl}?fileToken=${encodeURIComponent(fileToken)}`, { method: 'GET' })
+      expect(withToken.status).to.equal(200)
+
+      // 3. No token and no auth → 401 (the ambient cookie is no longer accepted; anon is blocked).
+      const noAuth = await fetch(fileUrl, { method: 'GET' })
+      expect(noAuth.status).to.equal(401)
+
+      // 4. Bogus token → 401.
+      const bogus = await fetch(`${fileUrl}?fileToken=deadbeefdeadbeefdeadbeef`, { method: 'GET' })
+      expect(bogus.status).to.equal(401)
+
+      // 5. Scope-bound: the token must not serve a DIFFERENT app's path.
+      const wrongApp = await fetch(`${serverUrl}/feps/userfiles/info.freezr.account/${userId}/${uploadedFileId}?fileToken=${encodeURIComponent(fileToken)}`, { method: 'GET' })
+      expect(wrongApp.status).to.equal(401)
+    })
+
+    it('refuses to mint a token outside the requesting app (cross-app / ungranted → not 200)', async function () {
+      if (!auth) this.skip()
+      const userId = auth.userId
+      // The requesting token is for the test app; asking for info.freezr.account's files is neither
+      // self nor a same-app grant → denied, no token issued.
+      const res = await auth.get(`/feps/getuserfiletoken/self/info.freezr.account/${userId}`)
+      expect(res.status).to.not.equal(200)
+      expect(res.data || {}).to.not.have.property('fileToken')
     })
   })
 

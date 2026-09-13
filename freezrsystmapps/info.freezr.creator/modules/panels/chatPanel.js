@@ -1,9 +1,10 @@
 /* global freezr */
-import { sendChatMessage } from '../chatService.js'
+import { sendChatMessage, grantDataAccess, denyDataAccess } from '../chatService.js'
 import { showError, clearError } from '../showError.js'
 import { fetchFileContent } from '../fileTree.js'
 import { formatCost, formatTokens } from '../priceService.js'
-import { escHtml, tsOf, saveChatDraft, clearChatDraft } from '../utils.js'
+import { escHtml, tsOf, saveChatDraft, clearChatDraft, saveWebSearchPref } from '../utils.js'
+import { checkVoiceSupport, isRecording, startDictation, stopDictationAndTranscribe, cancelDictation } from '../voiceDictation.js'
 
 const isMobile = () => {
   const root = document.querySelector('.creator-root')
@@ -150,6 +151,31 @@ const renderRefactorBanner = (chatState) => {
   return `<div class="chat-refactor-banner">${items}</div>`
 }
 
+// Consent card for a data access_request. Nothing is minted or read until Allow is clicked;
+// write requests are visually distinct because they can change the user's stored records.
+const renderAccessRequestCard = (chatState) => {
+  const req = chatState.pendingAccessRequest
+  if (!req) return ''
+  const isWrite = req.access === 'write'
+  const tables = (req.tables || []).filter(Boolean)
+  const what = isWrite ? 'CHANGE' : 'read'
+  return `<div class="chat-access-banner${isWrite ? ' chat-access-banner-write' : ''}">
+    <div class="chat-access-banner-text">
+      <strong>${isWrite ? '⚠️ ' : ''}The assistant is asking to ${what} your data.</strong>
+      ${tables.length ? `<div class="chat-access-tables">${tables.map(escHtml).join(', ')}</div>` : ''}
+      ${req.reason ? `<div class="chat-access-reason">“${escHtml(req.reason)}”</div>` : ''}
+      <div class="chat-access-note">${isWrite
+        ? 'Allowing lets it modify real records in this app for the next 30 minutes.'
+        : 'Allowing shares up to ' + (Math.min(Math.max(parseInt(req.count, 10) || 3, 1), 50)) +
+          ' record(s) per table, read-only, for the next 30 minutes.'}</div>
+    </div>
+    <div class="chat-access-banner-actions">
+      <button class="panel-cta panel-cta-sm${isWrite ? ' panel-cta-danger' : ''}" data-action="access-allow">Allow ${isWrite ? 'changes' : 'read'}</button>
+      <button class="panel-cta panel-cta-sm panel-cta-secondary" data-action="access-deny">Don't allow</button>
+    </div>
+  </div>`
+}
+
 const renderUsageInfo = (msg) => {
   const parts = []
   if (msg.llmModel) parts.push(escHtml(msg.llmModel))
@@ -169,8 +195,10 @@ const renderUsageInfo = (msg) => {
 
 const renderMessage = (msg) => {
   if (msg.role === 'user') {
+    // displayContent: a short stand-in for machine-generated turns (e.g. a data-access grant,
+    // whose real content carries a token and sample records).
     return `<div class="chat-msg chat-msg-user">
-      <div class="chat-msg-content">${escHtml(msg.content)}</div>
+      <div class="chat-msg-content">${escHtml(msg.displayContent || msg.content)}</div>
       <div class="chat-msg-time">${formatTime(msg.timestamp)}</div>
     </div>`
   }
@@ -330,6 +358,20 @@ export const renderChatPanel = ({ container, state, setState, renderOptions }) =
   const wasNearBottom = !prevMsgContainer ||
     (prevMsgContainer.scrollHeight - prevMsgContainer.scrollTop - prevMsgContainer.clientHeight) < 80
 
+  // The two evidence-triggered escalations. Neither asks the user to predict anything: one
+  // fires because the MODEL said it needed the web, the other because our own cap actually bit.
+  const renderWebPrompt = (cs) => {
+    const wp = cs.webPrompt
+    if (!wp || cs.sending) return ''
+    if (wp.kind === 'needs_web') {
+      const why = wp.reason ? `: <em>${escHtml(wp.reason)}</em>` : ''
+      return `<div class="chat-web-prompt"><span>🌐 The assistant says it needs the web to answer this${why}</span>` +
+        '<button class="panel-cta panel-cta-sm" data-action="retry-with-web">Search the web and retry</button></div>'
+    }
+    return '<div class="chat-web-prompt"><span>🌐 Search limit reached — the answer may be incomplete.</span>' +
+      '<button class="panel-cta panel-cta-sm" data-action="retry-uncapped">Search more</button></div>'
+  }
+
   const messagesHtml = messages.map(renderMessage).join('')
   const hasMessages = messages.length > 0
   const showNewChat = hasMessages || sending
@@ -338,9 +380,45 @@ export const renderChatPanel = ({ container, state, setState, renderOptions }) =
     ? `<div class="launch-app-footer"><a href="/app/${encodeURIComponent(appName)}" target="_blank" class="panel-cta" data-action="launch-app">Launch App 🚀</a></div>`
     : ''
 
+  // Web search toggle. OFF by default and deliberately visible rather than buried in settings:
+  // turning it on adds ~7,200 input tokens to EVERY call in this conversation (measured), so the
+  // user should be able to see at a glance that it is costing them.
+  const webOn = chatState.webSearch === true
+  const webToggleHtml = `<button type="button"
+        class="chat-web-toggle${webOn ? ' chat-web-toggle-on' : ''}"
+        data-action="toggle-web"
+        aria-pressed="${webOn ? 'true' : 'false'}"
+        title="${webOn
+          ? 'Web search is ON for this app — the assistant can search and read pages. Adds cost to every message.'
+          : 'Web search is OFF. Turn it on to let the assistant look things up (adds cost to every message).'}"
+        ${sending ? 'disabled' : ''}>🌐${webOn ? ' Web on' : ''}</button>`
+
+  // Dictation. Absent until checkVoiceSupport() has answered, rather than rendered-then-hidden:
+  // voice is ChatGPT-only, so for a Claude-only user this button must never appear at all.
+  // recordingState is 'idle' | 'recording' | 'transcribing'.
+  const voiceReady = chatState.voiceSupported === true
+  const recordingState = chatState.recording || 'idle'
+  const micLabel = { idle: '🎤', recording: '⏺ Listening…', transcribing: '… Transcribing' }[recordingState]
+  // Name the key that will be spent. Only one provider does speech today, so this is often NOT
+  // the provider selected in the model settings — worth saying before it appears on a bill.
+  const voiceProvider = chatState.voiceProvider || null
+  const micTitle = 'Hold to dictate. The text lands in the box for you to check before sending.' +
+    (voiceProvider ? ' Speech uses your ' + voiceProvider + ' key.' : '')
+  const micHtml = voiceReady
+    ? `<button type="button"
+        class="chat-mic-btn${recordingState !== 'idle' ? ' chat-mic-btn-live' : ''}"
+        data-action="dictate"
+        title="${escHtml(micTitle)}"
+        ${sending || recordingState === 'transcribing' ? 'disabled' : ''}>${micLabel}</button>`
+    : ''
+
   const inputAreaHtml = `<div class="chat-input-area">
         <textarea id="chatInput" class="chat-input" placeholder="Describe what you want..." rows="2" ${sending ? 'disabled' : ''}>${escHtml(draftMessage)}</textarea>
-        <button class="panel-cta chat-send-btn" data-action="send" ${sending ? 'disabled' : ''}>Send</button>
+        <div class="chat-input-actions">
+          ${micHtml}
+          ${webToggleHtml}
+          <button class="panel-cta chat-send-btn" data-action="send" ${sending ? 'disabled' : ''}>Send</button>
+        </div>
       </div>`
 
   container.innerHTML = `
@@ -353,6 +431,7 @@ export const renderChatPanel = ({ container, state, setState, renderOptions }) =
       ${renderRefactorBanner(chatState)}
       <div class="chat-messages" id="chatMessages">
         ${messagesHtml}
+        ${renderAccessRequestCard(chatState)}
         ${sending
           ? (streamingContent || streamingThinking || streamingFiles)
             ? `<div class="chat-msg chat-msg-assistant chat-msg-streaming">`
@@ -362,6 +441,7 @@ export const renderChatPanel = ({ container, state, setState, renderOptions }) =
               + `<div class="chat-spinner-inline"></div></div>`
             : '<div class="chat-msg chat-msg-assistant chat-msg-loading"><div class="chat-spinner"></div> Thinking...</div>'
           : ''}
+        ${renderWebPrompt(chatState)}
         ${chatError ? `<div class="chat-error-wrap"><div class="chat-error">${escHtml(chatError)}</div>${chatState.lastFailedMessage ? '<button class="panel-cta panel-cta-sm chat-retry-btn" data-action="retry">Retry</button>' : ''}</div>` : ''}
         ${launchBtnHtml}
       </div>
@@ -431,6 +511,47 @@ export const renderChatPanel = ({ container, state, setState, renderOptions }) =
   const input = container.querySelector('#chatInput')
   const sendBtn = container.querySelector('[data-action="send"]')
   const newChatBtn = container.querySelector('[data-action="new-chat"]')
+  const webBtn = container.querySelector('[data-action="toggle-web"]')
+  const retryWebBtn = container.querySelector('[data-action="retry-with-web"]')
+  const retryUncappedBtn = container.querySelector('[data-action="retry-uncapped"]')
+
+  if (webBtn) {
+    webBtn.onclick = () => {
+      const turningOn = !(state.chat?.webSearch === true)
+      // Sticky per app: a follow-up to a web-answered question usually needs the web too.
+      saveWebSearchPref(state.appName, turningOn)
+      setState((next) => {
+        if (!next.chat) next.chat = {}
+        next.chat.webSearch = turningOn
+        if (!turningOn) next.chat.webUncapped = false
+        next.chat.webPrompt = null
+        return next
+      }, { rerender: true, sourcePanel: 'chat' })
+    }
+  }
+
+  // Re-ask the SAME message with the web enabled. The user has now seen why it is needed, which
+  // is the whole point of not turning it on speculatively.
+  const resendWith = async ({ uncapped }) => {
+    const wp = state.chat?.webPrompt
+    if (!wp || !wp.message) return
+    saveWebSearchPref(state.appName, true)
+    setState((next) => {
+      if (!next.chat) next.chat = {}
+      next.chat.webSearch = true
+      next.chat.webUncapped = uncapped === true
+      next.chat.webPrompt = null
+      next.chat.error = null
+      return next
+    }, { rerender: false })
+
+    const currentState = { ...state }
+    currentState.chat = { ...(state.chat || {}), webSearch: true, webUncapped: uncapped === true, webPrompt: null, error: null }
+    await sendChatMessage(wp.message, currentState, setState)
+  }
+
+  if (retryWebBtn) retryWebBtn.onclick = () => resendWith({ uncapped: false })
+  if (retryUncappedBtn) retryUncappedBtn.onclick = () => resendWith({ uncapped: true })
 
   const syncDraftMessage = (value) => {
     // Mirror to localStorage as the user types so an abrupt shutdown doesn't lose the prompt.
@@ -480,8 +601,95 @@ export const renderChatPanel = ({ container, state, setState, renderOptions }) =
     autoResize()
   }
 
+  // Ask once per session whether voice is usable, then re-render so the mic can appear. Doing
+  // this here rather than at startup keeps it off the critical path — the chat is usable
+  // immediately and the button arrives a moment later.
+  if (chatState.voiceSupported === undefined) {
+    checkVoiceSupport().then(({ supported, provider }) => {
+      setState((next) => {
+        if (!next.chat) next.chat = {}
+        next.chat.voiceSupported = supported
+        next.chat.voiceProvider = provider
+        return next
+      })
+    })
+  }
+
+  const micBtn = container.querySelector('[data-action="dictate"]')
+  if (micBtn) {
+    // The recording state is painted DIRECTLY onto the button, with rerender:false, instead of
+    // going through a normal setState. A full rerender here would rebuild the input area in the
+    // middle of a press-and-hold: the textarea would be recreated (losing the caret), and the
+    // mousedown would have landed on an element that no longer exists by the time the user
+    // lets go. The state is still recorded so a later, unrelated rerender paints it correctly.
+    const MIC_LABELS = { idle: '🎤', recording: '⏺ Listening…', transcribing: '… Transcribing' }
+    const setRecording = (value) => {
+      micBtn.textContent = MIC_LABELS[value]
+      micBtn.classList.toggle('chat-mic-btn-live', value !== 'idle')
+      micBtn.disabled = value === 'transcribing'
+      setState((next) => {
+        if (!next.chat) next.chat = {}
+        next.chat.recording = value
+        return next
+      }, { rerender: false })
+    }
+
+    const begin = async (e) => {
+      e.preventDefault() // stop a touch from also firing the mouse handlers
+      if (isRecording() || sending) return
+      try {
+        await startDictation()
+        setRecording('recording')
+      } catch (err) {
+        // Overwhelmingly a denied mic permission. Say which, because "failed" sends people
+        // looking in the wrong place.
+        showError(err?.name === 'NotAllowedError'
+          ? 'Microphone access was blocked. Allow it in your browser to dictate.'
+          : 'Could not start recording: ' + (err?.message || 'unknown error'))
+        setRecording('idle')
+      }
+    }
+
+    const finish = async () => {
+      if (!isRecording()) return
+      setRecording('transcribing')
+      try {
+        const text = await stopDictationAndTranscribe()
+        if (text) {
+          // APPEND rather than replace: dictating twice, or dictating after typing, should add
+          // to what is there. And it goes in the box, never straight to send — see voiceDictation.js.
+          const current = container.querySelector('#chatInput')
+          const merged = current && current.value.trim() ? current.value.replace(/\s*$/, '') + ' ' + text : text
+          if (current) {
+            current.value = merged
+            // The textarea auto-grows on input; a programmatic value change fires no input
+            // event, so a dictated paragraph would sit in a two-row box without this.
+            current.style.height = 'auto'
+            current.style.height = Math.min(current.scrollHeight, 200) + 'px'
+          }
+          syncDraftMessage(merged)
+        }
+      } catch (err) {
+        showError('Could not transcribe: ' + (err?.message || 'unknown error'))
+      }
+      setRecording('idle')
+      const restored = container.querySelector('#chatInput')
+      if (restored) restored.focus()
+    }
+
+    // Hold to talk: press starts, release anywhere ends it. `mouseleave` matters — releasing
+    // outside the button would otherwise leave the mic open indefinitely.
+    micBtn.onmousedown = begin
+    micBtn.onmouseup = finish
+    micBtn.onmouseleave = () => { if (isRecording()) finish() }
+    micBtn.ontouchstart = begin
+    micBtn.ontouchend = (e) => { e.preventDefault(); finish() }
+    micBtn.ontouchcancel = () => { cancelDictation(); setRecording('idle') }
+  }
+
   if (newChatBtn) {
     newChatBtn.onclick = () => {
+      cancelDictation() // never leave the mic open across a chat reset
       clearChatDraft(state.appName)
       setState((next) => {
         if (!next.chat) next.chat = {}
@@ -493,6 +701,27 @@ export const renderChatPanel = ({ container, state, setState, renderOptions }) =
         next.chat.lastFailedMessage = null
         return next
       })
+    }
+  }
+
+  // Data-access consent. Allow mints a short-lived token (read-only unless the request was for
+  // write) and resumes the conversation; Don't allow resumes it with a refusal.
+  const accessAllowBtn = container.querySelector('[data-action="access-allow"]')
+  if (accessAllowBtn) {
+    accessAllowBtn.onclick = async () => {
+      accessAllowBtn.disabled = true
+      clearError()
+      const currentState = { ...state, chat: { ...(state.chat || {}), error: null } }
+      await grantDataAccess(currentState, setState)
+    }
+  }
+  const accessDenyBtn = container.querySelector('[data-action="access-deny"]')
+  if (accessDenyBtn) {
+    accessDenyBtn.onclick = async () => {
+      accessDenyBtn.disabled = true
+      clearError()
+      const currentState = { ...state, chat: { ...(state.chat || {}), error: null } }
+      await denyDataAccess(currentState, setState)
     }
   }
 

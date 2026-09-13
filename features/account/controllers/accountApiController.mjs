@@ -16,7 +16,9 @@ import { startsWithOneOf } from '../../../common/helpers/utils.mjs'
 import { deleteLocalFolderAndContents } from '../../../adapters/datastore/fsConnectors/fileHandler.mjs'
 import { OAUTH_PROVIDERS } from '../../oauth/services/providers/index.mjs'
 import { ensureContextDoc } from '../../creator/controllers/creatorApiController.mjs'
+import { identityOf, stampEdit } from '../../../common/helpers/provenance.mjs'
 import { decryptResourceSensitiveFields } from '../services/resourceCrypto.mjs'
+import { queryTallies, summarizeTallies, resolveRange } from '../services/usageTallyService.mjs'
 
 /**
  * Generate a one-time app password and corresponding app token
@@ -514,7 +516,7 @@ const handleChangePassword = async (req, res) => {
  *
  * Dependencies expected from middleware chain:
  * - req.session.logged_in_user_id
- * - req.params.getAction (getAppList, getUserPrefs, or getAppResourceUsage)
+ * - req.params.getAction (getAppList, getUserPrefs, getAppResourceUsage, getUsageTallies, getlogs)
  * - res.locals.freezr.userDS (from createAddUserDs)
  * - res.locals.freezr.freezrPrefs (from middleware)
  */
@@ -529,14 +531,57 @@ const handleGettingAccountInfo = async (req, res) => {
         return await handleGetUserPrefs(req, res)
       case 'getAppResourceUsage':
         return await handleGetAppResourceUsage(req, res)
+      case 'getUsageTallies':
+        return await handleGetUsageTallies(req, res)
       case 'getlogs':
         return await handleGetLogs(req, res)
+      case 'getLocalLlmCliStatus':
+        return await handleGetLocalLlmCliStatus(req, res)
       default:
         return sendFailure(res, 'Invalid action', 'accountApiController.handleGettingAccountInfo', 400)
     }
   } catch (error) {
     return sendFailure(res, error, 'accountApiController.handleGettingAccountInfo', 500)
   }
+}
+
+/**
+ * Eligibility snapshot for the ClaudeLocal (local Claude Code CLI) LLM connector, for the
+ * Account Resources page: whether the admin master pref is on, whether THIS user is an
+ * admin, and whether a runnable `claude` binary exists on this host. Read-only — the
+ * use-time enforcement lives in llmContext.mjs regardless of what this reports.
+ */
+const handleGetLocalLlmCliStatus = async (req, res) => {
+  const freezrPrefs = res.locals?.freezr?.freezrPrefs || {}
+  let claudePath = null
+  let codexPath = null
+  try {
+    const { findClaudeBinary } = await import('../../../adapters/llmConnectors/claudeLocal.mjs')
+    claudePath = findClaudeBinary()
+  } catch (e) {
+    console.warn('Could not probe for claude CLI binary:', e.message)
+  }
+  try {
+    const { findCodexBinary } = await import('../../../adapters/llmConnectors/codexLocal.mjs')
+    codexPath = findCodexBinary()
+  } catch (e) {
+    console.warn('Could not probe for codex CLI binary:', e.message)
+  }
+  const { localAgentsAllowedEverywhere, LOCAL_AGENT_ALLOWED_APPS } = await import('../../../common/helpers/localAgentPolicy.mjs')
+  return sendApiSuccess(res, {
+    enabled: !!freezrPrefs.local_llm_cli_enabled,
+    isAdmin: !!req.session?.logged_in_as_admin,
+    // Which apps may actually USE these connectors (creator only by default) — so the
+    // Resources page can say so rather than leaving a working-looking key that most apps
+    // silently never see. See common/helpers/localAgentPolicy.mjs.
+    allowedInAllApps: localAgentsAllowedEverywhere(),
+    allowedApps: LOCAL_AGENT_ALLOWED_APPS,
+    // claude fields keep their original flat names (the account page already reads them)
+    binaryFound: !!claudePath,
+    binaryPath: claudePath || null,
+    codexBinaryFound: !!codexPath,
+    codexBinaryPath: codexPath || null
+  })
 }
 
 /**
@@ -623,6 +668,34 @@ const handleGetUserPrefs = async (req, res) => {
  * Get app resource usage
  * Modernized version of account_handler.getAppResources
  */
+/**
+ * Metered-resource usage (LLM cost/token tallies) for the logged-in user.
+ *
+ * GET /acctapi/getUsageTallies?from=YYYY-MM-DD&to=YYYY-MM-DD&resource=llm&app_name=...
+ * Defaults to the last 30 days. Reads info.freezr.account.usageTallies, which the LLM
+ * routes write via features/account/services/usageTallyService.mjs.
+ */
+const handleGetUsageTallies = async (req, res) => {
+  const userDS = res.locals?.freezr?.userDS
+  if (!userDS) {
+    return sendFailure(res, 'User data store not available', 'accountApiController.handleGetUsageTallies', 500)
+  }
+
+  try {
+    const { from, to } = resolveRange({ from: req.query?.from, to: req.query?.to, days: req.query?.days })
+    const resource = (typeof req.query?.resource === 'string' && req.query.resource) ? req.query.resource : 'llm'
+    const appName = (typeof req.query?.app_name === 'string' && req.query.app_name) ? req.query.app_name : null
+
+    const tallyDb = await userDS.getorInitDb('info.freezr.account.usageTallies')
+    const rows = await queryTallies(tallyDb, { resource, from, to, appName })
+
+    return sendApiSuccess(res, { rows, summary: summarizeTallies(rows), from, to, resource })
+  } catch (error) {
+    console.error('❌ Error in handleGetUsageTallies:', error)
+    return sendFailure(res, error, 'accountApiController.handleGetUsageTallies', 500)
+  }
+}
+
 const handleGetAppResourceUsage = async (req, res) => {
   // onsole.log('💾 getAppResourceUsage called')
   
@@ -850,6 +923,39 @@ const updateAppFromFilesController = async (req, res) => {
       log: (msg, context) => { console.log('Error logger not available, using console.log:', msg, context) },
       error: (msg, context) => { console.error('Error logger not available, using console.error:', msg, context) },
       warn: (msg, context) => { console.error('Error logger not available, using console.warn:', msg, context) }
+    }
+
+    // Provenance: every re-install-from-files is an EDIT of the app — stamp authorship.last_modified
+    // (and record a first-time foreign contributor) on the manifest BEFORE the install service reads
+    // it, so the stamped manifest lands in the app-list record too. stampEdit only reports a change
+    // when identity actually differs, so a same-author re-install causes no manifest churn. It never
+    // auto-assigns main_author to a legacy authorless app (that is an explicit claim — see the
+    // ask-app "Add me as author" flow). Non-fatal: any error here must not block the install.
+    try {
+      const appFSForStamp = await userDS.getorInitAppFS(appName, {})
+      if (appFSForStamp && appFSForStamp.readAppFile && appFSForStamp.writeToAppFiles && !isSystemApp(appName)) {
+        const manifestRaw = await appFSForStamp.readAppFile('manifest.json')
+        if (manifestRaw) {
+          const manifestObj = JSON.parse(manifestRaw)
+          let restoredAuthorship = false
+          if (!manifestObj.authorship || !manifestObj.authorship.main_author) {
+            // A manifest rewrite (e.g. by the creator's LLM) may have dropped authorship — restore
+            // the last-known stamp from the app-list record so lineage is never silently lost.
+            const prevEntity = await userAppListDb.read_by_id(constructAppIdStringFrom(userId, appName))
+            const prevAuthorship = prevEntity?.manifest?.authorship
+            if (prevAuthorship && prevAuthorship.main_author) {
+              manifestObj.authorship = prevAuthorship
+              restoredAuthorship = true
+            }
+          }
+          const selfHost = res.locals?.freezr?.serverName || (req.protocol + '://' + req.get('host'))
+          if (stampEdit(manifestObj, identityOf(userId, selfHost)) || restoredAuthorship) {
+            await appFSForStamp.writeToAppFiles('manifest.json', JSON.stringify(manifestObj, null, 2), { doNotOverWrite: false })
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('updateAppFromFiles: could not stamp edit provenance (continuing):', e.message)
     }
 
     // Create update context
@@ -1537,11 +1643,85 @@ export const createConnectionDisconnectHandler = ({ dsManager, freezrPrefs }) =>
       // Always delete the local record, even if revoke didn't succeed.
       await resourcesDb.delete_record(resourceId)
 
+      // A disconnected connection must not keep receiving socket routing —
+      // drop its live-registry row (no-op for non-messaging connections).
+      try {
+        const { unregisterLive } = await import('../../connections/messaging/services/messagingRegistry.mjs')
+        await unregisterLive({ dsManager, freezrPrefs, ownerId: userId, connectionName: record.connectionName })
+      } catch (e) {
+        console.warn('connectionDisconnect: live-registry cleanup failed (non-fatal):', e?.message || e)
+      }
+
       res.locals.freezr.permGiven = true
       return sendApiSuccess(res, { success: true, revoked, connectionName: record.connectionName })
     } catch (error) {
       console.error('❌ Error in connectionDisconnect:', error)
       return sendFailure(res, error, 'connectionDisconnect', 500)
+    }
+  }
+}
+
+/**
+ * POST /acctapi/connection_set_live  body: { resource_id, live: boolean }
+ *
+ * The user-level (Tier 2) socket opt-in: toggles live socket-fed updates for
+ * one of the user's own messaging connections. live:true resolves the
+ * connection's provider identity (team + user id, using its own token) and
+ * writes the server-wide live-registry row the socket manager routes against;
+ * live:false removes it. The flag is also mirrored onto the connection record
+ * so /account/resources can render state without touching fradmin tables.
+ *
+ * Note this toggle grants nothing by itself: events only flow once the admin
+ * has ALSO enabled sockets (prefs + admission row + app token) — see
+ * socketManager.mjs. Guarded like connection_disconnect (account app only).
+ */
+export const createConnectionSetLiveHandler = ({ dsManager, freezrPrefs }) => {
+  return async (req, res) => {
+    try {
+      const userId = req.session?.logged_in_user_id
+      if (!userId) return sendFailure(res, 'User not logged in', 'connectionSetLive', 401)
+      const resourceId = req.body?.resource_id
+      const live = req.body?.live === true
+      if (!resourceId) return sendFailure(res, 'resource_id is required', 'connectionSetLive', 400)
+
+      const resourcesDb = await dsManager.getorInitDb(
+        { app_table: 'info.freezr.account.resources', owner: userId },
+        { freezrPrefs }
+      )
+      if (!resourcesDb) return sendFailure(res, 'Could not open user resources DB', 'connectionSetLive', 500)
+
+      const record = await resourcesDb.read_by_id(resourceId).catch(() => null)
+      if (!record || record.type !== 'connection') {
+        return sendFailure(res, 'Connection not found', 'connectionSetLive', 404)
+      }
+      if (!Array.isArray(record.services) || !record.services.includes('messaging')) {
+        return sendFailure(res, 'Live updates only apply to messaging connections', 'connectionSetLive', 400)
+      }
+
+      const { registerLive, unregisterLive } = await import('../../connections/messaging/services/messagingRegistry.mjs')
+      if (live) {
+        // Throws on bad token / unresolvable identity — correctly blocking the
+        // opt-in rather than writing a row that can't be routed.
+        await registerLive({ dsManager, freezrPrefs, ownerId: userId, connection: record })
+      } else {
+        await unregisterLive({ dsManager, freezrPrefs, ownerId: userId, connectionName: record.connectionName })
+      }
+      await resourcesDb.update(resourceId, { live }, { replaceAllFields: false })
+
+      // If the manager is running, pick up the change without a restart.
+      try {
+        const { getSocketManagerIfRunning } = await import('../../connections/messaging/services/socketManager.mjs')
+        const mgr = getSocketManagerIfRunning()
+        if (mgr && mgr.isRunning()) await mgr.refreshRoutes()
+      } catch (e) {
+        console.warn('connectionSetLive: route refresh failed (non-fatal):', e?.message || e)
+      }
+
+      res.locals.freezr.permGiven = true
+      return sendApiSuccess(res, { success: true, connectionName: record.connectionName, live })
+    } catch (error) {
+      console.error('❌ Error in connectionSetLive:', error)
+      return sendFailure(res, error, 'connectionSetLive', 500)
     }
   }
 }

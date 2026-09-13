@@ -3,9 +3,14 @@ import path from 'path'
 import crypto from 'crypto'
 import { zipSync } from 'fflate'
 import { sendApiSuccess, sendFailure } from '../../../adapters/http/responses.mjs'
-import { userAppListOAC, userPERMS_OAC, constructAppIdStringFrom, isSystemApp, validAppName } from '../../../common/helpers/config.mjs'
+import { userAppListOAC, userPERMS_OAC, constructAppIdStringFrom, isSystemApp, validAppName, isAskAppName, askAppSlug, ASK_APP_PREFIX, MAX_USER_NAME_LEN } from '../../../common/helpers/config.mjs'
 import { listAllUserApps } from '../../account/services/accountQueryService.mjs'
 import { deleteApp } from '../../account/services/appMgmtService.mjs'
+import { generateAndSaveAppPasswordForUser } from '../../account/services/passwordService.mjs'
+import { inspectTokenStore } from '../../../middleware/tokens/inspectTokenStore.mjs'
+import { validateAppFiles as runFileValidation } from '../services/appValidationService.mjs'
+import { askAppManifestSkeleton, askAppScaffoldFiles, askAppProtectedScaffoldFiles, ASKAPP_INDEX_MODULES, PROBE_HOOK_STUB } from '../askAppTemplate.mjs'
+import { identityOf, stampCreated, stampFork } from '../../../common/helpers/provenance.mjs'
 
 import { fileURLToPath } from 'url'
 const __filename = fileURLToPath(import.meta.url)
@@ -38,10 +43,98 @@ const collectFilePaths = (tree, out = []) => {
   return out
 }
 
+// On cloud hosts (Azure/AWS/…) the local disk under the repo root is a NON-authoritative, per-instance
+// cache — files an app owns live in the cloud store, and may be absent locally (fresh instance, eviction,
+// a best-effort local write that failed). So listing/zipping an app's files by reading the local FS
+// (fs.promises) silently misses files. These helpers read via the CONNECTOR (dsManager) for cloud
+// backends, falling back to the local FS only for the 'local'/'glitch' backends where the disk IS
+// authoritative. See freezr_askapp_sharing_summary.md (Azure file-visibility fix).
+const usesLocalDisk = (appFS) => {
+  const type = appFS && appFS.fsParams && appFS.fsParams.type
+  return !type || type === 'local' || type === 'glitch'
+}
+
+// Build a nested folder tree (same shape as buildFolderTree) from a FLAT list of relative file paths.
+const buildTreeFromPaths = (paths) => {
+  const root = []
+  const dirIndex = new Map() // relDir -> children array
+  const ensureDir = (relDir) => {
+    if (!relDir) return root
+    if (dirIndex.has(relDir)) return dirIndex.get(relDir)
+    const parts = relDir.split('/')
+    const parent = ensureDir(parts.slice(0, -1).join('/'))
+    const children = []
+    parent.push({ name: parts[parts.length - 1], path: relDir, type: 'folder', children })
+    dirIndex.set(relDir, children)
+    return children
+  }
+  for (const p of (paths || [])) {
+    if (!p) continue
+    const norm = String(p).replace(/\\/g, '/').replace(/^\/+/, '')
+    if (!norm) continue
+    const parts = norm.split('/')
+    ensureDir(parts.slice(0, -1).join('/')).push({ name: parts[parts.length - 1], path: norm, type: 'file' })
+  }
+  const sortTree = (nodes) => {
+    nodes.sort((a, b) => (a.type !== b.type ? (a.type === 'folder' ? -1 : 1) : a.name.localeCompare(b.name)))
+    for (const n of nodes) if (n.children) sortTree(n.children)
+    return nodes
+  }
+  return sortTree(root)
+}
+
+// All app file paths (relative), authoritative: connector for cloud, local FS for local/glitch.
+const listAppFilePaths = async (appFS) => {
+  if (!usesLocalDisk(appFS) && typeof appFS.readAppDir === 'function') {
+    const entries = await appFS.readAppDir('') // cloud connectors return a flat recursive list
+    return (entries || []).map((e) => String(e).replace(/\\/g, '/').replace(/^\/+/, '')).filter(Boolean)
+  }
+  const rootAbsPath = path.resolve(appFS.pathToFile(''))
+  if (!fs.existsSync(rootAbsPath)) return []
+  return collectFilePaths(await buildFolderTree(rootAbsPath, rootAbsPath)).map((p) => p.replace(/\\/g, '/'))
+}
+
+// All app files as {relPath: Uint8Array} for zipping — bytes read via readAppFile (connector-backed).
+const collectAppFileBuffers = async (appFS) => {
+  const result = {}
+  for (const rel of await listAppFilePaths(appFS)) {
+    try {
+      const buf = await appFS.readAppFile(rel, { doNotToString: true })
+      if (buf != null) result[rel] = new Uint8Array(Buffer.isBuffer(buf) ? buf : Buffer.from(buf))
+    } catch (e) { console.warn('collectAppFileBuffers: could not read', rel, e.message) }
+  }
+  return result
+}
+
 const TEXT_EXTENSIONS = new Set(['html', 'htm', 'css', 'js', 'mjs', 'json', 'md', 'txt', 'svg', 'xml', 'csv', 'yaml', 'yml'])
 const isTextFile = (filePath) => {
   const ext = filePath.split('.').pop().toLowerCase()
   return TEXT_EXTENSIONS.has(ext)
+}
+
+// Non-text app files (images, PDFs, fonts, media) are never part of the LLM's text context, so the
+// model has always been blind to them — including images it generated itself, which made "make that
+// logo bluer" impossible. These are inventoried (path + type + size) so the model KNOWS they exist
+// and can ask to SEE the ones it can actually read: the LLM APIs accept images and PDFs as input
+// (Claude: image / document blocks), so those are `viewable`. Video is NOT an accepted input on any
+// current model — a video asset is listed but flagged unviewable so the model doesn't ask for it.
+const ASSET_MIME_BY_EXT = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+  bmp: 'image/bmp', ico: 'image/x-icon', pdf: 'application/pdf',
+  mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mp3: 'audio/mpeg', wav: 'audio/wav',
+  woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf', zip: 'application/zip'
+}
+const VIEWABLE_ASSET_MIMES = /^(image\/(png|jpeg|gif|webp)|application\/pdf)$/
+// Inventory only files we can actually name a type for, and never dot-files/dot-folders — otherwise
+// the list fills with .DS_Store and extension-less junk (LICENSE etc.), which is pure context noise.
+const assetInfo = (filePath) => {
+  const segments = String(filePath).split('/')
+  if (segments.some((seg) => seg.startsWith('.'))) return null
+  const name = segments[segments.length - 1]
+  if (!name.includes('.')) return null
+  const mime = ASSET_MIME_BY_EXT[name.split('.').pop().toLowerCase()]
+  if (!mime) return null
+  return { mime, viewable: VIEWABLE_ASSET_MIMES.test(mime) }
 }
 
 const FREEZR_API_PATH = path.resolve(__dirname, '../../../freezrsystmapps/info.freezr.public/public/freezrApiV2.js')
@@ -121,6 +214,206 @@ const BLANK_INDEX_CSS = `#app {
 const BLANK_INDEX_JS = `console.log('App loaded.')
 `
 
+// Creates a new app's app_list record + a blank file scaffold (manifest + index.html/css/js +
+// context doc). Shared by createBlankApp and createAskApp. Throws an Error with code 'EXISTS'
+// if the app already exists so callers can retry with a different name. Does NOT validate the
+// app name — the caller does that (validAppName for ordinary apps, validAskAppName (removed) — validAppName for ask-apps).
+const persistNewApp = async ({ userDS, userId, freezrPrefs, appName, appDisplayName, manifest, extraEntityFields, scaffoldFiles }) => {
+  const userAppListDb = await userDS.getorInitDb(userAppListOAC(userId), { freezrPrefs })
+  if (!userAppListDb) throw new Error('Could not access app list database.')
+
+  const appNameId = constructAppIdStringFrom(userId, appName)
+  const existingEntity = await userAppListDb.read_by_id(appNameId)
+  if (existingEntity) {
+    const err = new Error('App already exists: ' + appName)
+    err.code = 'EXISTS'
+    throw err
+  }
+
+  const appEntity = {
+    app_name: appName,
+    app_display_name: appDisplayName || appName,
+    manifest,
+    warnings: [],
+    installed: new Date().toISOString(),
+    removed: false,
+    ...(extraEntityFields || {})
+  }
+  await userAppListDb.create(appNameId, appEntity, null)
+
+  const appFS = await userDS.getorInitAppFS(appName, {})
+  if (!appFS || !appFS.writeToAppFiles) throw new Error('Could not initialise app filesystem.')
+
+  await appFS.writeToAppFiles('manifest.json', JSON.stringify(manifest, null, 2), { doNotOverWrite: false })
+  if (Array.isArray(scaffoldFiles) && scaffoldFiles.length) {
+    // Caller-provided scaffold (e.g. the ask-app shell + base files) instead of the blank defaults.
+    for (const f of scaffoldFiles) await appFS.writeToAppFiles(f.path, f.content || '', { doNotOverWrite: false })
+  } else {
+    await appFS.writeToAppFiles('index.html', BLANK_INDEX_HTML, { doNotOverWrite: false })
+    await appFS.writeToAppFiles('index.css', BLANK_INDEX_CSS, { doNotOverWrite: false })
+    await appFS.writeToAppFiles('index.js', BLANK_INDEX_JS, { doNotOverWrite: false })
+  }
+
+  try {
+    await ensureContextDoc(appFS)
+  } catch (err) {
+    console.warn('persistNewApp: could not write context doc:', err.message)
+  }
+
+  return { appFS, appEntity }
+}
+
+// Trims one installed app's embedded manifest down to what the ask-app builder's Stage-1 routing
+// LLM needs to pick relevant apps: names, description, table field descriptions, and a permission
+// summary — NO source code, NO full field schemas. See freezr_askapps_plan_v1.md §5d.
+const projectAppForContext = (app) => {
+  const manifest = app.manifest || {}
+
+  const appTables = {}
+  if (manifest.app_tables && typeof manifest.app_tables === 'object') {
+    for (const [tableName, tableDef] of Object.entries(manifest.app_tables)) {
+      const fields = {}
+      // Manifests define columns under either `field_names` or `schema` — support both (previously only
+      // field_names, so schema-based apps like vcTracker were sent with EMPTY field info).
+      const fieldDefs = (tableDef && (tableDef.field_names || tableDef.schema)) || {}
+      for (const [fieldName, fieldDef] of Object.entries(fieldDefs)) {
+        fields[fieldName] = (fieldDef && (fieldDef.description || fieldDef.type)) || ''
+      }
+      // Keep the table-level description too — it usually explains what the entity is and how it relates
+      // to the others, which the model needs to query the right table.
+      appTables[tableName] = (tableDef && tableDef.description) ? { description: tableDef.description, fields } : { fields }
+    }
+  }
+
+  const permissions = Array.isArray(manifest.permissions)
+    ? manifest.permissions
+        .filter((p) => p && p.type)
+        .map((p) => ({ name: p.name, type: p.type, table_id: p.table_id }))
+    : []
+
+  // A flat list of the app's source files (path + one-line description) so the Stage-1 routing LLM
+  // can request specific files to reuse. Drawn from manifest.files (the app's documented list) plus
+  // the file references in each page. No file contents — just paths.
+  const files = []
+  const seen = new Set()
+  const addFile = (path, description) => {
+    if (path && !seen.has(path)) { seen.add(path); files.push({ path, description: description || '' }) }
+  }
+  // Some manifests store a page's file refs as a bare string rather than an array — coerce.
+  const asArray = (v) => (Array.isArray(v) ? v : (v ? [v] : []))
+  if (Array.isArray(manifest.files)) manifest.files.forEach((f) => f && addFile(f.path, f.description))
+  if (manifest.pages && typeof manifest.pages === 'object') {
+    for (const page of Object.values(manifest.pages)) {
+      if (!page) continue
+      addFile(page.html_file, 'page html')
+      asArray(page.modules).forEach((m) => addFile(m, 'page module'))
+      asArray(page.script_files).forEach((m) => addFile(m, 'page script'))
+      asArray(page.css_files).forEach((m) => addFile(m, 'page css'))
+    }
+  }
+
+  return {
+    app_name: app.app_name,
+    app_type: app.app_type || null,
+    _date_modified: app._date_modified || null,
+    display_name: manifest.display_name || app.app_display_name || app.app_name,
+    description: manifest.description || '',
+    version: manifest.version || null,
+    // Authorship (who first built it) — surfaced as "by: X" in the app list. See freezr_askapp_sharing_summary.md §3.
+    authorship: manifest.authorship || null,
+    // Optional per-app guidance for LLMs building pages against this app's data (e.g. how to decrypt
+    // encrypted fields, which module to copy). Sent to both routing and build stages. See §"special_instructions".
+    special_instructions: manifest.special_instructions || null,
+    // Services this app offers to other apps: { description, contract } where contract is the
+    // path of its contract doc (usually app-comms.md). Lets routing/reference LLMs know the app
+    // can be interacted with, not just read.
+    app_services: manifest.app_services || null,
+    app_tables: appTables,
+    files,
+    permissions
+  }
+}
+
+// A MUCH leaner projection for "which of the user's apps does this request refer to?" — the only
+// question the creator chat's app_reference app_list pass has to answer. Table NAMES + descriptions,
+// no field schemas, no file list. The full projectAppForContext runs ~165KB over ~30 apps (≈41k
+// tokens) because it carries every field of every table plus every file description; injected as a
+// follow-up message that alone could exhaust the model's output budget (observed: an empty response
+// with stopReason 'max_tokens'). This is ~16KB for the same apps. The /ask Stage-1 router keeps the
+// full projection — it needs field-level detail to route a DATA question.
+const projectAppForSummary = (app) => {
+  const manifest = app.manifest || {}
+  const tables = {}
+  if (manifest.app_tables && typeof manifest.app_tables === 'object') {
+    for (const [tableName, tableDef] of Object.entries(manifest.app_tables)) {
+      tables[tableName] = String((tableDef && tableDef.description) || '').slice(0, 200)
+    }
+  }
+  return {
+    app_name: app.app_name,
+    app_type: app.app_type || null,
+    display_name: manifest.display_name || app.app_display_name || app.app_name,
+    description: String(manifest.description || '').slice(0, 400),
+    // Services this app offers to OTHER apps (the whole point of the app_list pass for inter-app
+    // work): the summary + where its contract doc lives.
+    app_services: manifest.app_services || null,
+    offers_services: !!manifest.app_services,
+    tables
+  }
+}
+
+// The manifest projection a REQUESTER app needs, for the app_reference "manifest" want.
+// A full manifest is mostly irrelevant to another app AND can be enormous (superlazy: 134KB, of
+// which 51% is per-file descriptions and 9% is page defs) — big enough that it used to be cut by
+// the client's file-size cap, which left the model with UNPARSEABLE JSON. So:
+//   - drop `pages` and `files` entirely (this app's internal structure/docs)
+//   - keep full schemas ONLY for tables this app EXPOSES to other apps (those named in its
+//     share_records / message_records / read_all / write_all / write_own permissions) — for
+//     superlazy that resolves to exactly inputs / email_bodies / subscription_deliveries, the
+//     tables its own contract tells requesters to read
+//   - keep name + description for every other table, so the model knows they exist
+// Returns { manifest_reference, omitted } — `omitted` is reported to the model so it can ask for a
+// specific key or table if it genuinely needs more (bounded override rather than a silent cap).
+const KEYS_KEPT_FOR_REFERENCE = ['identifier', 'version', 'display_name', 'description', 'app_services', 'authorship', 'jobs', 'permissions', 'special_instructions']
+const PERM_TYPES_EXPOSING_TABLES = new Set(['share_records', 'message_records', 'read_all', 'write_all', 'write_own'])
+
+export const projectManifestForReference = (manifest) => {
+  const m = manifest || {}
+  const ref = {}
+  for (const key of KEYS_KEPT_FOR_REFERENCE) {
+    if (m[key] !== undefined && m[key] !== null) ref[key] = m[key]
+  }
+
+  // Which of this app's own tables are reachable by another app?
+  const exposedTables = new Set()
+  for (const perm of (Array.isArray(m.permissions) ? m.permissions : [])) {
+    if (!perm || !PERM_TYPES_EXPOSING_TABLES.has(perm.type)) continue
+    const tableIds = [...(perm.table_id ? [perm.table_id] : []), ...(Array.isArray(perm.table_ids) ? perm.table_ids : [])]
+    for (const tableId of tableIds) {
+      if (typeof tableId === 'string' && tableId) exposedTables.add(tableId.split('.').pop())
+    }
+  }
+
+  const appTables = {}
+  const summarizedTables = []
+  for (const [tableName, tableDef] of Object.entries((m.app_tables && typeof m.app_tables === 'object') ? m.app_tables : {})) {
+    if (exposedTables.has(tableName)) {
+      appTables[tableName] = tableDef // full schema — a requester can actually read this one
+    } else {
+      appTables[tableName] = { description: (tableDef && tableDef.description) || null }
+      summarizedTables.push(tableName)
+    }
+  }
+  if (Object.keys(appTables).length) ref.app_tables = appTables
+
+  const omitted = []
+  if (m.pages && Object.keys(m.pages).length) omitted.push('pages (' + Object.keys(m.pages).length + ' page definitions — internal to that app)')
+  if (Array.isArray(m.files) && m.files.length) omitted.push('files (' + m.files.length + ' per-file descriptions — internal to that app)')
+  if (summarizedTables.length) omitted.push('full field schemas for ' + summarizedTables.length + ' table(s) not exposed to other apps (name + description kept): ' + summarizedTables.join(', '))
+
+  return { manifest_reference: ref, omitted }
+}
+
 export const createCreatorApiController = () => {
   const createBlankApp = async (req, res) => {
     try {
@@ -134,7 +427,9 @@ export const createCreatorApiController = () => {
         return sendFailure(res, 'User not logged in.', 'creatorApiController.createBlankApp', 401)
       }
 
-      if (isSystemApp(appName) || !validAppName(appName)) {
+      // The user-facing create flow refuses the reserved ask-app. namespace (ask-apps are made
+      // via createAskApp). validAppName itself accepts ask-app.* — they are valid app names.
+      if (isSystemApp(appName) || isAskAppName(appName) || !validAppName(appName)) {
         return sendFailure(res, 'App name not allowed: ' + appName, 'creatorApiController.createBlankApp', 400)
       }
 
@@ -145,45 +440,19 @@ export const createCreatorApiController = () => {
 
       const freezrPrefs = res.locals?.freezr?.freezrPrefs
 
-      const userAppListDb = await userDS.getorInitDb(userAppListOAC(userId), { freezrPrefs })
-      if (!userAppListDb) {
-        return sendFailure(res, 'Could not access app list database.', 'creatorApiController.createBlankApp', 500)
-      }
-
-      const appNameId = constructAppIdStringFrom(userId, appName)
-      const existingEntity = await userAppListDb.read_by_id(appNameId)
-      if (existingEntity) {
-        return sendFailure(res, 'App already exists: ' + appName, 'creatorApiController.createBlankApp', 400)
-      }
-
       const manifest = { identifier: appName, version: '0.01', pages: { index: { html_file: 'index.html', css_files: 'index.css', script_files: 'index.js', 'page_title': 'Welcome to ' + appName } } }
-
-      const appEntity = {
-        app_name: appName,
-        app_display_name: appName,
-        manifest,
-        warnings: [],
-        installed: new Date().toISOString(),
-        removed: false
-      }
-
-      await userAppListDb.create(appNameId, appEntity, null)
-
-      const appFS = await userDS.getorInitAppFS(appName, {})
-      if (!appFS || !appFS.writeToAppFiles) {
-        return sendFailure(res, 'Could not initialise app filesystem.', 'creatorApiController.createBlankApp', 500)
-      }
-
-      const manifestJson = JSON.stringify(manifest, null, 2)
-      await appFS.writeToAppFiles('manifest.json', manifestJson, { doNotOverWrite: false })
-      await appFS.writeToAppFiles('index.html', BLANK_INDEX_HTML, { doNotOverWrite: false })
-      await appFS.writeToAppFiles('index.css', BLANK_INDEX_CSS, { doNotOverWrite: false })
-      await appFS.writeToAppFiles('index.js', BLANK_INDEX_JS, { doNotOverWrite: false })
+      // Provenance: stamp authorship at creation (host derived like freezrMeta.serverAddress, so the
+      // creator's own later edits match main_author). See common/helpers/provenance.mjs for the schema.
+      const selfHost = res.locals?.freezr?.serverName || (req.protocol + '://' + req.get('host'))
+      stampCreated(manifest, identityOf(userId, selfHost))
 
       try {
-        await ensureContextDoc(appFS)
+        await persistNewApp({ userDS, userId, freezrPrefs, appName, appDisplayName: appName, manifest })
       } catch (err) {
-        console.warn('createBlankApp: could not write context doc:', err.message)
+        if (err && err.code === 'EXISTS') {
+          return sendFailure(res, 'App already exists: ' + appName, 'creatorApiController.createBlankApp', 400)
+        }
+        throw err
       }
 
       return sendApiSuccess(res, {
@@ -194,6 +463,80 @@ export const createCreatorApiController = () => {
     } catch (error) {
       console.error('creatorApiController.createBlankApp error:', error)
       return sendFailure(res, error, 'creatorApiController.createBlankApp', 500)
+    }
+  }
+
+  // Creates a ask-app (an LLM-generated data page — see freezr_askapps_plan_v1.md). Unlike
+  // createBlankApp, the caller supplies a free-text display name / question rather than an app
+  // name; the server generates a unique `ask-app.{slug}.{suffix}` name in the reserved namespace
+  // and stamps app_type:'askapp' on the app-list record. The generated files are blank placeholders
+  // that the builder's LLM pipeline (Slice 2) overwrites.
+  const createAskApp = async (req, res) => {
+    try {
+      const userId = req.session?.logged_in_user_id
+      if (!userId) {
+        return sendFailure(res, 'User not logged in.', 'creatorApiController.createAskApp', 401)
+      }
+
+      const displayName = (req.body?.display_name || req.body?.query || '').toString().trim()
+      if (!displayName) {
+        return sendFailure(res, 'A display name or query is required.', 'creatorApiController.createAskApp', 400)
+      }
+
+      const userDS = res.locals?.freezr?.userDS
+      if (!userDS) {
+        return sendFailure(res, 'User data store not available.', 'creatorApiController.createAskApp', 500)
+      }
+      const freezrPrefs = res.locals?.freezr?.freezrPrefs
+
+      // Fit `ask-app.{slug}.{suffix}` within MAX_USER_NAME_LEN.
+      const SUFFIX_LEN = 4
+      const maxSlug = MAX_USER_NAME_LEN - ASK_APP_PREFIX.length - 1 - SUFFIX_LEN
+      const slug = (askAppSlug(displayName).slice(0, maxSlug).replace(/-+$/, '')) || 'app'
+
+      // Stamp authorship at creation (robust — not reliant on the first client build). Host is derived
+      // the same way freezrMeta.serverAddress is (context.mjs serverName = protocol + host), so the
+      // creator's own later edits match main_author and are NOT recorded as a foreign contributor.
+      // See freezr_askapp_sharing_summary.md §3 (Manifest authorship schema).
+      const selfHost = res.locals?.freezr?.serverName || (req.protocol + '://' + req.get('host'))
+      const author = { id: userId, host: selfHost, date: Date.now() }
+
+      let appName = null
+      let lastErr = null
+      for (let attempt = 0; attempt < 5 && !appName; attempt++) {
+        const suffix = crypto.randomBytes(4).toString('hex').slice(0, SUFFIX_LEN)
+        const candidate = ASK_APP_PREFIX + slug + '.' + suffix
+        // A ask-app is a normal app in the reserved namespace: it must be a valid app name AND
+        // carry the ask-app. prefix (true by construction here — belt and suspenders).
+        if (!isAskAppName(candidate) || !validAppName(candidate)) {
+          lastErr = new Error('Generated an invalid ask-app name: ' + candidate)
+          continue
+        }
+        const manifest = {
+          identifier: candidate,
+          version: '0.01',
+          app_type: 'askapp',
+          display_name: displayName,
+          ...askAppManifestSkeleton(displayName)
+        }
+        stampCreated(manifest, author) // authorship { main_author, last_modified, contributors, history }
+        try {
+          await persistNewApp({ userDS, userId, freezrPrefs, appName: candidate, appDisplayName: displayName, manifest, extraEntityFields: { app_type: 'askapp' }, scaffoldFiles: askAppScaffoldFiles() })
+          appName = candidate
+        } catch (err) {
+          if (err && err.code === 'EXISTS') { lastErr = err; continue }
+          throw err
+        }
+      }
+
+      if (!appName) {
+        return sendFailure(res, lastErr || 'Could not allocate a unique ask-app name.', 'creatorApiController.createAskApp', 500)
+      }
+
+      return sendApiSuccess(res, { success: true, app_name: appName, app_type: 'askapp', display_name: displayName })
+    } catch (error) {
+      console.error('creatorApiController.createAskApp error:', error)
+      return sendFailure(res, error, 'creatorApiController.createAskApp', 500)
     }
   }
 
@@ -219,6 +562,85 @@ export const createCreatorApiController = () => {
     }
   }
 
+  // Stage-1 context for the ask-app builder: a trimmed projection of EVERY installed app's manifest
+  // (names, description, table field descriptions, permission summary) so the routing LLM can pick
+  // which app(s) a question is about. Excludes system apps and removed apps. See §5d / Phase 1.3.
+  const getInstalledAppsContext = async (req, res) => {
+    try {
+      const userDS = res.locals?.freezr?.userDS
+      if (!userDS) {
+        return sendFailure(res, 'User data store not available.', 'creatorApiController.getInstalledAppsContext', 500)
+      }
+
+      const { user_apps, error } = await listAllUserApps(userDS, { includeManifest: true })
+      if (error) {
+        return sendFailure(res, error, 'creatorApiController.getInstalledAppsContext', 500)
+      }
+
+      // detail=summary → the LEAN projection (app identity + services + table names only), for the
+      // creator chat's app_reference app_list pass, where the only question is WHICH app is meant.
+      // Default stays the full projection: /ask Stage-1 routes DATA questions and needs field detail.
+      const wantSummary = (req.query?.detail || req.body?.detail) === 'summary'
+      const apps = (user_apps || [])
+        .filter((app) => !isSystemApp(app.app_name) && !app.removed)
+        .map(wantSummary ? projectAppForSummary : projectAppForContext)
+
+      return sendApiSuccess(res, { success: true, apps, detail: wantSummary ? 'summary' : 'full' })
+    } catch (error) {
+      console.error('creatorApiController.getInstalledAppsContext error:', error)
+      return sendFailure(res, error, 'creatorApiController.getInstalledAppsContext', 500)
+    }
+  }
+
+  // The reference view of ONE app's manifest, for the creator chat's app_reference flow: a
+  // purpose-built projection (see projectManifestForReference) instead of a raw manifest that can be
+  // 130KB+ and mostly irrelevant to a requester app. Read from the app's manifest.json on disk (the
+  // authoritative copy the developer edits), NOT the app-list record.
+  const getManifestReference = async (req, res) => {
+    const FUNC = 'creatorApiController.getManifestReference'
+    try {
+      const appName = req.query?.app_name || req.body?.app_name
+      if (!appName || String(appName).includes('..')) {
+        return sendFailure(res, 'app_name is required.', FUNC, 400)
+      }
+      const userDS = res.locals?.freezr?.userDS
+      if (!userDS) return sendFailure(res, 'User data store not available.', FUNC, 500)
+
+      const appFS = await userDS.getorInitAppFS(appName, {})
+      if (!appFS || !appFS.readAppFile) return sendFailure(res, 'Could not access app filesystem.', FUNC, 500)
+
+      let raw = null
+      try {
+        raw = await appFS.readAppFile('manifest.json')
+      } catch (err) {
+        return sendFailure(res, 'Could not read manifest.json for ' + appName + ': ' + err.message, FUNC, 404)
+      }
+      if (!raw) return sendFailure(res, 'No manifest.json found for ' + appName, FUNC, 404)
+
+      let manifest = null
+      try {
+        manifest = JSON.parse(raw)
+      } catch (err) {
+        return sendFailure(res, 'manifest.json for ' + appName + ' is not valid JSON: ' + err.message, FUNC, 422)
+      }
+
+      const { manifest_reference: manifestReference, omitted } = projectManifestForReference(manifest)
+      // The contract doc's path, so the caller can fetch it without re-parsing the manifest.
+      const contractPath = (manifest.app_services && manifest.app_services.contract) || null
+      return sendApiSuccess(res, {
+        success: true,
+        app_name: appName,
+        manifest_reference: manifestReference,
+        omitted,
+        contract_path: contractPath,
+        full_manifest_chars: String(raw).length
+      })
+    } catch (error) {
+      console.error(FUNC + ' error:', error)
+      return sendFailure(res, error, FUNC, 500)
+    }
+  }
+
   const readFolder = async (req, res) => {
     try {
       const appName = req.query?.app_name || req.body?.app_name
@@ -241,14 +663,14 @@ export const createCreatorApiController = () => {
         return sendFailure(res, 'Could not access app filesystem.', 'creatorApiController.readFolder', 500)
       }
 
-      const rootRelPath = appFS.pathToFile('')
-      const rootAbsPath = path.resolve(rootRelPath)
-
-      if (!fs.existsSync(rootAbsPath)) {
-        return sendApiSuccess(res, { success: true, tree: [] })
+      // Cloud backends: list via the connector (authoritative). Local/glitch: read the local disk.
+      let tree
+      if (!usesLocalDisk(appFS) && typeof appFS.readAppDir === 'function') {
+        tree = buildTreeFromPaths(await appFS.readAppDir(''))
+      } else {
+        const rootAbsPath = path.resolve(appFS.pathToFile(''))
+        tree = fs.existsSync(rootAbsPath) ? await buildFolderTree(rootAbsPath, rootAbsPath) : []
       }
-
-      const tree = await buildFolderTree(rootAbsPath, rootAbsPath)
       return sendApiSuccess(res, { success: true, tree })
     } catch (error) {
       console.error('creatorApiController.readFolder error:', error)
@@ -303,22 +725,29 @@ export const createCreatorApiController = () => {
         return sendFailure(res, 'Could not access app filesystem.', 'creatorApiController.readAllFiles', 500)
       }
 
-      const rootRelPath = appFS.pathToFile('')
-      const rootAbsPath = path.resolve(rootRelPath)
       const files = []
-
-      if (fs.existsSync(rootAbsPath)) {
-        const tree = await buildFolderTree(rootAbsPath, rootAbsPath)
-        const filePaths = collectFilePaths(tree)
-
-        for (const filePath of filePaths) {
-          if (!isTextFile(filePath)) continue
-          try {
-            const content = await appFS.readAppFile(filePath)
-            files.push({ path: filePath, content })
-          } catch (err) {
-            files.push({ path: filePath, content: null, error: err.message })
+      const assets = [] // non-text files: inventory only (path/type/size), never content
+      const filePaths = await listAppFilePaths(appFS) // connector for cloud, local FS for local/glitch
+      const localDisk = usesLocalDisk(appFS)
+      for (const filePath of filePaths) {
+        if (!isTextFile(filePath)) {
+          const info = assetInfo(filePath)
+          if (!info) continue // unrecognised / dot-file — not an asset worth telling the model about
+          const { mime, viewable } = info
+          let size = null
+          // Size is a nicety (it tells the model whether an asset is worth requesting), so only take
+          // it where it is free — a local stat. Never read the bytes just to measure them.
+          if (localDisk && appFS.pathToFile) {
+            try { size = (await fs.promises.stat(path.resolve(appFS.pathToFile(filePath)))).size } catch (e) { /* size unknown */ }
           }
+          assets.push({ path: filePath, mime, viewable, size })
+          continue
+        }
+        try {
+          const content = await appFS.readAppFile(filePath)
+          files.push({ path: filePath, content })
+        } catch (err) {
+          files.push({ path: filePath, content: null, error: err.message })
         }
       }
 
@@ -332,7 +761,7 @@ export const createCreatorApiController = () => {
         files.push({ path: '__freezrApiV2.js', content: freezrApiContent, readOnly: true })
       }
 
-      return sendApiSuccess(res, { success: true, files })
+      return sendApiSuccess(res, { success: true, files, assets })
     } catch (error) {
       console.error('creatorApiController.readAllFiles error:', error)
       return sendFailure(res, error, 'creatorApiController.readAllFiles', 500)
@@ -364,26 +793,23 @@ export const createCreatorApiController = () => {
       }
 
       if (action === 'delete') {
-        const absPath = path.resolve(appFS.pathToFile(filePath))
-        if (fs.existsSync(absPath)) {
-          await fs.promises.unlink(absPath)
-        }
+        // Delete via the connector (authoritative backend + local cache) — NOT just the local disk,
+        // else the cloud copy survives and the file reappears. Guard root/traversal.
+        if (!filePath || filePath === '/' || filePath === '.') return sendFailure(res, 'Invalid file path.', 'creatorApiController.writeAppFile', 400)
+        if (typeof appFS.deleteAppFile === 'function') await appFS.deleteAppFile(filePath)
+        else { const absPath = path.resolve(appFS.pathToFile(filePath)); if (fs.existsSync(absPath)) await fs.promises.unlink(absPath) }
         return sendApiSuccess(res, { success: true, file_path: filePath, action: 'deleted' })
       }
 
       if (action === 'delete_folder') {
+        // Confine to the app dir (traversal/root guard), then delete via the connector.
         const absPath = path.resolve(appFS.pathToFile(filePath))
         const rootAbs = path.resolve(appFS.pathToFile(''))
         if (absPath === rootAbs || !absPath.startsWith(rootAbs + path.sep)) {
           return sendFailure(res, 'Cannot delete root or paths outside app.', 'creatorApiController.writeAppFile', 400)
         }
-        if (fs.existsSync(absPath)) {
-          const stat = await fs.promises.stat(absPath)
-          if (!stat.isDirectory()) {
-            return sendFailure(res, 'Path is not a folder.', 'creatorApiController.writeAppFile', 400)
-          }
-          await fs.promises.rm(absPath, { recursive: true, force: true })
-        }
+        if (typeof appFS.deleteAppFolder === 'function') await appFS.deleteAppFolder(filePath)
+        else if (fs.existsSync(absPath)) await fs.promises.rm(absPath, { recursive: true, force: true })
         return sendApiSuccess(res, { success: true, file_path: filePath, action: 'folder_deleted' })
       }
 
@@ -396,6 +822,191 @@ export const createCreatorApiController = () => {
     } catch (error) {
       console.error('creatorApiController.writeAppFile error:', error)
       return sendFailure(res, error, 'creatorApiController.writeAppFile', 500)
+    }
+  }
+
+  // Server-side copy of unchanged source files (e.g. an app's decryption/render modules) straight into
+  // the target app's imported/<source_app>/<path>. Used by the ask-app builder so large reusable files
+  // are copied on disk rather than regenerated by the LLM and re-uploaded — a big time/token saving.
+  const copyAppFiles = async (req, res) => {
+    const FUNC = 'creatorApiController.copyAppFiles'
+    try {
+      const targetApp = req.body?.target_app
+      const sources = req.body?.sources // [{ app, path }]
+      if (!targetApp || !Array.isArray(sources)) {
+        return sendFailure(res, 'target_app and sources[] are required.', FUNC, 400)
+      }
+      const userDS = res.locals?.freezr?.userDS
+      if (!userDS) return sendFailure(res, 'User data store not available.', FUNC, 500)
+
+      const targetFS = await userDS.getorInitAppFS(targetApp, {})
+      if (!targetFS || !targetFS.writeToAppFiles) {
+        return sendFailure(res, 'Could not access target app filesystem.', FUNC, 500)
+      }
+
+      const copied = []
+      const errors = []
+      const srcFSCache = {}
+      for (const s of sources) {
+        if (!s || !s.app || !s.path || String(s.app).includes('..') || String(s.path).includes('..')) {
+          errors.push({ ...(s || {}), error: 'invalid source' }); continue
+        }
+        try {
+          if (!srcFSCache[s.app]) srcFSCache[s.app] = await userDS.getorInitAppFS(s.app, {})
+          const srcFS = srcFSCache[s.app]
+          if (!srcFS || !srcFS.readAppFile) { errors.push({ app: s.app, path: s.path, error: 'no source filesystem' }); continue }
+          const content = await srcFS.readAppFile(s.path)
+          const destPath = 'imported/' + s.app + '/' + s.path
+          await targetFS.writeToAppFiles(destPath, content, { doNotOverWrite: false })
+          copied.push({ app: s.app, path: s.path, dest: destPath })
+        } catch (err) {
+          errors.push({ app: s.app, path: s.path, error: err.message })
+        }
+      }
+      return sendApiSuccess(res, { success: true, copied, errors })
+    } catch (error) {
+      console.error(FUNC + ' error:', error)
+      return sendFailure(res, error, FUNC, 500)
+    }
+  }
+
+  // Fork: copy EVERY file of source_app into target_app's ROOT (not imported/), rewriting every
+  // occurrence of the source app id to the target app id in text files — so the copy runs against
+  // its own tables and pages (nav URLs, fallback literals, manifest identifier + own table_ids all
+  // carry the full app id; other apps' table_ids are naturally untouched). Skips dot-files/folders
+  // (.git, .DS_Store, .freezr-access.local.json) and freezr-context.md (the target keeps its own).
+  // Used by the creator chat's app_reference "fork" flow ("build an app like X").
+  const cloneAppFiles = async (req, res) => {
+    const FUNC = 'creatorApiController.cloneAppFiles'
+    try {
+      const sourceApp = req.body?.source_app
+      const targetApp = req.body?.target_app
+      if (!sourceApp || !targetApp || String(sourceApp).includes('..') || String(targetApp).includes('..')) {
+        return sendFailure(res, 'source_app and target_app are required.', FUNC, 400)
+      }
+      if (sourceApp === targetApp) return sendFailure(res, 'source and target are the same app.', FUNC, 400)
+      const userDS = res.locals?.freezr?.userDS
+      if (!userDS) return sendFailure(res, 'User data store not available.', FUNC, 500)
+
+      const srcFS = await userDS.getorInitAppFS(sourceApp, {})
+      if (!srcFS || !srcFS.readAppFile) return sendFailure(res, 'Could not access source app filesystem.', FUNC, 500)
+      const targetFS = await userDS.getorInitAppFS(targetApp, {})
+      if (!targetFS || !targetFS.writeToAppFiles) return sendFailure(res, 'Could not access target app filesystem.', FUNC, 500)
+
+      const allPaths = await listAppFilePaths(srcFS)
+      const isDotPath = (p) => p.split('/').some((seg) => seg.startsWith('.'))
+      const toCopy = allPaths.filter((p) => !isDotPath(p) && p !== CONTEXT_DOC_NAME)
+      const skipped = allPaths.filter((p) => isDotPath(p) || p === CONTEXT_DOC_NAME)
+      if (toCopy.length > 3000) return sendFailure(res, 'Source app has too many files to clone (' + toCopy.length + ').', FUNC, 400)
+
+      const copied = []
+      const replacements = [] // [{ path, count }] — occurrences of the source app id rewritten
+      const errors = []
+      let sourceManifestRaw = null // pre-replace source manifest, for the provenance fork stamp below
+      let targetManifestText = null
+      for (const rel of toCopy) {
+        try {
+          if (isTextFile(rel)) {
+            let content = await srcFS.readAppFile(rel)
+            content = content == null ? '' : String(content)
+            if (rel === 'manifest.json') sourceManifestRaw = content
+            const parts = content.split(sourceApp)
+            if (parts.length > 1) {
+              replacements.push({ path: rel, count: parts.length - 1 })
+              content = parts.join(targetApp)
+            }
+            if (rel === 'manifest.json') targetManifestText = content
+            await targetFS.writeToAppFiles(rel, content, { doNotOverWrite: false })
+          } else {
+            const buf = await srcFS.readAppFile(rel, { doNotToString: true })
+            if (buf != null) await targetFS.writeToAppFiles(rel, buf, { doNotOverWrite: false })
+          }
+          copied.push(rel)
+        } catch (err) {
+          errors.push({ path: rel, error: err.message })
+        }
+      }
+
+      // Provenance: the cloner owns the fork (main_author); the source app + its main_author are
+      // credited in authorship.forked_from, and the source's history travels along (see provenance.mjs).
+      // Stamped AFTER the id rewrite so forked_from.app keeps the SOURCE app id. Non-fatal.
+      let provenance = null
+      if (targetManifestText) {
+        try {
+          const targetManifest = JSON.parse(targetManifestText)
+          let sourceManifest = null
+          try { sourceManifest = JSON.parse(sourceManifestRaw) } catch (e) { /* unparseable source manifest — fork stamp proceeds without source authorship */ }
+          const selfHost = res.locals?.freezr?.serverName || (req.protocol + '://' + req.get('host'))
+          const userId = req.session?.logged_in_user_id
+          stampFork(targetManifest, { by: identityOf(userId, selfHost), sourceApp, sourceManifest })
+          await targetFS.writeToAppFiles('manifest.json', JSON.stringify(targetManifest, null, 2), { doNotOverWrite: false })
+          provenance = targetManifest.authorship
+        } catch (e) {
+          console.warn(FUNC + ': could not stamp fork provenance:', e.message)
+        }
+      }
+
+      return sendApiSuccess(res, {
+        success: true,
+        source_app: sourceApp,
+        target_app: targetApp,
+        copied: copied.length,
+        files: copied,
+        replacements,
+        skipped,
+        errors,
+        provenance
+      })
+    } catch (error) {
+      console.error(FUNC + ' error:', error)
+      return sendFailure(res, error, FUNC, 500)
+    }
+  }
+
+  // Re-apply the current protected scaffold to an existing ask-app: rewrites askapp-base.*/boot/probe with
+  // the latest template, ensures the probe hook exists (without clobbering the model's), and migrates the
+  // manifest's index modules to the boot dispatcher (file + app-list record). Lets scaffold fixes reach
+  // apps built earlier without recreating them. Ask-apps only.
+  const refreshAskAppScaffold = async (req, res) => {
+    const FUNC = 'creatorApiController.refreshAskAppScaffold'
+    try {
+      const userId = req.session?.logged_in_user_id
+      if (!userId) return sendFailure(res, 'User not logged in.', FUNC, 401)
+      const appName = req.body?.app_name
+      if (!appName || !isAskAppName(appName)) return sendFailure(res, 'An ask-app name is required.', FUNC, 400)
+      const userDS = res.locals?.freezr?.userDS
+      if (!userDS) return sendFailure(res, 'User data store not available.', FUNC, 500)
+      const freezrPrefs = res.locals?.freezr?.freezrPrefs
+      const appFS = await userDS.getorInitAppFS(appName, {})
+      if (!appFS || !appFS.writeToAppFiles) return sendFailure(res, 'Could not access app filesystem.', FUNC, 500)
+
+      // 1. Overwrite the protected scaffold files with the current template.
+      for (const f of askAppProtectedScaffoldFiles()) await appFS.writeToAppFiles(f.path, f.content, { doNotOverWrite: false })
+      // 2. Ensure the probe hook exists (never overwrite the model's version).
+      try { await appFS.readAppFile('askapp-probe-hook.js') } catch (e) { await appFS.writeToAppFiles('askapp-probe-hook.js', PROBE_HOOK_STUB, { doNotOverWrite: false }) }
+      // 3. Migrate the manifest's index modules to the boot dispatcher, drop any stale separate probe page.
+      let manifest = null
+      try {
+        manifest = JSON.parse(await appFS.readAppFile('manifest.json'))
+        if (!manifest.pages) manifest.pages = {}
+        if (!manifest.pages.index) manifest.pages.index = { html_file: 'index.html', css_files: ['askapp-base.css', 'app.css'], page_title: manifest.display_name || appName }
+        manifest.pages.index.modules = ASKAPP_INDEX_MODULES.slice()
+        if (manifest.pages.probe) delete manifest.pages.probe
+        await appFS.writeToAppFiles('manifest.json', JSON.stringify(manifest, null, 2), { doNotOverWrite: false })
+      } catch (e) { /* leave manifest as-is if unreadable */ }
+      // 4. Keep the app-list record's embedded manifest in step (page routing uses it).
+      if (manifest) {
+        try {
+          const userAppListDb = await userDS.getorInitDb(userAppListOAC(userId), { freezrPrefs })
+          const appId = constructAppIdStringFrom(userId, appName)
+          const entity = userAppListDb && await userAppListDb.read_by_id(appId)
+          if (entity) await userAppListDb.update(appId, { manifest }, { replaceAllFields: false })
+        } catch (e) { /* best effort */ }
+      }
+      return sendApiSuccess(res, { success: true, app_name: appName })
+    } catch (error) {
+      console.error(FUNC + ' error:', error)
+      return sendFailure(res, error, FUNC, 500)
     }
   }
 
@@ -450,12 +1061,8 @@ export const createCreatorApiController = () => {
         return sendFailure(res, 'Could not access app filesystem.', 'creatorApiController.uploadAppFile', 500)
       }
 
-      const destDir = path.dirname(filePath)
-      if (destDir && destDir !== '.') {
-        const dirAbsPath = path.resolve(appFS.pathToFile(destDir))
-        await fs.promises.mkdir(dirAbsPath, { recursive: true })
-      }
-
+      // writeToAppFiles writes to the connector (authoritative) + local cache, creating the local dir
+      // itself — no need to pre-mkdir a (CWD-based) local folder here.
       await appFS.writeToAppFiles(filePath, file.buffer, { doNotOverWrite: false })
       return sendApiSuccess(res, { success: true, file_path: filePath, action: 'uploaded', originalName: file.originalname })
     } catch (error) {
@@ -552,24 +1159,15 @@ export const createCreatorApiController = () => {
         return sendFailure(res, 'Could not initialise new app filesystem.', FUNC, 500)
       }
 
-      const oldRootRel = oldAppFS.pathToFile('')
-      const oldRootAbs = path.resolve(oldRootRel)
-      if (fs.existsSync(oldRootAbs)) {
-        const tree = await buildFolderTree(oldRootAbs, oldRootAbs)
-        const filePaths = collectFilePaths(tree)
-        for (const filePath of filePaths) {
-          try {
-            const absFilePath = path.join(oldRootAbs, filePath)
-            const content = await fs.promises.readFile(absFilePath)
-            const destDir = path.dirname(filePath)
-            if (destDir && destDir !== '.') {
-              const dirAbsPath = path.resolve(newAppFS.pathToFile(destDir))
-              await fs.promises.mkdir(dirAbsPath, { recursive: true })
-            }
-            await newAppFS.writeToAppFiles(filePath, content, { doNotOverWrite: false })
-          } catch (err) {
-            console.warn('Could not copy file ' + filePath + ':', err.message)
-          }
+      // Copy every file from old → new via the CONNECTOR (authoritative). Reading the local disk here
+      // would miss files on cloud hosts (per-instance cache), producing an empty/broken renamed app.
+      const filePaths = await listAppFilePaths(oldAppFS)
+      for (const filePath of filePaths) {
+        try {
+          const content = await oldAppFS.readAppFile(filePath, { doNotToString: true })
+          if (content != null) await newAppFS.writeToAppFiles(filePath, content, { doNotOverWrite: false })
+        } catch (err) {
+          console.warn('Could not copy file ' + filePath + ':', err.message)
         }
       }
 
@@ -583,13 +1181,11 @@ export const createCreatorApiController = () => {
         console.warn('Could not update manifest identifier:', e.message)
       }
 
-      // Phase 3b: Check for logo in copied files
+      // Phase 3b: Check for logo in copied files (via connector — local disk may be incomplete on cloud)
       let hasLogo = oldAppEntity.hasLogo || false
       try {
-        const newRootRel = newAppFS.pathToFile('')
-        const logoPath = path.join(path.resolve(newRootRel), 'static', 'logo.png')
-        await fs.promises.access(logoPath)
-        hasLogo = true
+        const logo = await newAppFS.readAppFile('static/logo.png', { doNotToString: true })
+        if (logo != null) hasLogo = true
       } catch (e) {
         // no logo file present
       }
@@ -723,22 +1319,6 @@ export const createCreatorApiController = () => {
     return 0
   }
 
-  const collectAllFileBuffers = async (dirPath, relativeTo) => {
-    const result = {}
-    const entries = await fs.promises.readdir(dirPath, { withFileTypes: true })
-    for (const entry of entries) {
-      const fullPath = path.join(dirPath, entry.name)
-      const relPath = path.relative(relativeTo, fullPath).replace(/\\/g, '/')
-      if (entry.isDirectory()) {
-        const sub = await collectAllFileBuffers(fullPath, relativeTo)
-        Object.assign(result, sub)
-      } else {
-        result[relPath] = new Uint8Array(await fs.promises.readFile(fullPath))
-      }
-    }
-    return result
-  }
-
   const publishApp = async (req, res) => {
     const FUNC = 'creatorApiController.publishApp'
     try {
@@ -792,12 +1372,10 @@ export const createCreatorApiController = () => {
         }
       }
 
-      // 3. Zip the app folder
-      const rootRelPath = appFS.pathToFile('')
-      const rootAbsPath = path.resolve(rootRelPath)
-      if (!fs.existsSync(rootAbsPath)) return sendFailure(res, 'App folder does not exist.', FUNC, 404)
-
-      const fileBuffers = await collectAllFileBuffers(rootAbsPath, rootAbsPath)
+      // 3. Zip the app folder — read files via the connector (authoritative on cloud; local disk is a
+      // per-instance cache that can be incomplete). See listAppFilePaths / collectAppFileBuffers.
+      const fileBuffers = await collectAppFileBuffers(appFS)
+      if (!Object.keys(fileBuffers).length) return sendFailure(res, 'App has no files to publish.', FUNC, 404)
       const zipped = zipSync(fileBuffers, { level: 6 })
       const zipBuffer = Buffer.from(zipped)
 
@@ -901,16 +1479,14 @@ export const createCreatorApiController = () => {
       // 7. Publish logo if it exists - copy to user files as {appName}.logo.png
       let logoPublished = false
       let logoNote = null
-      const logoPath = path.join(rootAbsPath, 'static', 'logo.png')
+      let logoBuffer = null
       try {
-        await fs.promises.access(logoPath)
-      } catch (e) {
-        logoNote = 'No logo found at static/logo.png'
-      }
-      if (!logoNote) {
+        const rawLogo = await appFS.readAppFile('static/logo.png', { doNotToString: true }) // via connector
+        if (rawLogo != null) logoBuffer = Buffer.isBuffer(rawLogo) ? rawLogo : Buffer.from(rawLogo)
+      } catch (e) { /* no logo */ }
+      if (!logoBuffer) logoNote = 'No logo found at static/logo.png'
+      if (logoBuffer) {
         try {
-          const logoBuffer = await fs.promises.readFile(logoPath)
-
           const logoFileName = appName + '.logo.png'
           await creatorAppFS.writeToUserFiles(logoFileName, logoBuffer, { doNotOverWrite: false })
 
@@ -1176,19 +1752,279 @@ export const createCreatorApiController = () => {
     }
   }
 
+  // Package an ask-app into info.freezr.creator.files for a PRIVATE person-to-person share (no public
+  // record — unlike publishApp). Zips the app, writes the zip to the creator's user files, and creates
+  // a `.files` record carrying the share metadata + a trimmed manifest_snapshot. The client then
+  // freezr.messages.send()s the record_id to recipients; that message's _accessibles stamping is what
+  // grants each same-host recipient the grantee file-fetch. See freezr_askapp_sharing_summary.md §2-3.
+  const packageAskAppForShare = async (req, res) => {
+    const FUNC = 'creatorApiController.packageAskAppForShare'
+    try {
+      const appName = req.body?.app_name
+      if (!appName) return sendFailure(res, 'app_name is required.', FUNC, 400)
+      if (!isAskAppName(appName)) return sendFailure(res, 'Only ask-apps can be shared this way.', FUNC, 400)
+
+      const userId = req.session?.logged_in_user_id
+      if (!userId) return sendFailure(res, 'User not logged in.', FUNC, 401)
+
+      const userDS = res.locals?.freezr?.userDS
+      const freezrPrefs = res.locals?.freezr?.freezrPrefs
+      if (!userDS) return sendFailure(res, 'User data store not available.', FUNC, 500)
+
+      // 1. Read manifest (version / authorship / permissions / description all come from it)
+      const appFS = await userDS.getorInitAppFS(appName, {})
+      if (!appFS || !appFS.readAppFile) return sendFailure(res, 'Could not access app filesystem.', FUNC, 500)
+
+      let manifest
+      try {
+        manifest = JSON.parse(await appFS.readAppFile('manifest.json'))
+      } catch (e) {
+        return sendFailure(res, 'Could not read or parse manifest.json: ' + e.message, FUNC, 500)
+      }
+
+      const version = manifest.version || '0.01'
+      const appDisplayName = manifest.display_name || appName
+      const appDescription = manifest.description || ''
+      const authorship = manifest.authorship || null
+
+      // A trimmed snapshot so the recipient can preview what the app needs & grants BEFORE downloading
+      // the zip: its permissions (which name the source tables), description, and the source tables.
+      const perms = Array.isArray(manifest.permissions) ? manifest.permissions : []
+      const sourceTables = [...new Set(perms.flatMap(p => Array.isArray(p.table_id) ? p.table_id : (p.table_id ? [p.table_id] : [])))]
+      const manifestSnapshot = {
+        display_name: appDisplayName,
+        description: appDescription,
+        version,
+        permissions: perms,
+        source_tables: sourceTables
+      }
+
+      // 2. Zip the app folder — read files via the connector (authoritative on cloud; the local disk is
+      // a per-instance cache that can be incomplete). See listAppFilePaths / collectAppFileBuffers.
+      const fileBuffers = await collectAppFileBuffers(appFS)
+      if (!Object.keys(fileBuffers).length) return sendFailure(res, 'App has no files to share.', FUNC, 404)
+      const zipBuffer = Buffer.from(zipSync(fileBuffers, { level: 6 }))
+
+      // 3. Write the zip to the creator's user files. Follows the main-app convention where everything
+      // AFTER the first space is metadata (here the version), so the app identity is the part before the
+      // space and each version is retained as its own file (re-sharing a version overwrites; distinct
+      // versions accumulate → a version history the recipient/sender can re-install from). The recipient's
+      // grantee fetch URL-encodes this record_id, so the space is safe. See freezr_askapp_sharing_summary.md §4.
+      const zipFileName = appName + ' v' + version + '.zip'
+      const creatorAppFS = await userDS.getorInitAppFS('info.freezr.creator', {})
+      if (!creatorAppFS || !creatorAppFS.writeToUserFiles) return sendFailure(res, 'Could not access creator user files.', FUNC, 500)
+      await creatorAppFS.writeToUserFiles(zipFileName, zipBuffer, { doNotOverWrite: false })
+
+      // 4. Create/update the private .files record (NO public record)
+      const creatorOac = { owner: userId, app_name: 'info.freezr.creator' }
+      const creatorFilesDb = await userDS.getorInitDb({ ...creatorOac, collection_name: 'files' }, { freezrPrefs })
+      if (!creatorFilesDb) return sendFailure(res, 'Could not access info.freezr.creator.files.', FUNC, 500)
+
+      const fileRecord = {
+        record_type: 'app',
+        app_type: 'ask',
+        sharedAppName: appName,
+        display_name: appDisplayName,
+        description: appDescription,
+        version,
+        authorship,
+        manifest_snapshot: manifestSnapshot,
+        fileName: zipFileName,
+        timestamp: new Date().toISOString(),
+        isSharedApp: true,
+        _UploadStatus: 'complete'
+      }
+      try {
+        const existing = await creatorFilesDb.read_by_id(zipFileName)
+        if (existing) await creatorFilesDb.update(zipFileName, fileRecord, { replaceAllFields: false })
+        else await creatorFilesDb.create(zipFileName, fileRecord, {})
+      } catch (e) {
+        await creatorFilesDb.create(zipFileName, fileRecord, {})
+      }
+
+      return sendApiSuccess(res, {
+        success: true,
+        record_id: zipFileName,
+        fileName: zipFileName,
+        record_type: 'app',
+        app_type: 'ask',
+        app_name: appName,
+        display_name: appDisplayName,
+        version,
+        authorship,
+        manifest_snapshot: manifestSnapshot
+      })
+    } catch (error) {
+      console.error(FUNC + ' error:', error)
+      return sendFailure(res, error, FUNC, 500)
+    }
+  }
+
+  /**
+   * GET /creatorapi/validate_app_files?app_name=... — freezr_creator_selfcheck_plan_v1.md B1.
+   *
+   * Would these files actually load? PARSE-ONLY: JS syntax (acorn), JSON, and relative-import
+   * resolution. Nothing generated is ever executed. CSS/HTML are not load-breaking (both are
+   * error-tolerant by spec) and are checked advisorily in the browser instead.
+   */
+  const validateAppFiles = async (req, res) => {
+    const FUNC = 'creatorApiController.validateAppFiles'
+    try {
+      const appName = req.query?.app_name
+      if (!appName) return sendFailure(res, 'app_name is required.', FUNC, 400)
+
+      const userDS = res.locals?.freezr?.userDS
+      if (!userDS) return sendFailure(res, 'User data store not available.', FUNC, 500)
+
+      const appFS = await userDS.getorInitAppFS(appName, {})
+      if (!appFS || !appFS.readAppFile) return sendFailure(res, 'Could not access app filesystem.', FUNC, 500)
+
+      const files = []
+      for (const filePath of await listAppFilePaths(appFS)) {
+        if (!isTextFile(filePath)) {
+          files.push({ path: filePath, content: null }) // present for import resolution, not parsed
+          continue
+        }
+        try {
+          files.push({ path: filePath, content: await appFS.readAppFile(filePath) })
+        } catch (err) {
+          files.push({ path: filePath, content: null })
+        }
+      }
+
+      const result = runFileValidation(files)
+      return sendApiSuccess(res, { success: true, appName, ...result })
+    } catch (error) {
+      console.error(FUNC + ' error:', error)
+      return sendFailure(res, error, FUNC, 500)
+    }
+  }
+
+  /**
+   * POST /creatorapi/create_inspection_token — freezr_creator_selfcheck_plan_v1.md Part A.
+   *
+   * Mints a short-lived inspection token the user hands to an LLM/agent (or that the builder
+   * uses on its behalf) so it can check the app's work on a hosted freezr:
+   *  - files scope (default on): random token in inspectTokenStore, honored ONLY by
+   *    GET /creator/inspect/:app_name/* (page/source files, read-only).
+   *  - data scope (opt-in via body.include_data): a real app token. `data_access: 'read'`
+   *    (default) mints it read_only:true so mutating routes 403; `data_access: 'write'` mints a
+   *    normal token that can also write — only ever granted through an explicit user consent
+   *    click in the creator UI.
+   *
+   * Body: { app_name, include_files?: bool (default true), include_data?: bool,
+   *         data_access?: 'read'|'write', ttl_minutes?: number (default 30, max 60) }
+   * Tokens are returned to the browser for display/use — never written to server disk.
+   */
+  const createInspectionToken = async (req, res) => {
+    const FUNC = 'creatorApiController.createInspectionToken'
+    try {
+      const userId = req.session?.logged_in_user_id
+      if (!userId) return sendFailure(res, 'Missing user id', FUNC, 401)
+
+      const appName = req.body?.app_name
+      if (!appName) return sendFailure(res, 'Invalid app name', FUNC, 400)
+      if (isSystemApp(appName)) return sendFailure(res, 'Cannot create inspection tokens for system apps', FUNC, 403)
+      if (!validAppName(appName)) return sendFailure(res, 'Invalid app name', FUNC, 400)
+
+      const includeFiles = req.body?.include_files !== false // default on
+      const includeData = req.body?.include_data === true
+      const dataAccess = req.body?.data_access === 'write' ? 'write' : 'read'
+      let ttlMinutes = parseInt(req.body?.ttl_minutes, 10)
+      if (!Number.isFinite(ttlMinutes) || ttlMinutes <= 0) ttlMinutes = 30
+      ttlMinutes = Math.min(ttlMinutes, 60)
+      const expiry = Date.now() + ttlMinutes * 60 * 1000
+
+      // The app must actually exist for this user (every installed app has a manifest.json).
+      const userDS = res.locals?.freezr?.userDS
+      if (!userDS) return sendFailure(res, 'User data store not available', FUNC, 500)
+      const targetAppFS = await userDS.getorInitAppFS(appName, {})
+      try {
+        await targetAppFS.readAppFile('manifest.json')
+      } catch (e) {
+        return sendFailure(res, 'App not found: ' + appName, FUNC, 404)
+      }
+
+      // Files scope — cache-only token, dies on expiry or restart, never in the app_tokens DB.
+      let filesToken = null
+      if (includeFiles) {
+        filesToken = crypto.randomBytes(32).toString('hex')
+        inspectTokenStore.set(filesToken, { app_name: appName, owner_id: userId, expiry })
+      }
+
+      // Data scope (opt-in) — a real app token; read_only unless write was explicitly consented to.
+      let dataToken = null
+      if (includeData) {
+        const tokenDb = res.locals?.freezr?.appTokenDb
+        if (!tokenDb) return sendFailure(res, 'App token database not available', FUNC, 500)
+        const { app_password: appPassword } = await generateAndSaveAppPasswordForUser(tokenDb, userId, appName, {
+          deviceCode: req.session.device_code,
+          expiry,
+          oneDevice: false,
+          readOnly: (dataAccess !== 'write')
+        })
+        const tokenRecords = await tokenDb.query({ app_password: appPassword }, {})
+        dataToken = (tokenRecords && tokenRecords[0] && tokenRecords[0].app_token) || null
+        if (!dataToken) return sendFailure(res, 'Could not retrieve newly created data token', FUNC, 500)
+      }
+
+      const baseUrl = (req.headers.host && req.headers.host.startsWith('localhost') ? 'http' : 'https') + '://' + req.headers.host
+      const expiresAt = new Date(expiry).toISOString()
+      const examples = {}
+      if (filesToken) {
+        examples.readMainPage = 'curl "' + baseUrl + '/creator/inspect/' + appName + '/index.html?inspectToken=' + filesToken + '"'
+        examples.readAppJs = 'curl "' + baseUrl + '/creator/inspect/' + appName + '/index.js?inspectToken=' + filesToken + '"'
+        examples.readManifest = 'curl "' + baseUrl + '/creator/inspect/' + appName + '/manifest.json?inspectToken=' + filesToken + '"'
+      }
+      if (dataToken) {
+        examples.queryData = 'curl -s -X POST "' + baseUrl + '/ceps/query/' + appName + '.<collection>" -H "Authorization: Bearer ' + dataToken + '" -H "Content-Type: application/json" -d \'{"count":5}\''
+        if (dataAccess === 'write') {
+          examples.writeData = 'curl -s -X POST "' + baseUrl + '/ceps/write/' + appName + '.<collection>" -H "Authorization: Bearer ' + dataToken + '" -H "Content-Type: application/json" -d \'{"field":"value"}\''
+        }
+      }
+
+      // Tokens are truncated: enough to correlate with the validation logs, never the full secret.
+
+      return sendApiSuccess(res, {
+        success: true,
+        appName,
+        baseUrl,
+        filesToken,
+        dataToken,
+        dataAccess: dataToken ? dataAccess : null,
+        readOnly: dataToken ? (dataAccess !== 'write') : true,
+        ttlMinutes,
+        expiresAt,
+        examples
+      })
+    } catch (error) {
+      console.error(FUNC + ' error:', error)
+      return sendFailure(res, error, FUNC, 500)
+    }
+  }
+
   return {
     createBlankApp,
+    createAskApp,
+    packageAskAppForShare,
     getUserApps,
+    getInstalledAppsContext,
+    getManifestReference,
     readFolder,
     readAppFile,
     readAllFiles,
     writeAppFile,
+    copyAppFiles,
+    cloneAppFiles,
+    refreshAskAppScaffold,
     syncContext,
     uploadAppFile,
     renameApp,
     publishApp,
     getPublishedVersions,
-    unpublishApp
+    unpublishApp,
+    createInspectionToken,
+    validateAppFiles
   }
 }
 

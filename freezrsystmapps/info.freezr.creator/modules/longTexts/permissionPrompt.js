@@ -304,6 +304,25 @@ if (sharePermission && sharePermission.granted) {
 }
 \`\`\`
 
+**Checking whether granted permissions are actually USABLE (preferred at startup):**
+Granted is not the same as usable — a granted \`use_llm\` still fails if the user has no LLM
+key, and a granted \`run_job\` fails if the job has nowhere to run. One \`freezr.utils.ping()\`
+call returns every permission annotated with \`usable\` and, when not usable, a \`blocked_by\`
+reason ('not_granted', 'no_llm_keys', 'no_compute_credential', 'job_not_trusted',
+'no_job_runtime', 'no_matching_connection') plus a \`capabilities\` summary. Gate features on
+\`usable\` and use \`blocked_by\` to tell the user the right fix:
+\`\`\`javascript
+const status = await freezr.utils.ping()
+const aiPerm = (status.permissions || []).find(p => p.name === 'ai_access')
+if (aiPerm?.usable) {
+  // safe to call freezr.llm.ask()
+} else if (aiPerm?.blocked_by === 'not_granted') {
+  // ask the user to grant the permission in Settings
+} else if (aiPerm?.blocked_by === 'no_llm_keys') {
+  // permission granted but no key — ask the user to add an LLM key in Account Resources
+}
+\`\`\`
+
 ---
 
 ### use_llm — Using AI / LLM Features
@@ -426,7 +445,7 @@ Notes:
 
 Use this when the app needs to read messages, search mail, sync incrementally, send / draft, or modify mail (mark-read, move, trash, delete) on the user's connected accounts. The full API surface lives at \`freezr.connections.mail.*\` and is documented in apiReference.md under "Mail (Connections)".
 
-Tokens are never visible client-side — the freezr server holds the OAuth grant and refreshes it. Today only the Gmail connector is wired up; Microsoft Graph and IMAP/SMTP are planned and the API won't change when they land.
+Tokens are never visible client-side — the freezr server holds the OAuth grant and refreshes it. Gmail, Microsoft Graph (Outlook / Microsoft 365) and IMAP/SMTP connectors are all wired up behind the same normalized API.
 
 **Manifest entry — read-only:**
 \`\`\`json
@@ -631,6 +650,35 @@ Shadow DOM scopes the email's \`<style>\` so it can't override the app's CSS. Th
 
 ---
 
+### use_messaging — Reading and sending messages via connected messaging accounts
+
+Use this when the app needs to read conversations and messages (channels, DMs, group DMs), sync incrementally, send messages / thread replies, mark-read, or delete the user's own messages on the user's connected messaging accounts. Slack is the first provider. The full API surface lives at \`freezr.connections.messaging.*\` and is documented in the "Messaging APIs" section above.
+
+The permission shape and the two-level model are IDENTICAL to use_mail: \`connection_names\` (fail-closed; \`["*"]\` for all current and future messaging connections, user can narrow at grant time) and \`scopes\` (\`["read"]\` or \`["read", "write"]\`), gated on both the app-side scope AND the connection-side \`access.messaging\` (\`'read'\` | \`'readwrite'\`, set by the user at /account/resources).
+
+**Manifest entry — read-only:**
+\`\`\`json
+{
+  "permissions": [
+    {
+      "name": "messaging_read",
+      "type": "use_messaging",
+      "description": "Read messages from your connected messaging accounts (e.g. Slack).",
+      "connection_names": ["*"],
+      "scopes": ["read"]
+    }
+  ]
+}
+\`\`\`
+
+**Manifest entry — read + write** (\`"scopes": ["read", "write"]\`) additionally allows sendMessage, markRead and deleteMessage (own messages only).
+
+**Live updates are a server capability, not part of this permission.** The \`use_messaging\` grant covers reading the socket-fed activity index (\`getChanges\`) — but whether the index is being FED depends on the server admin having enabled messaging sockets and the user having opted the connection in ("Live updates" at /account/resources). Never assume it: check \`capabilities.messaging_live\` from \`freezr.utils.ping()\` and fall back to polling (pattern shown in the Messaging APIs section). An app that hard-requires live updates should tell the user which switch is missing rather than failing silently.
+
+(A related permission type, \`socket_connect\` — apps asking the server to hold sockets to arbitrary external services — is registered in the permission vocabulary but NOT yet executable; grants report \`blocked_by: 'socket_not_admitted'\`. Don't design against it yet.)
+
+---
+
 ### read_all / write_all — Accessing Another App's Data
 
 Use read_all when the app needs to read records from a collection belonging to another app. Use write_all when it needs to write to another app's collection. These are powerful permissions — the user must explicitly grant them.
@@ -758,18 +806,33 @@ if (readPerm && readPerm.granted) {
 
 ---
 
-### Summary of Permission Types
+### message_records & inter-app services — talking to the user's other apps
+
+Same-user apps can message each other: a message sent with \`recipient_app\` lands in that app's inbox (\`freezr.messages.getAppMessages\` returns messages the app sent plus ones addressed to it). No \`contact_permission\` is needed for same-user inter-app sends. The sender declares one \`message_records\` permission:
+
+\`\`\`json
+{
+  "name": "msg_targetapp",
+  "type": "message_records",
+  "table_id": "<your.app.id>.your_requests_collection",
+  "description": "Send requests to <target app>. You approve each request inside that app."
+}
+\`\`\`
+
+Some apps OFFER SERVICES over this transport (e.g. an email app delivering matching emails to subscriber apps). A provider app declares \`"app_services": { "description": "...", "contract": "app-comms.md" }\` in its manifest and ships the contract doc at its app root. **The contract is the authority**: read the target app's manifest \`app_services\` and its contract file, and follow the request shapes, message lifecycle (pending/approved/denied/revoked), dedup rules and trust model it defines. Remember the freezr grant is transport-only — the real consent happens inside the provider app's UI, so handle denied/paused/revoked states gracefully and word request prompts narrowly (they are shown verbatim to the user).
 
 | Type | Category | Needs table_id | Purpose |
 |------|----------|----------------|---------|
 | share_records | Sharing | Yes | Share specific records with users or make public |
-| message_records | Sharing | Yes | Send records as messages to other users |
+| message_records | Sharing | Yes | Send records as messages to other users, or to another app of the same user (via recipient_app) |
 | read_all | Database Access | Yes | Read all records in another app's collection |
 | write_all | Database Access | Yes | Read and write any records in another app's collection |
 | write_own | Database Access | Yes | Write only your own records in another app's collection |
 | upload_pages | Sharing | No | Upload and serve public HTML pages |
 | use_llm | App Capabilities | No | Use the user's LLM API keys for AI requests |
 | use_mail | App Capabilities | No | Read / send mail via the user's connected mail accounts. Requires connection_names + scopes fields; gated by both app-side scope AND connection-side access.mail. |
+| use_messaging | App Capabilities | No | Read / send messages via the user's connected messaging accounts (Slack first). Same shape and two-level gating as use_mail (connection_names + scopes; access.messaging). Includes the getChanges live-updates index when the server has sockets enabled. |
+| socket_connect | App Capabilities | No | RESERVED — vocabulary registered, not yet executable (grants report blocked_by 'socket_not_admitted'). Will let the server hold a socket to a named external domain on the app's behalf, subject to explicit admin admission. |
 | external_scripts | App Capabilities | No | Load JavaScript from external domains (relaxes script-src CSP) |
 | external_fetch | App Capabilities | No | Send/receive data to/from external domains (relaxes connect-src CSP) |
 | unsafe_eval | App Capabilities | No | Allow eval() and dynamic code execution (adds unsafe-eval to script-src CSP) |

@@ -11,10 +11,11 @@ import path from 'path'
 import fetch from 'node-fetch'
 import { unzipSync, zipSync } from 'fflate'
 import { bjLog } from '../../../common/debug/consoleFlags.mjs'
-import { 
-  FREEZR_USER_FILES_DIR, 
-  isSystemApp, 
+import {
+  FREEZR_USER_FILES_DIR,
+  isSystemApp,
   validAppName,
+  isAskAppName,
   constructAppIdStringFrom,
   tempAppNameFromFileName,
   APP_MANIFEST_FILE_NAME
@@ -450,6 +451,10 @@ const createOrUpdateUserAppList = async (context, customEnv) => {
 
   const appName = manifest.identifier || null
   const appDisplayName = manifest.display_name || manifest.identifier
+  // Recognise ask-apps and install them as such: app_type comes from the manifest, falling back to
+  // the reserved name prefix. Kept on the app-list record (survives update, which replaces all
+  // fields) so the home screen can group them. See freezr_askapps_plan_v1.md.
+  const appType = manifest.app_type || (isAskAppName(appName) ? 'askapp' : null)
 
   // Validate input
   if (!appNameId) {
@@ -462,7 +467,7 @@ const createOrUpdateUserAppList = async (context, customEnv) => {
 
   // Check if app exists (using modern async method)
   const existingEntity = await userAppListDb.read_by_id(appNameId)
-  
+
   // Create or update the app in the database
   if (existingEntity) {
     appExists = true
@@ -471,22 +476,24 @@ const createOrUpdateUserAppList = async (context, customEnv) => {
     appEntity.removed = false
     appEntity.warnings = warnings
     appEntity.app_name = appName
+    appEntity.app_type = appType
     appEntity.customEnv = customEnv
     appEntity.app_display_name = appDisplayName
     appEntity.updated = new Date().toISOString()
     appEntity.hasLogo = hasLogo
     const res = await userAppListDb.update(appNameId, appEntity, { replaceAllFields: true })
   } else {
-    appEntity = { 
-      app_name: appName, 
-      app_display_name: appDisplayName, 
-      served_url: manifest.served_url, 
-      manifest, 
+    appEntity = {
+      app_name: appName,
+      app_type: appType,
+      app_display_name: appDisplayName,
+      served_url: manifest.served_url,
+      manifest,
       warnings,
       hasLogo,
       installed: new Date().toISOString(),
-      customEnv, 
-      removed: false 
+      customEnv,
+      removed: false
     }
     await userAppListDb.create(appNameId, appEntity, null)
   }

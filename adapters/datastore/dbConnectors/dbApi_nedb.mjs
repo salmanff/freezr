@@ -198,6 +198,27 @@ NEDB_FOR_FREEZR.prototype.stats = function (callback) {
 NEDB_FOR_FREEZR.prototype.persistCachedDatabase = function (cb) {
   this.db.persistence.persistCachedDatabase(cb)
 }
+
+// EXECUTOR READINESS  (see TODO.md - "nedb-asyncfs: loadDatabase leaves a dead executor")
+// nedb runs every operation through a concurrency-1 executor that only starts
+// processing once loadDatabase has called executor.processBuffer(). nedb-asyncfs
+// SKIPS that call on any loadDatabase error, so a failed load leaves the executor
+// stuck at ready=false forever: every later find/insert is parked in
+// executor.buffer and never calls back - no result, no error, ever. The awaiting
+// request then hangs for the life of the process, holding its socket open, and
+// after a handful of those the browser's per-origin connection pool is exhausted
+// and the whole app looks frozen.
+// These two let initOacDB detect that state instead of caching a black hole.
+NEDB_FOR_FREEZR.prototype.executorIsReady = function () {
+  return !!(this.db && this.db.executor && this.db.executor.ready)
+}
+// Start executing queued (and future) operations against the current - empty -
+// in-memory indexes. Only safe when the load failed BECAUSE there is nothing to
+// load (a table whose file does not exist yet); anything else would serve empty
+// results for a table that actually has data.
+NEDB_FOR_FREEZR.prototype.releaseExecutorBuffer = function () {
+  if (this.db && this.db.executor && !this.db.executor.ready) this.db.executor.processBuffer()
+}
 const fullName = function (ownerAppTable) {
   // console.log("fullName ownerAppTable ", ownerAppTable)
   if (!ownerAppTable) throw error('NEDB collection failure - need ownerAppTable ')

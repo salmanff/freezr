@@ -198,7 +198,7 @@ export function createAwsJobRunner ({ credentials, jobsDir, lambdaClient = null,
         try {
           out = await lambda.send(new InvokeCommand({
             FunctionName: functionName,
-            Payload: JSON.stringify({ baseUrl, token, params, appName: app }),
+            Payload: JSON.stringify({ baseUrl, token, params, appName: app, userId: ownerId }),
             LogType: LogType.Tail
           }))
           break

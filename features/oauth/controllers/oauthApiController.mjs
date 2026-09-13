@@ -109,7 +109,13 @@ export const createOauthApiController = (deps = {}) => {
           secret: req.body.secret || '',
           enabled: req.body.enabled,
           federation_enabled: !!req.body.federation_enabled,
-          partner_redirect_uris: partnerRedirectUris
+          partner_redirect_uris: partnerRedirectUris,
+          // App-level token for provider push connections (Slack Socket Mode's
+          // xapp-… token). CREDENTIAL PROVISIONING ONLY — storing it does not
+          // enable a socket; that requires the explicit admission on
+          // /admin/sockets plus the prefs master switch. Same trust level and
+          // storage as `secret`.
+          appToken: typeof req.body.appToken === 'string' ? req.body.appToken.trim() : ''
         }
         
         // Check if exists
@@ -446,7 +452,9 @@ const handleGetNewState = async (req, res, oauthorDb, cacheManager) => {
  * - accessToken: Access token from OAuth provider (optional, legacy)
  */
 const handleValidateState = async (req, res, oauthorDb, cacheManager, deps = {}) => {
-  let { state, code, accessToken } = req.query
+  // Params arrive in the body (POST — preferred, keeps multi-KB Entra codes out
+  // of the request line) or the query string (GET — legacy/federation callers).
+  let { state, code, accessToken } = { ...req.query, ...req.body }
 
   // Normalize null strings
   if (accessToken === 'null') accessToken = null
@@ -528,7 +536,10 @@ const handleValidateState = async (req, res, oauthorDb, cacheManager, deps = {})
       }
     } catch (error) {
       console.warn('Failed to get refresh token:', error.message)
-      // Continue anyway - some providers don't return refresh tokens (e.g. accessToken-only flows)
+      // Continue anyway - some providers don't return refresh tokens (e.g. accessToken-only flows).
+      // Keep the provider's actual error so the downstream "cannot persist connection" guard can
+      // show WHY the exchange failed (bad secret / redirect mismatch / …) instead of a generic line.
+      stateParams.tokenExchangeError = error?.message || String(error)
     }
   }
 
@@ -543,9 +554,13 @@ const handleValidateState = async (req, res, oauthorDb, cacheManager, deps = {})
     // No logged-in user on this freezr — return tokens to the consumer's receiver via the
     // existing sender-redirect machinery in oauth_validate_page.js. The sender is the
     // consumer's transfer_receiver URL (we set it as stateParams.sender during get_new_state).
-    if (!stateParams.accessToken || !stateParams.refreshToken) {
+    // Providers whose tokens never expire (provider.refreshTokenOptional, e.g.
+    // Slack with rotation off) legitimately return no refresh token — the same
+    // rule handleConnectionPurpose and writeConnectionRecord apply.
+    if (!stateParams.accessToken || (!stateParams.refreshToken && !provider?.refreshTokenOptional)) {
       return sendAuthFailure(res, {
-        message: 'Token exchange did not return both access and refresh tokens — cannot complete transfer',
+        message: 'Token exchange did not return both access and refresh tokens — cannot complete transfer' +
+          (stateParams.tokenExchangeError ? (' (provider said: ' + stateParams.tokenExchangeError + ')') : ''),
         type: 'auth_error',
         path: req.path,
         url: req.url
@@ -640,9 +655,13 @@ const handleConnectionPurpose = async (req, res, stateParams, cacheManager, deps
     return sendFailure(res, { message: 'Server misconfiguration: connection purpose unavailable' }, 'handleConnectionPurpose', 500)
   }
 
-  if (!stateParams.accessToken || !stateParams.refreshToken) {
+  // Providers whose tokens never expire (provider.refreshTokenOptional, e.g. Slack
+  // with rotation off) legitimately return no refresh token; writeConnectionRecord
+  // applies the same rule.
+  if (!stateParams.accessToken || (!stateParams.refreshToken && !provider?.refreshTokenOptional)) {
     return sendAuthFailure(res, {
-      message: 'Token exchange did not return both access and refresh tokens — cannot persist connection',
+      message: 'Token exchange did not return both access and refresh tokens — cannot persist connection' +
+        (stateParams.tokenExchangeError ? (' (provider said: ' + stateParams.tokenExchangeError + ')') : ''),
       type: 'auth_error',
       path: req.path,
       url: req.url
@@ -803,7 +822,10 @@ export const createStoreTransferredCredentialsHandler = ({ dsManager, freezrPref
         connectionName, provider: providerType, services, access
       } = req.body || {}
 
-      if (!consumerState || !accessToken || !refreshToken) {
+      // refreshToken is optional for providers whose tokens don't expire
+      // (provider.refreshTokenOptional — e.g. Slack without token rotation).
+      const transferProvider = OAUTH_PROVIDERS[providerType]
+      if (!consumerState || !accessToken || (!refreshToken && !transferProvider?.refreshTokenOptional)) {
         return sendFailure(res, 'Missing required fields (consumer_state, accessToken, refreshToken)', 'store_transferred_credentials', 400)
       }
 

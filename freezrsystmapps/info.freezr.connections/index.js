@@ -131,6 +131,13 @@ const renderConnections = function (accounts) {
       openCal.innerText = 'Open Calendar'
       actions.appendChild(openCal)
     }
+    if (services.includes('messaging')) {
+      const openMessaging = document.createElement('a')
+      openMessaging.className = 'smallTextButt'
+      openMessaging.href = '/connections/messaging'
+      openMessaging.innerText = 'Open Messaging'
+      actions.appendChild(openMessaging)
+    }
 
     if (status === 'token_expired') {
       const reconnect = document.createElement('a')

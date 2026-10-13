@@ -351,7 +351,7 @@ const loadConversations = async function () {
   }
 }
 
-// "mpdm-salman--raphaelle--richard-1" → ['salman','raphaelle','richard'].
+// "mpdm-saman--alice--jack-1" → ['saman','alice','jack'].
 // Used as an immediate label and as the fallback if member lookup fails.
 const parseMpdmHandles = function (name) {
   if (!name || !name.startsWith('mpdm-')) return []

@@ -13,6 +13,18 @@ import { sendApiSuccess, sendFailure } from '../../../adapters/http/responses.mj
 import { userPERMS_OAC } from '../../../common/helpers/config.mjs'
 import { inspectTokenStore } from '../../../middleware/tokens/inspectTokenStore.mjs'
 
+// Response headers for every inspect response. The route hands an agent source TEXT and permission
+// metadata; nothing it serves should ever be rendered or executed by a browser. Without these, an
+// .html file goes out as text/html (res.sendFile types by extension) and renders same-origin, under
+// /creator — the creator app token's cookie path. And because the token rides in the query string,
+// any external reference in a served file would leak it through the Referer header.
+const setInspectSafetyHeaders = (res, { download = false } = {}) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.setHeader('Content-Security-Policy', 'sandbox')
+  res.setHeader('Referrer-Policy', 'no-referrer')
+  if (download) res.setHeader('Content-Disposition', 'attachment')
+}
+
 export const createInspectController = ({ dsManager, freezrPrefs }) => {
   // Token accepted as ?inspectToken= or a Cookie (inspectToken=...) — the cookie carrier makes
   // curl/agent use trivial and is acceptable here because these routes are static reads for one
@@ -62,6 +74,7 @@ export const createInspectController = ({ dsManager, freezrPrefs }) => {
       // The validated inspect token IS the permission grant for these read-only source files;
       // the send* helpers refuse to serve unless permGiven is set (checkPermGiven → 400 otherwise).
       res.locals.freezr.permGiven = true
+      setInspectSafetyHeaders(res, { download: true })
       // sendAppFile applies its own endpathIsConfined guard and 404s on missing files.
       return appFS.sendAppFile(endpath, res, {})
     } catch (error) {
@@ -111,6 +124,7 @@ export const createInspectController = ({ dsManager, freezrPrefs }) => {
       const notGranted = declared.filter((d) => !grantedNames.includes(d.name)).map((d) => d.name)
 
       res.locals.freezr.permGiven = true
+      setInspectSafetyHeaders(res)
       return sendApiSuccess(res, {
         app_name: rec.app_name,
         declared,

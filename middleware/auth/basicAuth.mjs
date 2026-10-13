@@ -317,7 +317,9 @@ export const createGetAppTokenInfoFromheaderForApi = (dsManager, options = {}) =
         user_id: userId, 
         message: 'error validating credentials', 
         path: req.path, 
-        shouldBeAlertedToFailure: (error.code !== 'expired')
+        // expired and stale_session (valid token from a previous login of the SAME user) are
+        // not attack signals — see tokenHandler.getAppTokenFromHeaderAndDoMinimalChecks
+        shouldBeAlertedToFailure: (error.code !== 'expired' && error.code !== 'stale_session')
       })
     }
   }

@@ -345,7 +345,7 @@ const standardizeUsage = (usage, toolsUsed = null) => {
  * @param {Object[]} [params.files] - Array of multer file objects (buffer + originalname)
  * @returns {Promise<Object>} { response, thinking, provider, model, usage }
  */
-export const ask = async ({ apiKey, prompt, context, model, max_tokens, role, responseType, thinking, cache, effort, files, web }) => {
+export const ask = async ({ apiKey, prompt, context, model, max_tokens, role, responseType, thinking, cache, effort, files, web, structuredOutput }) => {
   const client = new Anthropic({ apiKey })
   const modelToUse = await resolveModel(client, model)
   const maxTokens = max_tokens || DEFAULT_MAX_TOKENS
@@ -399,7 +399,9 @@ export const ask = async ({ apiKey, prompt, context, model, max_tokens, role, re
   // spend on current models — it scales EVERYTHING the model writes, thinking included. Passed only
   // when the caller sets it; unknown-to-the-model values fail the request, so the degrade-retry
   // below also covers output_config.
-  if (effort) params.output_config = { effort: String(effort) }
+  // structuredOutput (2026-09-19) shares the same box: output_config.format constrains generation
+  // to the caller's schema. Set only when asked — a request without it is byte-identical to before.
+  applyOutputConfig(params, { effort, structuredOutput })
 
   // Web access: server tools run on Anthropic's side, so declaring them is the whole
   // integration. Which tool VERSION this model takes is settled by runWithDegrades trying,
@@ -505,7 +507,46 @@ export const CAPABILITIES = {
   effort: true,
   cache: { explicit: true, ttl: ['5m', '1h'] },
   images: { generate: 'svg' },
-  voice: false
+  voice: false,
+  // output_config.format (json_schema) — the provider constrains generation to the caller's
+  // schema. Tier 1 here; the Models API tree flag `structured_outputs` (tier 2) and the ladder
+  // in runWithDegrades (tier 3) narrow it per model. Added 2026-09-19.
+  structuredOutput: true
+}
+
+// The API's wording when it will not take a schema. Only consulted while the request carries
+// one (params.output_config.format), so a stray "schema" in an unrelated error cannot misfire.
+export const isStructuredOutputRejection = (err) => {
+  const msg = ((err && (err.message || String(err))) || '').toLowerCase()
+  return msg.includes('output_config.format') || msg.includes('json_schema') || msg.includes('schema') ||
+    msg.includes('structured output')
+}
+
+// TWO different failures share the word "schema", and they must not share a fate:
+//   'model'  — this MODEL will not take structured output at all. A capability verdict: remember
+//              it for the TTL so the gate refuses the next call before any token is spent.
+//   'schema' — the SCHEMA itself is outside what the provider accepts (a keyword, a shape). That is
+//              the CALLER's problem. It must NOT be memoised against the model — one bad schema
+//              would otherwise block every structured call on that model, for everyone, for an
+//              hour — and the provider's own wording must travel back so the caller can fix it.
+// Learned the hard way on 2026-09-19: the first version memoised both, and one unsupported
+// keyword made haiku "incapable" server-wide until restart.
+export const classifyStructuredRejection = (err) => {
+  const msg = ((err && (err.message || String(err))) || '').toLowerCase()
+  const aboutModel = /(not supported|unsupported|not available|does not support)[^.]{0,60}\bmodel\b/.test(msg) ||
+    /\bmodel\b[^.]{0,60}(not supported|unsupported|does not support|not available)/.test(msg) ||
+    /structured outputs? (is|are) not (supported|available)/.test(msg)
+  return aboutModel ? 'model' : 'schema'
+}
+
+// The error for a schema the provider will not accept. 400-class: the request was wrong, the
+// model is fine. Carries the provider's message verbatim — that sentence is the fix.
+export const schemaRejectedError = (model, err) => {
+  const e = new Error(model + ' rejected the response schema: ' + ((err && err.message) || String(err)))
+  e.code = 'structured_output_schema_rejected'
+  e.status = 400
+  e.model = model
+  return e
 }
 
 // TIER 3 memo: verdicts LEARNED by trying (see probeMemoKey / rememberProbe below). Shares
@@ -575,6 +616,7 @@ export const CAPABILITY_TREE_PATHS = {
   vision: ['image_input'],
   documents: ['document_input', 'pdf_input'],
   effort: ['effort'],
+  structuredOutput: ['structured_outputs'],
   'web.search': ['web_search', 'web_search_tool', 'tools.web_search', 'server_tools.web_search'],
   'web.fetch': ['web_fetch', 'web_fetch_tool', 'tools.web_fetch', 'server_tools.web_fetch']
 }
@@ -648,7 +690,7 @@ export const getCapabilities = async ({ apiKey, model } = {}) => {
   }
   resolved.web = web
 
-  for (const key of ['vision', 'documents', 'effort']) {
+  for (const key of ['vision', 'documents', 'effort', 'structuredOutput']) {
     if (CAPABILITIES[key] === false) continue
     const memo = readProbeMemo(model, key)
     if (memo !== undefined) { resolved[key] = memo; continue }
@@ -708,18 +750,27 @@ The format must be exactly:
   }
 }
 Use the exact model ID strings I provided as keys.
-If you are unsure of the exact price for a model, provide your best estimate based on the specific generation and tier.
-Never use 0 as a placeholder price unless the model is genuinely free.`
+If you do not KNOW a model's current published price, OMIT that model entirely. Do not estimate it
+from its generation or tier, and do not use 0 as a placeholder. A wrong price is worse than no
+price: an omitted model is reported as unpriced, a guessed one is billed as if it were true.`
 }
 
+// The note below the builtin table says models self-report confidently WRONG prices — every current
+// Opus reporting the old $15/$75. The same failure hit OpenAI in 2026-09: gpt-5.6-luna was guessed
+// at $15/$60 against a published $0.20/$1.20, and $15/$60 is itself suspiciously close to that old
+// Opus rate — a model asked for a price reaches for a familiar one. So this prompt now REQUIRES an
+// explicit "unknown" rather than inviting an estimate; the caller turns that into `lookup_failed`,
+// which surfaces as unpriced.
 const makeSingleModelPricingPrompt = (modelId) => {
-  return `You are a helpful assistant that provides current Anthropic Claude API pricing information.
-Return ONLY a valid JSON object (no markdown, no explanation) with the per-million-token pricing in USD for model "${modelId}".
-The format must be exactly:
+  return `You are a pricing lookup. Report only the CURRENT PUBLISHED per-million-token price in USD for model "${modelId}".
+Return ONLY a valid JSON object (no markdown, no explanation), in exactly this format:
 { "input": <price_per_million_input_tokens>, "output": <price_per_million_output_tokens> }
-IMPORTANT: Different model generations have very different prices. Do NOT confuse older models with newer ones.
-If you are unsure of the exact price for "${modelId}", provide your best estimate based on its specific generation and tier.
-Never return 0 unless the model is genuinely free.`
+Different model generations have very different prices, and prices are cut over time.
+If you do not KNOW the current published price for "${modelId}" — because it is newer than your
+information, or because the price may have changed — return exactly { "unknown": true }.
+Do NOT estimate, do NOT infer from the generation or tier, and do NOT reuse a price you remember
+for a similar model: a wrong price is worse than no price, because it is billed as if it were
+true. { "unknown": true } is the correct, expected answer for any model you are not sure about.`
 }
 
 // OFFICIAL first-party prices, USD per MILLION tokens, keyed by canonical model prefix (longest
@@ -831,6 +882,7 @@ export const getPricing = async ({ apiKey, targetModel = null }) => {
   }
 
   let models = null
+  if (parsed && parsed.unknown === true) return null // it says it does not know — believe it
   if (targetModel && parsed) {
     if (parsed.input !== undefined && parsed.output !== undefined) {
       models = { [targetModel]: { input: parsed.input, output: parsed.output } }
@@ -1138,6 +1190,18 @@ export const streamAndCollect = async (client, params, { web = null, onEvent = n
  *
  * Verdicts are memoized via rememberProbe so the same rejection is paid once an hour.
  */
+/**
+ * Build params.output_config from the two things that live in it. Shared by ask() and
+ * askStream() so the two cannot drift. Nothing is set when neither was asked for.
+ */
+export const applyOutputConfig = (params, { effort, structuredOutput } = {}) => {
+  const cfg = {}
+  if (effort) cfg.effort = String(effort)
+  if (structuredOutput && structuredOutput.schema) cfg.format = { type: 'json_schema', schema: structuredOutput.schema }
+  if (Object.keys(cfg).length) params.output_config = cfg
+  return params
+}
+
 export const runWithDegrades = async (client, params, { web = null, model = null, onEvent = null } = {}) => {
   let webVariant = 0
   let webDropped = false
@@ -1150,6 +1214,7 @@ export const runWithDegrades = async (client, params, { web = null, model = null
         if (web?.search) rememberProbe(model, 'web.search', true)
         if (web?.fetch) rememberProbe(model, 'web.fetch', true)
       }
+      if (params.output_config?.format) rememberProbe(model, 'structuredOutput', true)
       return { ...collected, webDropped }
     } catch (err) {
       const emsg = ((err && (err.message || String(err))) || '').toLowerCase()
@@ -1179,11 +1244,34 @@ export const runWithDegrades = async (client, params, { web = null, model = null
         throw capErr
       }
 
-      if (params.output_config && (emsg.includes('output_config') || emsg.includes('effort'))) {
-        console.warn('[freezr anthropic] the API rejected output_config ' + JSON.stringify(params.output_config) +
-          ' for ' + params.model + ' — retrying without it')
+      if (params.output_config && (emsg.includes('output_config') || emsg.includes('effort') || isStructuredOutputRejection(err))) {
+        // TWO things can live in output_config, and they must NOT share one fate (2026-09-19).
+        // Before the schema existed this rung deleted the whole object and retried — fine when it
+        // only ever held `effort`. With a schema in the same box, that retry would strip the
+        // constraint and hand back unconstrained text under a structured-output success.
+        const hasFormat = !!params.output_config.format
+        const aboutSchema = hasFormat && isStructuredOutputRejection(err)
+        const aboutEffort = emsg.includes('effort')
+        if (hasFormat && (aboutSchema || !aboutEffort)) {
+          // A rejection with a schema present. Either way: fail, never degrade. But WHICH failure
+          // it is decides what gets remembered — see classifyStructuredRejection.
+          console.warn('[freezr anthropic] ' + params.model + ' rejected output_config with a response schema present (' +
+            (err && err.message) + ') — failing the request rather than answering unconstrained')
+          if (classifyStructuredRejection(err) === 'schema') throw schemaRejectedError(params.model, err)
+          rememberProbe(model, 'structuredOutput', false)
+          const capErr = new Error(params.model + ' does not support structuredOutput (' + ((err && err.message) || '') + ')')
+          capErr.code = 'capability_unsupported_on_model'
+          capErr.capability = 'structuredOutput'
+          capErr.model = params.model
+          throw capErr
+        }
+        // The effort dial was refused. Drop ONLY that and keep the schema; an output_config left
+        // empty is removed, which is exactly what the effort-only case always did.
+        console.warn('[freezr anthropic] the API rejected output_config.effort ' + JSON.stringify(params.output_config.effort) +
+          ' for ' + params.model + ' — retrying without it' + (hasFormat ? ' (keeping the response schema)' : ''))
         rememberProbe(model, 'effort', false)
-        delete params.output_config
+        delete params.output_config.effort
+        if (!Object.keys(params.output_config).length) delete params.output_config
         continue
       }
 
@@ -1251,7 +1339,7 @@ async function * streamWithDegrades (client, params, opts) {
  *
  * Same params as ask() except responseType is ignored (raw text is always yielded).
  */
-export async function * askStream ({ apiKey, prompt, context, model, max_tokens, role, thinking, cache, effort, files, web }) {
+export async function * askStream ({ apiKey, prompt, context, model, max_tokens, role, thinking, cache, effort, files, web, structuredOutput }) {
   const client = new Anthropic({ apiKey })
   const modelToUse = await resolveModel(client, model)
   const maxTokens = max_tokens || DEFAULT_MAX_TOKENS
@@ -1287,7 +1375,7 @@ export async function * askStream ({ apiKey, prompt, context, model, max_tokens,
   const params = { model: modelToUse, max_tokens: maxTokens, stream: true, messages }
   if (context) params.system = context
   applyCacheControl(params, cache, { callerPlaced })
-  if (effort) params.output_config = { effort: String(effort) }
+  applyOutputConfig(params, { effort, structuredOutput })
 
   const webOption = normalizeWebOption(web)
   const webTools = buildWebTools(webOption)

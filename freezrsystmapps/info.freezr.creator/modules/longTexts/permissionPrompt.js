@@ -374,7 +374,9 @@ const result = await freezr.llm.ask(messages, {
 - **provider**: Preferred provider — "Claude" or "ChatGPT".
 - **model**: Model shorthand like "sonnet", "o3-mini", or a full model name.
 - **max_tokens**: Maximum tokens in the response.
-- **responseType**: Set to "json" to auto-parse JSON from the LLM response.
+- **responseType**: Set to "json" to auto-parse JSON from the LLM response (best-effort: the model is asked for JSON and the reply is parsed as well as it can be).
+- **structuredOutput**: { schema, name?, description? } — NATIVE schema-constrained output. The provider guarantees the reply matches your JSON Schema and response is the parsed object; otherwise the call fails ('structured_output_invalid' / 'structured_output_truncated' / 'capability_unsupported_on_model'). Use additionalProperties:false and list every property in required. Prefer this over responseType:"json" whenever you have a schema.
+- **effort**: 'low'|'medium'|'high' — how hard the model works; honoured by both Claude and ChatGPT.
 - **thinking**: Enable extended thinking — true for default, or { budget_tokens: N } for Claude / { effort: 'low'|'medium'|'high' } for ChatGPT.
 - **files**: One or more File objects to include with the request (for multimodal models).
 

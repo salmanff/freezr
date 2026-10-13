@@ -5,6 +5,7 @@ console.log('account_app_settings.js loaded 1')
 import { showPermsIn, appHeaderFor, replaceWithFreezrEmptyLogo, createWarningsDiv } from './modules/AppSettings.js'
 import { makeBox } from './modules/freezrbox.js'
 import { dg } from './modules/dgelements.js'
+import * as devActions from './modules/devAppActions.js'
 
 
 
@@ -104,8 +105,53 @@ freezr.initPageScripts = async function () {
   console.log('account_app_settings.js loaded 3')
   // Initial call to get manifest and set up warnings
   await getManifestAndRefreshWarnings()
-  
+
+  setUpDevOptions()
+
   history.pushState(null, null, '?')
+}
+
+/**
+ * Developer Options card - same three actions as the Dev tab on the home page,
+ * but always acting on the app being viewed. Admin users only.
+ */
+const setUpDevOptions = function () {
+  if (!devActions.devOptionsAvailable()) return
+  const card = dg.el('devCard')
+  if (!card) return
+  card.style.display = ''
+
+  devActions.fillDevActionDescriptions()
+
+  const wire = function (action, runningText, onDone) {
+    const butt = dg.el('button_dev_' + action)
+    if (!butt) return
+    butt.onclick = async function () {
+      if (butt.classList.contains('dev-butt-busy')) return
+      butt.classList.add('dev-butt-busy')
+      const result = await devActions[action](targetApp,
+        { onStart: () => showDevResult(runningText.replace('{app}', targetApp), false) })
+      butt.classList.remove('dev-butt-busy')
+      if (result.cancelled) return
+      showDevResult(result.message, !result.ok, result.isHtml)
+      if (result.ok && onDone) await onDone()
+    }
+  }
+
+  wire('updateAppFromFiles', 'Re-installing {app} from its files...', getManifestAndRefreshWarnings)
+  wire('regenerateDevTokens', 'Generating tokens for {app}...')
+  wire('generateContextFile', 'Generating context file for {app}...')
+}
+
+const showDevResult = function (message, isError, isTrustedHtml) {
+  const box = dg.el('devTokenResultBox')
+  if (!box) return
+  box.className = message ? (isError ? 'errorBox' : 'successBox') : ''
+  if (isTrustedHtml) {
+    box.innerHTML = message || ''
+  } else {
+    box.innerText = message || ''
+  }
 }
 
 /**

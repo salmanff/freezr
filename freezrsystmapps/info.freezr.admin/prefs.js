@@ -15,6 +15,12 @@ freezr.initPageScripts = function () {
     showClass('changeNormal')
     hideClass('setup')
   }
+  // Local CLI LLM connectors are only offered on localhost. Hide (don't remove) the
+  // checkbox so a save from elsewhere keeps its current value.
+  const hostname = (window.location.hostname || '').toLowerCase()
+  if (!['localhost', '127.0.0.1', '[::1]', '::1'].includes(hostname)) {
+    document.getElementById('localLlmCliLabelId').style.display = 'none'
+  }
   document.getElementById('defaultPublicAppId').onchange = function () {
     document.getElementById('redirectPublicId').checked = true
   }

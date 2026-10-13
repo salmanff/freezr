@@ -132,7 +132,12 @@ export const CAPABILITIES = {
   effort: false,
   cache: false,
   images: { generate: false },
-  voice: false
+  voice: false,
+  // `codex exec --output-schema <file>` — the CLI itself constrains the model's final reply to a
+  // JSON Schema (verified live on 0.153.4: a nullable field came back as null, the shape exact).
+  // That is provider-side enforcement, not a prompt asking for JSON, so declaring it is honest.
+  // The schema is written into the per-call scratch dir and dies with it. Added 2026-09-19.
+  structuredOutput: true
 }
 
 export const getCapabilities = async (_opts = {}) => ({ ...CAPABILITIES })
@@ -190,7 +195,7 @@ const buildPromptText = (prompt, context) => {
   return '<instructions>\n' + context + '\n</instructions>\n\n' + body
 }
 
-const buildArgs = ({ model, sandboxDir }) => {
+const buildArgs = ({ model, sandboxDir, outputSchemaPath = null }) => {
   const modelArg = resolveModelArg(model)
   const args = [
     'exec',
@@ -240,11 +245,21 @@ const buildArgs = ({ model, sandboxDir }) => {
   // itself unproven as a COMPLETE boundary.
   args.push('-s', 'read-only', '-C', sandboxDir)
   if (modelArg) args.push('-m', modelArg)
+  // Native structured output (2026-09-19): the CLI constrains the final reply to this schema.
+  // Only when the caller asked — a request without it is byte-identical to before.
+  if (outputSchemaPath) args.push('--output-schema', outputSchemaPath)
   return args
 }
 
-const spawnCli = ({ binaryPath, model }) => {
+const spawnCli = ({ binaryPath, model, structuredOutput = null }) => {
   const sandboxDir = fs.mkdtempSync(path.join(os.tmpdir(), 'freezr-codex-local-'))
+  // The schema file lives in the scratch dir the CLI already has as its working root (-C), so it
+  // is readable under the read-only sandbox and removed with everything else by cleanup().
+  let outputSchemaPath = null
+  if (structuredOutput && structuredOutput.schema) {
+    outputSchemaPath = path.join(sandboxDir, 'output-schema.json')
+    fs.writeFileSync(outputSchemaPath, JSON.stringify(structuredOutput.schema))
+  }
   // Allowlisted environment — see localCliEnv.mjs. Subsumes the old OPENAI_API_KEY /
   // CODEX_API_KEY billing guarantee, and matters more here than for claudeLocal on two
   // counts: this CLI is a `#!/usr/bin/env node` script, so NODE_OPTIONS would inject code
@@ -252,7 +267,7 @@ const spawnCli = ({ binaryPath, model }) => {
   // environment is reachable by a prompt injection. CODEX_HOME is passed because the CLI's
   // auth lives there (documented: `--ignore-user-config` still uses CODEX_HOME).
   const env = buildLocalCliEnv(['CODEX_HOME', 'XDG_CONFIG_HOME', 'XDG_CACHE_HOME'])
-  const child = spawn(binaryPath, buildArgs({ model, sandboxDir }), { cwd: sandboxDir, env, stdio: ['pipe', 'pipe', 'pipe'], detached: true })
+  const child = spawn(binaryPath, buildArgs({ model, sandboxDir, outputSchemaPath }), { cwd: sandboxDir, env, stdio: ['pipe', 'pipe', 'pipe'], detached: true })
 
   // See claudeLocal: an unlistened 'error' on stdin (EPIPE when the child is already gone)
   // is an uncaught exception that kills the whole server.
@@ -369,7 +384,7 @@ const buildDoneFields = ({ model, responseText, thinkingText, usage }) => ({
  *   { type: 'turn.completed', usage: { input_tokens, cached_input_tokens, output_tokens } }
  *   { type: 'turn.failed', error: { message } } / { type: 'error', message }
  */
-const runExec = async ({ binaryPath, model, promptText, timeoutMs, onEvent, control, signal }) => {
+const runExec = async ({ binaryPath, model, promptText, timeoutMs, onEvent, control, signal, structuredOutput = null }) => {
   // Single clamp point for this connector — both ask() and askStream() come through here.
   const effectiveTimeoutMs = resolveTimeoutMs(timeoutMs)
   await acquireSlot()
@@ -391,7 +406,7 @@ const runExec = async ({ binaryPath, model, promptText, timeoutMs, onEvent, cont
     else signal.addEventListener('abort', killChild, { once: true })
   }
   try {
-    ({ child, cleanup } = spawnCli({ binaryPath, model }))
+    ({ child, cleanup } = spawnCli({ binaryPath, model, structuredOutput }))
     // An already-aborted signal must kill the child the moment it exists.
     if (signal?.aborted) killChild()
     child.stdin.end(promptText)
@@ -485,7 +500,7 @@ const runExec = async ({ binaryPath, model, promptText, timeoutMs, onEvent, cont
  * Non-streaming ask. Same params as the API connectors; apiKey is ignored (there is none),
  * `local` carries the owner's connector config ({ binaryPath }) from the resource record.
  */
-export const ask = async ({ prompt, context, model, responseType, files, web, local, timeoutMs, signal }) => {
+export const ask = async ({ prompt, context, model, responseType, files, web, local, timeoutMs, signal, structuredOutput }) => {
   rejectUnsupported({ files, web })
   const binaryPath = resolveBinaryOrThrow(local)
   const requestedModel = resolveModelArg(model)
@@ -494,7 +509,8 @@ export const ask = async ({ prompt, context, model, responseType, files, web, lo
     model: requestedModel,
     promptText: buildPromptText(prompt, context),
     timeoutMs,
-    signal
+    signal,
+    structuredOutput: structuredOutput || null
   })
   const done = buildDoneFields({ model: requestedModel, responseText, thinkingText, usage })
   return {
@@ -507,7 +523,7 @@ export const ask = async ({ prompt, context, model, responseType, files, web, lo
  * Streaming variant — Codex emits whole agent_message items (item.updated carries the
  * running text), so deltas are the new suffix since the last event: coarse but correct.
  */
-export async function * askStream ({ prompt, context, model, files, web, local, timeoutMs, signal }) {
+export async function * askStream ({ prompt, context, model, files, web, local, timeoutMs, signal, structuredOutput }) {
   rejectUnsupported({ files, web })
   const binaryPath = resolveBinaryOrThrow(local)
   const requestedModel = resolveModelArg(model)
@@ -539,7 +555,7 @@ export async function * askStream ({ prompt, context, model, files, web, local, 
   let failure = null
   let collected = null
   const control = {}
-  const runningExec = runExec({ binaryPath, model: requestedModel, promptText: buildPromptText(prompt, context), timeoutMs, onEvent, control, signal })
+  const runningExec = runExec({ binaryPath, model: requestedModel, promptText: buildPromptText(prompt, context), timeoutMs, onEvent, control, signal, structuredOutput: structuredOutput || null })
     .then(r => { collected = r }, e => { failure = e })
     .finally(() => { finished = true; wakeUp() })
 

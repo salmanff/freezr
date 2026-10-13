@@ -5,9 +5,16 @@ import { fetchAppHistory, updateHistoryEntry, addHistoryEntry } from '../history
 import { fetchFolderTree } from '../fileTree.js'
 import { renderManifestEditor, loadManifestForApp } from './manifestRenderer.js'
 import { calculateProjectCost, calculateEntryCost, formatCost, formatTokens } from '../priceService.js'
-import { escHtml, loadChatDraft, loadWebSearchPref, saveWebSearchPref } from '../utils.js'
+import { escHtml, loadChatDraft, loadWebSearchPref, saveWebSearchPref, recordMeta } from '../utils.js'
 import { sendChatMessage, detectLargeFiles } from '../chatService.js'
 import { syncProjectOnOpen } from '../projectSync.js'
+import { refreshSnapshotsInState, deleteAppSnapshots, refreshAfterFolderChange } from '../snapshotActions.js'
+import { openSnapshotCompare } from './filePanel.js'
+
+const isMobile = () => {
+  const root = document.querySelector('.creator-root')
+  return root ? root.classList.contains('is-mobile') : false
+}
 
 const ACCOUNT_RESOURCES_LINK = '/account/resources'
 const formatAppNameForHeader = (name) => escHtml(name || 'Project').replace(/\./g, '.<wbr>')
@@ -91,7 +98,7 @@ const createApp = async (appName, creationText) => {
     throw new Error(result?.error || 'Create app failed.')
   }
   try {
-    const createdEntry = { appName, action: 'created', timestamp: new Date().toISOString() }
+    const createdEntry = { ...recordMeta(), appName, action: 'created', timestamp: new Date().toISOString() }
     // Record the original creation text so the History tab shows what was asked for.
     if (creationText) createdEntry.userPrompt = creationText
     const histResult = await freezr.create('appUpdates', createdEntry)
@@ -166,10 +173,18 @@ export const loadApp = async (appName, setState) => {
       next.index.history = history
       next.index.fileTree = fileTree
       next.index.activeTab = 'history'
+      // Versions (whole-app snapshots) are per app: drop the previous app's list, selection and
+      // any in-RAM undo; the list is refetched below.
+      next.index.snapshots = null
+      next.index.snapshotsFor = null
+      next.index.versionSelection = []
+      if (next.project?.appSettings) next.project.appSettings.lastUpload = null
       if (!next.file) next.file = {}
       next.file.openFilePath = null
       next.file.openFileContent = null
+      next.file.snapshotDiff = null
       if (!next.chat) next.chat = {}
+      next.chat.undo = null
       next.chat.largeFiles = []
       next.chat.refactorBannerDismissed = {}
       // Restore any unsent prompt persisted for this app (survives full shutdown).
@@ -190,6 +205,7 @@ export const loadApp = async (appName, setState) => {
     loadManifestForApp(appName, setState)
     detectLargeFiles(appName, setState)
     syncProjectOnOpen(appName, setState)
+    refreshSnapshotsInState(appName, setState)
   } catch (error) {
     setState((next) => {
       if (!next.loading) next.loading = {}
@@ -581,9 +597,25 @@ const incrementVersion = (version) => {
 }
 
 const bindPublishEvents = (container, state, setState, appName) => {
+  const notesInput = container.querySelector('#publishReleaseNotes')
+  if (notesInput) {
+    notesInput.oninput = () => {
+      setState((next) => {
+        if (!next.project.appSettings) next.project.appSettings = {}
+        next.project.appSettings.publishReleaseNotes = notesInput.value
+        return next
+      }, { rerender: false })
+    }
+  }
+
   const publishBtn = container.querySelector('[data-action="publish-app"]')
   if (publishBtn) {
     publishBtn.onclick = async () => {
+      if (state.project?.appSettings?.publishBusy || publishBtn.disabled) return
+      // Immediate feedback, before any state round-trip: no double-clicks, and something visibly
+      // happening while the zip is built and uploaded.
+      publishBtn.disabled = true
+      publishBtn.innerHTML = '<span class="chat-spinner-inline"></span> Publishing…'
       clearError()
       const manifestObj = state.project?.manifestEditor?.manifestObject || {}
       const manifestVersion = manifestObj.version || '0.01'
@@ -599,6 +631,8 @@ const bindPublishEvents = (container, state, setState, appName) => {
 
       if (!version) {
         showError('Version is required.')
+        publishBtn.disabled = false
+        publishBtn.textContent = 'Publish'
         return
       }
 
@@ -649,6 +683,7 @@ const bindPublishEvents = (container, state, setState, appName) => {
       setState((next) => {
         if (!next.project.appSettings) next.project.appSettings = {}
         next.project.appSettings.publishBusy = true
+        next.project.appSettings.publishStatus = 'Publishing v' + version + ' — zipping and uploading the app. This can take a while…'
         return next
       }, { sourcePanel: 'project' })
 
@@ -663,6 +698,8 @@ const bindPublishEvents = (container, state, setState, appName) => {
         setState((next) => {
           if (!next.project.appSettings) next.project.appSettings = {}
           next.project.appSettings.publishBusy = false
+          next.project.appSettings.publishStatus = ''
+          next.project.appSettings.publishReleaseNotes = ''
           next.project.appSettings.publishFetched = false
           next.project.appSettings.needsVersionBump = false
           next.project.appSettings.lastPublishResult = result
@@ -875,6 +912,189 @@ const bindRenameEvents = (container, state, setState) => {
   }
 }
 
+// ---- Backup & Transfer (app settings) ----
+// Download the app (zip) or its chat history (JSON export); upload either back. The server does
+// the work (snapshotController): an app upload is bracketed by "before upload" / "uploaded"
+// versions and a history entry, and a chat upload keeps original record ids so re-uploads skip
+// what is already there.
+const creatorToken = () => (freezr.app.isWebBased ? freezr.utils.getCookie('app_token_' + freezrMeta.userId) : freezrMeta.appToken)
+
+const downloadBlob = (blob, fileName) => {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 10000)
+}
+
+const fileNameFromResponse = (resp, fallback) => {
+  const hinted = resp.headers.get('X-Freezr-Filename')
+  if (hinted) return hinted
+  const m = /filename="([^"]+)"/.exec(resp.headers.get('Content-Disposition') || '')
+  return m ? m[1] : fallback
+}
+
+const countsText = (counts) => {
+  if (!counts) return ''
+  return [counts.modified && counts.modified + ' modified', counts.added && counts.added + ' added', counts.deleted && counts.deleted + ' deleted']
+    .filter(Boolean).join(', ') || 'no changes'
+}
+
+const bindTransferEvents = (container, state, setState, appName) => {
+  if (!appName) return
+  const patch = (fields, opts) => setState((next) => {
+    if (!next.project) next.project = {}
+    if (!next.project.appSettings) next.project.appSettings = {}
+    Object.assign(next.project.appSettings, fields)
+    return next
+  }, opts || { sourcePanel: 'project' })
+
+  const transferToggle = container.querySelector('[data-action="toggle-transfer"]')
+  if (transferToggle) transferToggle.onclick = () => patch({ transferExpanded: !state.project?.appSettings?.transferExpanded })
+  const dangerToggle = container.querySelector('[data-action="toggle-danger"]')
+  if (dangerToggle) dangerToggle.onclick = () => patch({ dangerExpanded: !state.project?.appSettings?.dangerExpanded })
+
+  const base = freezr.app.isWebBased ? '' : (freezrMeta.serverAddress || '')
+  const enc = encodeURIComponent(appName)
+
+  const fetchDownload = async (path, fallbackName) => {
+    const token = creatorToken()
+    const resp = await fetch(base + path, { headers: token ? { Authorization: 'Bearer ' + token } : {} })
+    if (!resp.ok) {
+      let msg = 'Download failed (' + resp.status + ').'
+      try { const j = await resp.json(); if (j?.error) msg = j.error } catch (e) { /* not json */ }
+      throw new Error(msg)
+    }
+    return { blob: await resp.blob(), fileName: fileNameFromResponse(resp, fallbackName) }
+  }
+
+  // One job at a time: disable the buttons, show a spinner + status, report the outcome.
+  const run = async (statusText, job) => {
+    if (state.project?.appSettings?.transferBusy) return
+    clearError()
+    patch({ transferBusy: true, transferStatus: statusText })
+    try {
+      const done = await job()
+      patch({ transferBusy: false, transferStatus: done || '' })
+    } catch (err) {
+      patch({ transferBusy: false, transferStatus: '' })
+      showError(err?.message || 'Transfer failed.')
+    }
+  }
+
+  const dlApp = container.querySelector('[data-action="download-app"]')
+  if (dlApp) {
+    dlApp.onclick = () => run('Zipping the app…', async () => {
+      const { blob, fileName } = await fetchDownload('/creatorapi/download_app_zip?app_name=' + enc, appName + '.zip')
+      downloadBlob(blob, fileName)
+      return 'Downloaded ' + fileName
+    })
+  }
+
+  const dlChat = container.querySelector('[data-action="download-chat"]')
+  if (dlChat) {
+    dlChat.onclick = () => run('Collecting the chat history…', async () => {
+      const { blob, fileName } = await fetchDownload('/creatorapi/download_chat?app_name=' + enc, appName + ' chat.json')
+      downloadBlob(blob, fileName)
+      return 'Downloaded ' + fileName
+    })
+  }
+
+  // One upload control for both kinds: a .zip is app files, a .json is a chat export.
+  const uploadApp = (file) => {
+    const ok = window.confirm(
+      'Replace the files of "' + appName + '" with the contents of ' + file.name + '?\n\n' +
+      'A version is saved before and after the upload, so this can be reversed from the Versions tab.'
+    )
+    if (!ok) return
+    run('Uploading ' + file.name + '…', async () => {
+      const fd = new FormData()
+      fd.append('file', file, file.name)
+      fd.append('app_name', appName)
+      const result = await freezr.apiRequest('POST', '/creatorapi/upload_app_zip', fd, { uploadFile: true })
+      if (!result || result.error) throw new Error(result?.error || 'Upload failed.')
+      if (result.nothingToDo) {
+        await refreshSnapshotsInState(appName, setState)
+        return 'Nothing changed — ' + file.name + ' matches the current files.'
+      }
+      await refreshAfterFolderChange(appName, setState, (result.files || []).map((f) => f.path))
+      loadManifestForApp(appName, setState)
+      patch({ lastUpload: { before: result.beforeSnapshot, after: result.afterSnapshot, fileName: file.name, counts: result.counts } }, { rerender: false })
+      return 'Uploaded ' + file.name + ' (' + countsText(result.counts) + ').' +
+        (result.installWarning ? ' Warning: the app re-install reported: ' + result.installWarning : '')
+    })
+  }
+
+  const uploadChat = (file) => {
+    run('Importing ' + file.name + '…', async () => {
+      const fd = new FormData()
+      fd.append('file', file, file.name)
+      fd.append('app_name', appName)
+      const result = await freezr.apiRequest('POST', '/creatorapi/upload_chat', fd, { uploadFile: true })
+      if (!result || result.error) throw new Error(result?.error || 'Import failed.')
+      const history = await fetchAppHistory(appName)
+      setState((next) => {
+        if (!next.index) next.index = {}
+        next.index.history = history
+        if (next.project && history.length > 0) next.project.lastUpdate = history[0]
+        return next
+      }, { sourcePanel: 'index' })
+      const au = result.appUpdates || {}
+      const fu = result.fileUpdates || {}
+      const skipped = (au.skipped || 0) + (fu.skipped || 0)
+      return 'Imported ' + (au.imported || 0) + ' chat entries and ' + (fu.imported || 0) + ' file records' +
+        (skipped ? '; ' + skipped + ' already present were skipped' : '') + '.'
+    })
+  }
+
+  const handleTransferFile = (file) => {
+    if (!file) return
+    if (state.project?.appSettings?.transferBusy) return
+    const name = (file.name || '').toLowerCase()
+    if (name.endsWith('.zip') || file.type === 'application/zip' || file.type === 'application/x-zip-compressed') return uploadApp(file)
+    if (name.endsWith('.json') || file.type === 'application/json') return uploadChat(file)
+    showError('Drop a .zip (app files) or a .json (chat history) — "' + file.name + '" is neither.')
+  }
+
+  const lastUpload = state.project?.appSettings?.lastUpload
+  const openUploadCompare = async (autoExplain) => {
+    if (!lastUpload?.before?._id || !lastUpload?.after?._id) return
+    if (isMobile()) {
+      setState((next) => {
+        if (next.index?.ui) next.index.ui.visible = false
+        if (next.chat?.ui) next.chat.ui.visible = false
+        return next
+      }, { rerender: false })
+    }
+    await openSnapshotCompare(appName, lastUpload.before._id, lastUpload.after._id, setState, { autoExplain })
+  }
+  const reviewBtn = container.querySelector('[data-action="review-upload"]')
+  if (reviewBtn) reviewBtn.onclick = () => openUploadCompare(false)
+  const explainBtn = container.querySelector('[data-action="explain-upload"]')
+  if (explainBtn) explainBtn.onclick = () => openUploadCompare(true)
+
+  const dropZone = container.querySelector('[data-action="upload-any"]')
+  const fileInput = container.querySelector('#transferFile')
+  if (dropZone && fileInput) {
+    const pick = () => { if (!state.project?.appSettings?.transferBusy) { fileInput.value = ''; fileInput.click() } }
+    dropZone.onclick = pick
+    dropZone.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick() } }
+    fileInput.onchange = () => handleTransferFile(fileInput.files && fileInput.files[0])
+    dropZone.ondragover = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; dropZone.classList.add('is-dragover') }
+    dropZone.ondragleave = () => dropZone.classList.remove('is-dragover')
+    dropZone.ondrop = (e) => {
+      e.preventDefault()
+      dropZone.classList.remove('is-dragover')
+      const files = e.dataTransfer?.files
+      if (files && files.length > 1) { showError('Drop one file at a time.'); return }
+      handleTransferFile(files && files[0])
+    }
+  }
+}
+
 const deleteChatHistory = async (appName) => {
   const errors = []
   try {
@@ -945,6 +1165,12 @@ const bindDeleteEvents = (container, state, setState, getState) => {
         await deleteChatHistory(appName)
       } catch (e) {
         showError(e.message || 'Could not delete chat history.')
+      }
+      showDeleteStatus('Deleting saved versions...')
+      try {
+        await deleteAppSnapshots(appName) // published zips are kept (they are the public download)
+      } catch (e) {
+        console.warn('Could not delete app snapshots:', e)
       }
       showDeleteStatus('Deleting app...')
       try {
@@ -1017,10 +1243,19 @@ export const renderProjectPanel = ({ container, state, getState, setState }) => 
       </div>`
     }
 
+    // Release notes live in state so the busy re-render does not wipe what was typed.
     const releaseNotesField = `<div class="panel-inline-row publish-notes-row">
           <label class="publish-field-label">Release notes</label>
-          <input id="publishReleaseNotes" type="text" placeholder="What's new in this version?" value="" ${publishBusy ? 'disabled' : ''}>
+          <input id="publishReleaseNotes" type="text" placeholder="What's new in this version?" value="${escHtml(appSettings.publishReleaseNotes || '')}" ${publishBusy ? 'disabled' : ''}>
         </div>`
+    // Publishing zips and uploads the whole app, which can take a while: the button goes disabled
+    // with a spinner the moment it is pressed, and a status line says what is happening.
+    const publishBtnLabel = (version) => publishBusy
+      ? '<span class="chat-spinner-inline"></span> Publishing…'
+      : 'Publish v' + escHtml(version)
+    const publishStatusHtml = appSettings.publishStatus
+      ? `<div class="publish-status">${publishBusy ? '<span class="chat-spinner-inline"></span> ' : ''}${escHtml(appSettings.publishStatus)}</div>`
+      : ''
 
     const publishFormHtml = (() => {
       if (publishLoading && !publishFetched) {
@@ -1042,13 +1277,15 @@ export const renderProjectPanel = ({ container, state, getState, setState }) => 
             <input id="publishVersionInput" type="text" placeholder="Version" value="${escHtml(suggestedVersion)}" ${publishBusy ? 'disabled' : ''}>
           </div>
           ${releaseNotesField}
-          <button class="panel-cta publish-btn" data-action="publish-app" ${publishBusy ? 'disabled' : ''}>${publishBusy ? 'Publishing...' : 'Publish v' + escHtml(suggestedVersion)}</button>
+          <button class="panel-cta publish-btn" data-action="publish-app" ${publishBusy ? 'disabled' : ''}>${publishBtnLabel(suggestedVersion)}</button>
+          ${publishStatusHtml}
         </div>`
       }
       return `<div class="publish-form">
         <div class="publish-version-info">Version from manifest: <strong>${escHtml(manifestVersion)}</strong></div>
         ${releaseNotesField}
-        <button class="panel-cta publish-btn" data-action="publish-app" ${publishBusy ? 'disabled' : ''}>${publishBusy ? 'Publishing...' : 'Publish v' + escHtml(manifestVersion)}</button>
+        <button class="panel-cta publish-btn" data-action="publish-app" ${publishBusy ? 'disabled' : ''}>${publishBtnLabel(manifestVersion)}</button>
+        ${publishStatusHtml}
       </div>`
     })()
 
@@ -1107,17 +1344,45 @@ export const renderProjectPanel = ({ container, state, getState, setState }) => 
                 <pre id="inspectTokenBlock" style="white-space:pre-wrap; word-break:break-all; font-size:11px; border:1px solid currentColor; border-radius:4px; padding:6px; opacity:0.85;">${escHtml(inspectPasteText(appSettings.inspectResult, appName))}</pre>
               ` : ''}
             </div>
+            <div class="app-settings-row transfer-section">
+              <div class="app-settings-subheader" data-action="toggle-transfer">
+                <span class="app-settings-toggle">${appSettings.transferExpanded ? '▼' : '▶'}</span>
+                <label>Backup &amp; Transfer</label>
+              </div>
+              ${appSettings.transferExpanded ? `
+                <div class="app-settings-warning">Move this app and its chat between servers (e.g. localhost and online). Uploading an app saves a version before and after and records it in the history. Uploading a chat merges it: entries already present are skipped, so uploading twice never duplicates.</div>
+                <div class="panel-inline-row transfer-actions">
+                  <button class="panel-cta panel-cta-sm" data-action="download-app" ${appSettings.transferBusy ? 'disabled' : ''}>⬇ Download App</button>
+                  <button class="panel-cta panel-cta-sm" data-action="download-chat" ${appSettings.transferBusy ? 'disabled' : ''}>⬇ Download Chat</button>
+                </div>
+                <div class="transfer-drop${appSettings.transferBusy ? ' is-busy' : ''}" data-action="upload-any" tabindex="0" role="button">
+                  <div class="transfer-drop-title">⬆ Upload — drop a file here or click</div>
+                  <div class="transfer-drop-hint">.zip = app files &nbsp;·&nbsp; .json = chat history</div>
+                  <input id="transferFile" type="file" accept=".zip,.json,application/zip,application/json" hidden>
+                </div>
+                ${appSettings.transferStatus ? `<div class="app-settings-status transfer-status">${appSettings.transferBusy ? '<span class="chat-spinner-inline"></span> ' : ''}${escHtml(appSettings.transferStatus)}</div>` : ''}
+                ${(appSettings.lastUpload?.before && appSettings.lastUpload?.after && !appSettings.transferBusy) ? `<div class="panel-inline-row transfer-actions">
+                  <button class="panel-cta panel-cta-sm" data-action="review-upload" title="Compare the app before and after ${escHtml(appSettings.lastUpload.fileName || 'the upload')}">↔ Review changes</button>
+                  <button class="panel-cta panel-cta-sm" data-action="explain-upload" title="Ask the AI to explain the upload, including a security review">✨ Explain changes (AI)</button>
+                </div>` : ''}
+              ` : ''}
+            </div>
             <div class="app-settings-row delete-section">
-              <label>Danger Zone</label>
-              <div class="app-settings-warning">These actions are irreversible.</div>
-              <div class="panel-inline-row">
-                <input id="deleteConfirmInput" type="text" placeholder="Type '${escHtml(appName.split('.').pop())}' to confirm">
+              <div class="app-settings-subheader" data-action="toggle-danger">
+                <span class="app-settings-toggle">${appSettings.dangerExpanded ? '▼' : '▶'}</span>
+                <label>Danger Zone</label>
               </div>
-              <div class="panel-inline-row" style="gap:8px; margin-top:4px;">
-                <button class="panel-cta panel-cta-sm panel-cta-danger" data-action="delete-chat-history">Delete Chat History</button>
-                <button class="panel-cta panel-cta-sm panel-cta-danger" data-action="delete-app-and-history">Delete App &amp; Chat History</button>
-              </div>
-              <div id="deleteStatus" class="app-settings-status" style="display:none;"></div>
+              ${appSettings.dangerExpanded ? `
+                <div class="app-settings-warning">These actions are irreversible.</div>
+                <div class="panel-inline-row">
+                  <input id="deleteConfirmInput" type="text" placeholder="Type '${escHtml(appName.split('.').pop())}' to confirm">
+                </div>
+                <div class="panel-inline-row" style="gap:8px; margin-top:4px;">
+                  <button class="panel-cta panel-cta-sm panel-cta-danger" data-action="delete-chat-history">Delete Chat History</button>
+                  <button class="panel-cta panel-cta-sm panel-cta-danger" data-action="delete-app-and-history">Delete App &amp; Chat History</button>
+                </div>
+                <div id="deleteStatus" class="app-settings-status" style="display:none;"></div>
+              ` : ''}
             </div>
           </div>
         ` : ''}
@@ -1180,6 +1445,7 @@ export const renderProjectPanel = ({ container, state, getState, setState }) => 
     bindRenameEvents(container, state, setState)
     bindPublishEvents(container, state, setState, appName)
     bindInspectTokenEvents(container, state, setState, appName)
+    bindTransferEvents(container, state, setState, appName)
     bindDeleteEvents(container, state, setState, getState)
 
     if (settingsExpanded && !publishFetched && !appSettings.publishLoading) {

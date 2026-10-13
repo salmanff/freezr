@@ -1,8 +1,8 @@
 // freezr.info - nodejs system files - main file: server.mjs 
 
-const VERSION = '0.0.307.0' 
+const VERSION = '0.0.308.6' 
 
-console.log('=========================  VERSION sep 05 2026 - ' + VERSION + ' =======================')
+console.log('=========================  VERSION oct 12 2026 - ' + VERSION + ' =======================')
 
 if (process.env.NODE_ENV === 'development') {
   console.log('[DEV-INFO] Running in DEVELOPMENT mode')

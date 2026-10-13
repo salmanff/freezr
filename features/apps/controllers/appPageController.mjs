@@ -7,7 +7,7 @@
 // - Returns HTML pages
 // - Uses functional approach with closures for dependency injection
 
-import { loadDataHtmlAndPage, fileExt } from '../../../adapters/rendering/pageLoader.mjs'
+import { loadDataHtmlAndPage, loadPageHtml, fileExt } from '../../../adapters/rendering/pageLoader.mjs'
 import { endsWith } from '../../../common/helpers/utils.mjs'
 import { sdkAddonsForApp } from '../../../common/helpers/sdkAddons.mjs'
 
@@ -235,6 +235,27 @@ const generateAppPage = async (req, res) => {
     // SDK add-ons: inject connections / llm scripts only if app's manifest
     // (or systemPermissions.json shortcut) requests the matching permission type.
     options.sdkAddons = sdkAddonsForApp(appName, manifest)
+
+    // Data probe (?freezr_probe=): the /creator assistant asked to look at this app's data. Serve
+    // freezr's consent page INSTEAD of the app's page — none of the app's html, css or js — so no
+    // app code (or code an LLM wrote into the app) can run alongside the consent gate. The page keeps
+    // this app's ordinary token (cookie below), so its reads use the app's own granted permissions.
+    // See xplanations/freezr_creator_data_access_plan.md.
+    const isProbe = typeof req.query?.freezr_probe === 'string' && req.query.freezr_probe.length > 0
+    if (isProbe) {
+      Object.assign(options, {
+        page_title: 'Data probe - freezr.info',
+        css_files: ['/app/info.freezr.public/public/freezrProbe.css'],
+        script_files: ['/app/info.freezr.public/public/freezrProbe.js'],
+        modules: [],
+        sdkAddons: {}, // core SDK only
+        allow_self_frames: false,
+        allow_external_scripts: false,
+        allow_external_fetch: false,
+        allow_unsafe_eval: false,
+        page_html: '<div id="freezr-probe"></div>'
+      })
+    }
     
     // Set cookie with app token
     let appPrefix = '/apps/'
@@ -258,7 +279,8 @@ const generateAppPage = async (req, res) => {
       path: '/feps/userfiles/' + appName 
     })
     
-    // Render page using modern page loader adapter
+    // Render page using modern page loader adapter (the probe's body is fixed — nothing read from the app)
+    if (isProbe) return loadPageHtml(res, options)
     return loadDataHtmlAndPage(appFS, res, options)
     
   } catch (error) {

@@ -99,7 +99,7 @@ const gmailFetch = async (url, accessToken, { method = 'GET', body } = {}) => {
   return data
 }
 
-// Parse an RFC-822 address like '"Salman" <salman@gmail.com>' or 'salman@gmail.com'
+// Parse an RFC-822 address like '"Saman" <saman@gmail.com>' or 'saman@gmail.com'
 // into { address, name }. Returns null for empty/malformed input.
 const parseAddress = (raw) => {
   if (!raw || typeof raw !== 'string') return null

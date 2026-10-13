@@ -262,8 +262,24 @@ await freezr.llm.ping(options?)
 // Send a prompt to an LLM.
 await freezr.llm.ask(prompt, options?)
 // prompt: a string, or an array of { role, content } messages for conversation
-// options: { context, provider, family, model, max_tokens, responseType, thinking, cache, files, streamBack, onDelta, onThinking, appToken, host }
+// options: { context, provider, family, model, max_tokens, responseType, structuredOutput, thinking, effort, cache, files, streamBack, onDelta, onThinking, appToken, host }
 // Fallback chain: model -> family -> defaultFamily of defaultProvider
+//
+// TWO ways to get JSON back, and they are not the same thing:
+//   responseType: 'json'       — asks for JSON in the prompt, then parses whatever came back as best
+//                                it can (fences stripped, first {...} block found). Best-effort.
+//   structuredOutput: { schema, name?, description? }
+//                              — NATIVE schema-constrained generation: the provider itself (OpenAI
+//                                text.format / Anthropic output_config.format) guarantees the reply
+//                                matches your JSON Schema, and result.response is the parsed object.
+//                                Either the reply satisfies the schema or the call fails — codes
+//                                'structured_output_invalid', 'structured_output_truncated' (cut off at
+//                                max_tokens), or 'capability_unsupported_on_model' (refused before any
+//                                token is spent). Write the schema for the subset both providers take:
+//                                additionalProperties:false on every object, every property in
+//                                required (make optional fields nullable). Check
+//                                freezr.llm.can('structuredOutput') first. Claude, ChatGPT and the local
+//                                Codex CLI support it; the local Claude CLI does not.
 //
 // cache (prompt caching): true for the provider's default 5-minute TTL, or { ttl: '1h' }.
 // Marks the END of the request's messages as a cache breakpoint, so a follow-up call whose

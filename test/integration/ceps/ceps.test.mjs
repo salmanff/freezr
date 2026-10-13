@@ -871,18 +871,24 @@ describe('CEPS Multi-User Tests', function () {
   it('users should have isolated data by default', async function () {
     if (!primaryAuth || !secondaryAuth || !primaryRecordId) this.skip()
     
-    // Secondary user queries - should not see primary's records (unless shared)
-    const response = await secondaryAuth.get(`/ceps/query/${appTable}?owner=primary`)
-    
+    // Secondary user queries the PRIMARY user's data - should not see their records (unless shared).
+    // NB `owner` is a CONTROL parameter (the data owner's user id — see addDataOwnerToContext in
+    // features/apps/middleware/appContext.mjs), so it must be the real user_id. This previously
+    // passed the credentials-file KEY ('primary'), i.e. a user that does not exist, which 500s in
+    // addOwnerPermDBs before the isolation check is ever reached.
+    const primaryUserId = testConfig.users.primary.user_id
+    const response = await secondaryAuth.get(`/ceps/query/${appTable}?owner=${primaryUserId}`)
+
     expect(response.ok).to.be.true
-    
+
     // CEPS 2.0 spec requires: response must be an array
     expect(response.data).to.be.an('array')
-    
-    // The response behavior depends on permission settings
-    // By default, users should only see their own records
-    // This is informational - actual behavior depends on app permissions
-    console.log(`      Secondary user query returned ${response.data.length} results`)
+
+    // Isolation is the actual point of this test: whatever the app's permissions are, the
+    // secondary user must not get the primary user's record back without it having been shared.
+    const ids = response.data.map((r) => r._id)
+    expect(ids).to.not.include(primaryRecordId)
+    console.log(`      Secondary user query of ${primaryUserId}'s data returned ${response.data.length} results`)
   })
 })
 

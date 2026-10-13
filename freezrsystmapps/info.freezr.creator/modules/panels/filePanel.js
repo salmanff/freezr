@@ -1,10 +1,13 @@
 /* global freezr */
 import { PROJECT_INSTRUCTIONS } from '../longTexts/projectInstructions.js'
 import { createEditor } from '../editorLoader.js'
-import { addHistoryEntry, updateHistoryEntry } from '../historyActions.js'
+import { addHistoryEntry, updateHistoryEntry, fetchAppHistory } from '../historyActions.js'
 import { fetchFileContent, fetchFolderTree } from '../fileTree.js'
 import { showError } from '../showError.js'
-import { escHtml, saveFileToBackend, updateAppFromFiles, tsOf } from '../utils.js'
+import { escHtml, saveFileToBackend, updateAppFromFiles, tsOf, recordMeta } from '../utils.js'
+import { snapshotBeforeChange, compareSnapshots, performRestore, formatSnapshotTs } from '../snapshotActions.js'
+import { runChangeReview, renderMarkdownLite } from '../changeReview.js'
+import { calculateProjectCost, formatCost } from '../priceService.js'
 
 const extensionLanguage = (filePath) => {
   const ext = (filePath || '').split('.').pop().toLowerCase()
@@ -64,7 +67,7 @@ const destroyEditor = () => {
 
 const recordFileUpdate = async (appName, filePath, content, historyId) => {
   const timestamp = new Date().toISOString()
-  const data = { appName, path: filePath, action: 'upsert', content, timestamp }
+  const data = { ...recordMeta(), appName, path: filePath, action: 'upsert', content, timestamp }
   if (historyId) data.historyId = historyId
   try {
     const result = await freezr.create('fileUpdates', data)
@@ -156,6 +159,13 @@ const saveFileFromEditor = async (appName, filePath, getState, setState) => {
   updateSaveStatusUI('Saving...', 'fp-status-saving')
 
   try {
+    // First save of a manual edit session (nothing to coalesce into yet): take the whole-app
+    // "before manual edit" restore point BEFORE anything is written. Best-effort, first save only.
+    const stateBefore = typeof getState === 'function' ? getState() : null
+    if (stateBefore && !findExistingEditHistoryId(stateBefore)) {
+      await snapshotBeforeChange(appName, { reason: 'pre_edit', label: 'Before editing ' + filePath })
+    }
+
     await saveFileToBackend(appName, filePath, content)
 
     try {
@@ -177,6 +187,8 @@ const saveFileFromEditor = async (appName, filePath, getState, setState) => {
       next.file.editorSaveStatus = 'Saved'
       next.file.editorDirty = false
       next.file.openFileContent = content
+      // A manual edit on top of the last chat turn: its RAM undo no longer describes the state.
+      if (next.chat) next.chat.undo = null
     }, { rerender: false })
 
     updateSaveStatusUI('Saved', 'fp-status-saved')
@@ -623,6 +635,284 @@ const renderHistoricalView = ({ container, state, getState, setState, historical
   }
 }
 
+// ---- Whole-app version compare (Versions tab → file panel) ----
+// `a` / `b` are snapshot ids or 'current'; statuses read as "what happened going from a to b".
+export const openSnapshotCompare = async (appName, a, b, setState, options = {}) => {
+  setState((next) => {
+    if (!next.file) next.file = {}
+    if (!next.file.ui) next.file.ui = {}
+    next.file.ui.visible = true
+    next.file.snapshotDiff = { loading: true, aId: a, bId: b }
+    return next
+  }, { sourcePanel: 'file' })
+  try {
+    const result = await compareSnapshots(appName, a, b)
+    const firstChanged = (result.files || []).find((f) => f.status !== 'unchanged' && !f.binary)
+    setState((next) => {
+      if (!next.file) next.file = {}
+      next.file.snapshotDiff = {
+        aId: a,
+        bId: b,
+        a: result.a,
+        b: result.b,
+        files: result.files || [],
+        counts: result.counts || {},
+        selectedPath: firstChanged ? firstChanged.path : null,
+        autoExplain: options.autoExplain === true,
+        review: null,
+        reviewOpen: options.autoExplain === true
+      }
+      next.file.openFilePath = null
+      next.file.openFileContent = null
+      next.file.openFolderPath = null
+      next.file.historicalView = null
+      next.file.compDiff = null
+      return next
+    }, { sourcePanel: 'file' })
+  } catch (err) {
+    showError(err?.message || 'Could not compare versions.')
+    setState((next) => {
+      if (next.file) next.file.snapshotDiff = null
+      return next
+    }, { sourcePanel: 'file' })
+  }
+}
+
+const sideLabel = (meta) => {
+  if (!meta) return ''
+  if (meta.id === 'current') return 'Current files'
+  const when = formatSnapshotTs(meta.timestamp)
+  return (meta.label || meta.id) + (when ? ' (' + when + ')' : '')
+}
+
+const fmtSize = (n) => {
+  if (n === null || n === undefined) return ''
+  if (n < 1024) return n + ' B'
+  return Math.round(n / 1024) + ' KB'
+}
+
+// Model options for a change review: the user's chosen provider/model, no streaming or thinking display.
+const buildReviewAskOptions = (state) => {
+  const opts = { context: 'You are a careful code reviewer for small web apps built on the freezr platform. Be concrete, cite files and short snippets, and never invent files you were not shown.' }
+  if (state?.llm?.model) opts.model = state.llm.model
+  if (state?.llm?.provider) opts.provider = state.llm.provider
+  if (state?.llm?.options?.maxTokens) opts.max_tokens = state.llm.options.maxTokens
+  return opts
+}
+
+const renderSnapshotDiffView = ({ container, appName, diff, setState, state }) => {
+  destroyEditor()
+
+  const back = () => setState((next) => {
+    if (!next.file) next.file = {}
+    next.file.snapshotDiff = null
+    return next
+  }, { sourcePanel: 'file' })
+
+  if (diff.loading) {
+    container.innerHTML = `
+      <div class="fp-editor-outer">
+        <div class="fp-header">
+          <h2>🗂️ Compare versions <span class="fp-historical-badge">versions</span></h2>
+          <div class="fp-header-actions"><button class="panel-cta panel-cta-sm" data-action="back">Back</button></div>
+        </div>
+        <div class="fp-snap-empty">Comparing…</div>
+      </div>`
+    container.querySelector('[data-action="back"]').onclick = back
+    return
+  }
+
+  // Which side can be restored FROM: the newer side if it is a snapshot, else the older one.
+  const restoreMeta = diff.bId !== 'current' ? diff.b : (diff.aId !== 'current' ? diff.a : null)
+  const restoreSnap = restoreMeta ? { _id: restoreMeta.id, label: restoreMeta.label, timestamp: restoreMeta.timestamp } : null
+
+  const changed = diff.files.filter((f) => f.status !== 'unchanged')
+  const unchangedCount = diff.files.length - changed.length
+  const c = diff.counts || {}
+  const countBits = []
+  if (c.modified) countBits.push(c.modified + ' modified')
+  if (c.added) countBits.push(c.added + ' added')
+  if (c.deleted) countBits.push(c.deleted + ' deleted')
+
+  const rows = changed.map((f) => {
+    const sel = f.path === diff.selectedPath ? ' is-selected' : ''
+    const bin = f.binary ? ' is-binary' : ''
+    const size = f.binary ? `<span class="fp-snap-size">${escHtml(fmtSize(f.aSize))}${f.status === 'modified' ? ' → ' + escHtml(fmtSize(f.bSize)) : ''}</span>` : ''
+    const restoreBtn = restoreSnap
+      ? `<button class="panel-cta panel-cta-xs fp-snap-restore-file" data-restore-path="${escHtml(f.path)}" title="Restore just this file from ${escHtml(restoreMeta.label || '')}">↩ file</button>`
+      : ''
+    return `<div class="fp-snap-file${sel}${bin}" data-snap-path="${escHtml(f.path)}" data-binary="${f.binary ? '1' : '0'}">
+      <span class="fp-snap-status fp-snap-status-${escHtml(f.status)}">${escHtml(f.status)}</span>
+      <span class="fp-snap-path">${escHtml(f.path)}</span>
+      ${size}
+      ${restoreBtn}
+    </div>`
+  }).join('')
+
+  container.innerHTML = `
+    <div class="fp-editor-outer">
+      <div class="fp-header">
+        <h2>🗂️ Compare versions <span class="fp-historical-badge">versions</span>
+          <span class="fp-diff-nav fp-diff-nav-hidden">
+            <button class="fp-diff-nav-btn" data-action="diff-prev" title="Previous change">▲</button>
+            <button class="fp-diff-nav-btn" data-action="diff-next" title="Next change">▼</button>
+            <span class="fp-diff-counter"></span>
+          </span>
+        </h2>
+        <div class="fp-header-actions">
+          ${changed.length ? '<button class="panel-cta panel-cta-sm" data-action="toggle-review" title="Ask the AI to explain these changes, including a security review">' + (diff.reviewOpen ? '✨ Hide explanation' : '✨ Explain changes') + '</button>' : ''}
+          ${restoreSnap ? `<button class="panel-cta panel-cta-sm" data-action="restore-all" title="Restore every file to this version">↩ Restore app to "${escHtml(restoreMeta.label || '')}"</button>` : ''}
+          <button class="panel-cta panel-cta-sm" data-action="back">Back</button>
+        </div>
+      </div>
+      <div class="fp-snap-head">
+        <div><strong>A:</strong> ${escHtml(sideLabel(diff.a))} &nbsp;→&nbsp; <strong>B:</strong> ${escHtml(sideLabel(diff.b))}</div>
+        <div>${countBits.length ? escHtml(countBits.join(', ')) : 'No differences'}${unchangedCount ? ' · ' + unchangedCount + ' unchanged' : ''}</div>
+      </div>
+      <div class="fp-snap-files">${rows || '<div class="fp-snap-empty">These two versions have identical files.</div>'}</div>
+      <div class="fp-historical-body"><div class="fp-comp-placeholder">Select a changed text file above to see its diff.</div></div>
+      <div class="fp-review" ${diff.reviewOpen ? '' : 'hidden'}>
+        <div class="fp-review-head">
+          <strong>✨ Explain changes</strong>
+          <input type="text" class="fp-review-note" placeholder="Optional note for the reviewer (what was this change meant to do?)" value="${escHtml(diff.reviewNote || '')}">
+          <button class="panel-cta panel-cta-sm" data-action="run-review">${diff.review ? 'Ask again' : 'Ask the AI'}</button>
+          <span class="fp-review-meta">${escHtml(diff.review?.metaText || '')}</span>
+        </div>
+        <div class="fp-review-body">${diff.review ? renderMarkdownLite(diff.review.text) : '<div class="fp-comp-placeholder">The model gets the manifest and both versions of every changed file, and returns a plain-language explanation with a security review. The result is saved to History.</div>'}</div>
+      </div>
+    </div>
+  `
+
+  const bodyEl = container.querySelector('.fp-historical-body')
+  const navEl = container.querySelector('.fp-diff-nav')
+
+  const showFile = (filePath) => {
+    const f = diff.files.find((x) => x.path === filePath)
+    container.querySelectorAll('.fp-snap-file').forEach((el) => el.classList.toggle('is-selected', el.dataset.snapPath === filePath))
+    if (!f || f.binary) {
+      bodyEl.innerHTML = `<div class="fp-comp-placeholder">${f ? 'Binary file — no text diff. Sizes: ' + escHtml(fmtSize(f.aSize)) + ' → ' + escHtml(fmtSize(f.bSize)) : ''}</div>`
+      navEl.classList.add('fp-diff-nav-hidden')
+      return
+    }
+    const lines = computeLineDiff(f.a || '', f.b || '')
+    bodyEl.innerHTML = `<div class="fp-diff-view">${renderDiffHtml(lines)}</div>`
+    bodyEl.scrollTop = 0
+    navEl.classList.remove('fp-diff-nav-hidden')
+    attachDiffNavigation(container)
+    setState((next) => {
+      if (next.file?.snapshotDiff) next.file.snapshotDiff.selectedPath = filePath
+      return next
+    }, { rerender: false })
+  }
+
+  container.querySelectorAll('.fp-snap-file').forEach((row) => {
+    row.onclick = (e) => {
+      if (e.target.closest('[data-restore-path]')) return
+      showFile(row.dataset.snapPath)
+    }
+  })
+
+  container.querySelectorAll('[data-restore-path]').forEach((btn) => {
+    btn.onclick = async (e) => {
+      e.stopPropagation()
+      if (!restoreSnap) return
+      const result = await performRestore(appName, restoreSnap, setState, { paths: [btn.dataset.restorePath] })
+      if (result && !result.nothingToDo) await openSnapshotCompare(appName, diff.aId, diff.bId, setState)
+    }
+  })
+
+  const restoreAllBtn = container.querySelector('[data-action="restore-all"]')
+  if (restoreAllBtn) {
+    restoreAllBtn.onclick = async () => {
+      if (!restoreSnap) return
+      const result = await performRestore(appName, restoreSnap, setState)
+      if (result && !result.nothingToDo) await openSnapshotCompare(appName, diff.aId, diff.bId, setState)
+    }
+  }
+
+  container.querySelector('[data-action="back"]').onclick = back
+
+  // --- Explain changes (AI). The review text lives on snapshotDiff state so re-renders keep it. ---
+  const reviewEl = container.querySelector('.fp-review')
+  const reviewToggle = container.querySelector('[data-action="toggle-review"]')
+  if (reviewEl && reviewToggle) {
+    const bodyR = reviewEl.querySelector('.fp-review-body')
+    const metaR = reviewEl.querySelector('.fp-review-meta')
+    const noteR = reviewEl.querySelector('.fp-review-note')
+    const runBtn = reviewEl.querySelector('[data-action="run-review"]')
+    const patchDiff = (fields) => setState((next) => {
+      if (next.file?.snapshotDiff) Object.assign(next.file.snapshotDiff, fields)
+      return next
+    }, { rerender: false })
+
+    // A review of this exact pair already in History: show it rather than paying for it again.
+    let haveReview = !!diff.review
+    if (!haveReview) {
+      const existing = (state?.index?.history || []).find((e) =>
+        e.action === 'change_review' && e.review && e.compared && e.compared.a?.id === diff.a?.id && e.compared.b?.id === diff.b?.id)
+      if (existing) {
+        const metaText = 'Reviewed ' + formatSnapshotTs(existing.timestamp) + (existing.llmModel ? ' · ' + existing.llmModel : '') + (existing.cost ? ' · ' + formatCost(existing.cost) : '')
+        bodyR.innerHTML = renderMarkdownLite(existing.review)
+        metaR.textContent = metaText
+        runBtn.textContent = 'Ask again'
+        patchDiff({ review: { text: existing.review, metaText } })
+        haveReview = true
+      }
+    }
+
+    const setOpen = (open) => {
+      reviewEl.hidden = !open
+      reviewToggle.textContent = open ? '✨ Hide explanation' : '✨ Explain changes'
+      patchDiff({ reviewOpen: open })
+    }
+    reviewToggle.onclick = () => setOpen(reviewEl.hidden)
+    noteR.oninput = () => patchDiff({ reviewNote: noteR.value })
+
+    const runReview = async () => {
+      runBtn.disabled = true
+      bodyR.innerHTML = '<div class="chat-msg-loading"><div class="chat-spinner"></div> Asking the model to review ' + changed.length + ' changed file' + (changed.length === 1 ? '' : 's') + '… this can take a minute.</div>'
+      metaR.textContent = ''
+      try {
+        const { text, entry } = await runChangeReview({
+          appName,
+          compare: diff,
+          note: noteR.value,
+          askOptions: buildReviewAskOptions(state),
+          ask: (messages, opts) => freezr.llm.ask(messages, opts),
+          saveEntry: (e) => freezr.create('appUpdates', e),
+          recordMeta
+        })
+        const metaText = (entry.llmModel ? entry.llmModel + ' · ' : '') + (entry.cost ? formatCost(entry.cost) + ' · ' : '') + 'saved to History'
+        bodyR.innerHTML = renderMarkdownLite(text)
+        metaR.textContent = metaText
+        runBtn.textContent = 'Ask again'
+        patchDiff({ review: { text, metaText } })
+        const history = await fetchAppHistory(appName)
+        setState((next) => {
+          if (!next.index) next.index = {}
+          next.index.history = history
+          if (!next.llm) next.llm = {}
+          next.llm.projectCost = calculateProjectCost(history)
+          return next
+        }, { sourcePanel: 'index' })
+      } catch (err) {
+        bodyR.innerHTML = '<div class="fp-snap-empty">' + escHtml(err?.message || 'Review failed.') + '</div>'
+      } finally {
+        runBtn.disabled = false
+      }
+    }
+    runBtn.onclick = runReview
+
+    if (diff.autoExplain) {
+      patchDiff({ autoExplain: false })
+      setOpen(true)
+      if (!haveReview) runReview()
+    }
+  }
+
+  if (diff.selectedPath) showFile(diff.selectedPath)
+}
+
 export const renderFilePanel = ({ container, state, getState, setState }) => {
   const fileState = state.file || {}
   const appName = state.appName || null
@@ -773,6 +1063,13 @@ export const renderFilePanel = ({ container, state, getState, setState }) => {
   }
 
   destroyEditor()
+
+  // Version compare sits BELOW any open file/compare/historical view: opening a file from the
+  // History or Chat panel takes over the panel, and Back from the compare view clears it.
+  if (appName && fileState.snapshotDiff) {
+    renderSnapshotDiffView({ container, appName, diff: fileState.snapshotDiff, setState, state })
+    return
+  }
 
   if (appName && fileState.openFolderPath !== null && fileState.openFolderPath !== undefined) {
     const folderPath = fileState.openFolderPath

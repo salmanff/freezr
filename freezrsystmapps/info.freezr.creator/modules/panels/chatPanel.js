@@ -1,9 +1,10 @@
 /* global freezr */
-import { sendChatMessage, grantDataAccess, denyDataAccess } from '../chatService.js'
+import { sendChatMessage, grantDataAccess, denyDataAccess, startDataProbe, dismissDataProbe, undoLastTurn } from '../chatService.js'
+import { describeProbeRequest } from '../dataProbe.js'
 import { showError, clearError } from '../showError.js'
 import { fetchFileContent } from '../fileTree.js'
 import { formatCost, formatTokens } from '../priceService.js'
-import { escHtml, tsOf, saveChatDraft, clearChatDraft, saveWebSearchPref } from '../utils.js'
+import { escHtml, tsOf, saveChatDraft, clearChatDraft, saveWebSearchPref, authorTag } from '../utils.js'
 import { checkVoiceSupport, isRecording, startDictation, stopDictationAndTranscribe, cancelDictation } from '../voiceDictation.js'
 
 const isMobile = () => {
@@ -164,16 +165,64 @@ const renderAccessRequestCard = (chatState) => {
       <strong>${isWrite ? '⚠️ ' : ''}The assistant is asking to ${what} your data.</strong>
       ${tables.length ? `<div class="chat-access-tables">${tables.map(escHtml).join(', ')}</div>` : ''}
       ${req.reason ? `<div class="chat-access-reason">“${escHtml(req.reason)}”</div>` : ''}
-      <div class="chat-access-note">${isWrite
-        ? 'Allowing lets it modify real records in this app for the next 30 minutes.'
-        : 'Allowing shares up to ' + (Math.min(Math.max(parseInt(req.count, 10) || 3, 1), 50)) +
-          ' record(s) per table, read-only, for the next 30 minutes.'}</div>
+      <div class="chat-access-note">Allowing shows the assistant up to ${Math.min(Math.max(parseInt(req.count, 10) || 3, 1), 50)} current record(s) per table${isWrite
+        ? ' so it can say exactly what should change. It cannot change anything itself.'
+        : '.'}</div>
     </div>
     <div class="chat-access-banner-actions">
-      <button class="panel-cta panel-cta-sm${isWrite ? ' panel-cta-danger' : ''}" data-action="access-allow">Allow ${isWrite ? 'changes' : 'read'}</button>
+      <button class="panel-cta panel-cta-sm${isWrite ? ' panel-cta-danger' : ''}" data-action="access-allow">Show records</button>
       <button class="panel-cta panel-cta-sm panel-cta-secondary" data-action="access-deny">Don't allow</button>
     </div>
   </div>`
+}
+
+// Consent card for a data_probe. Nothing is read here: "Look it up" opens the app in a new window,
+// where the user sees the exact queries and rows and approves them (see dataProbe.js).
+const renderDataProbeCard = (chatState) => {
+  const notice = chatState.probeNotice
+    ? `<div class="chat-probe-notice">${escHtml(chatState.probeNotice)}</div>`
+    : ''
+  const probe = chatState.pendingDataProbe
+  if (!probe) return notice
+  const waiting = probe.stage === 'waiting'
+  const exact = JSON.stringify(probe.requests.map((r) => r.kind === 'file'
+    ? { file: r.path }
+    : { table: r.table, filter: r.filter, count: r.count }), null, 2)
+  return notice + `<div class="chat-access-banner chat-probe-card">
+    <div class="chat-access-banner-text">
+      <strong>🔎 The assistant wants to look at your data.</strong>
+      ${probe.why ? `<div class="chat-access-reason">“${escHtml(probe.why)}”</div>` : ''}
+      <ul class="chat-probe-items">${probe.requests.map((r) => `<li>${escHtml(describeProbeRequest(r, probe.appName))}</li>`).join('')}</ul>
+      <details class="chat-probe-exact"><summary>Exact request</summary><pre class="chat-probe-pre">${escHtml(exact)}</pre></details>
+      <div class="chat-access-note">${waiting
+        ? 'Waiting for you in the other window… Share or decline there. Closing it counts as declining.'
+        : 'This opens your app in a new window to read the data. You\'ll see exactly what was found, and approve it there, before the assistant sees any of it.'}</div>
+    </div>
+    <div class="chat-access-banner-actions">
+      <button class="panel-cta panel-cta-sm" data-action="probe-lookup" ${waiting ? 'disabled' : ''}>${waiting ? 'Waiting…' : 'Look it up'}</button>
+      <button class="panel-cta panel-cta-sm panel-cta-secondary" data-action="probe-dismiss" ${waiting ? 'disabled' : ''}>Not now</button>
+    </div>
+  </div>`
+}
+
+// The permanent transcript record of what a probe shared: the exact queries and rows, so "the user
+// saw what was shared" stays true after the fact. (The rows themselves went to the model.)
+const renderProbeRecord = (probe) => {
+  const items = (probe.items || []).map((item) => {
+    const detail = item.error
+      ? `<div class="chat-probe-error">${escHtml(item.error)}</div>`
+      : item.rows
+        ? `<pre class="chat-probe-pre">${escHtml(JSON.stringify(item.rows, null, 2))}</pre>`
+        : item.text !== undefined
+          ? `<pre class="chat-probe-pre">${escHtml(item.text)}</pre>`
+          : item.file ? `<div class="chat-probe-q">${escHtml((item.file.mime || '') + ' — attached')}</div>` : ''
+    return `<div class="chat-probe-item">
+      <div class="chat-probe-item-title">${escHtml(item.label)}</div>
+      ${item.query ? `<div class="chat-probe-q">Query: ${escHtml(JSON.stringify(item.query))}</div>` : ''}
+      ${detail}
+    </div>`
+  }).join('')
+  return `<details class="chat-msg-probe"><summary>What was shared</summary>${items}</details>`
 }
 
 const renderUsageInfo = (msg) => {
@@ -193,12 +242,21 @@ const renderUsageInfo = (msg) => {
   return `<div class="chat-msg-usage">${parts.join(' · ')}</div>`
 }
 
-const renderMessage = (msg) => {
+// `undo` is the chat's RAM-only reversal record (see chatService.undoLastTurn): the message whose
+// turn it belongs to gets the Undo button, whatever its position.
+const renderMessage = (msg, undo) => {
+  if (msg.note) {
+    // A quiet system note (e.g. "changes undone") — shown small and centred, sent to the model as-is.
+    return `<div class="chat-msg chat-msg-note">${escHtml(msg.displayContent || msg.content)}</div>`
+  }
   if (msg.role === 'user') {
     // displayContent: a short stand-in for machine-generated turns (e.g. a data-access grant,
     // whose real content carries a token and sample records).
+    const from = authorTag(msg.author)
     return `<div class="chat-msg chat-msg-user">
+      ${from ? `<span class="chat-author-tag" title="Written by ${escHtml(from)}">${escHtml(from)}</span>` : ''}
       <div class="chat-msg-content">${escHtml(msg.displayContent || msg.content)}</div>
+      ${msg.probe ? renderProbeRecord(msg.probe) : ''}
       <div class="chat-msg-time">${formatTime(msg.timestamp)}</div>
     </div>`
   }
@@ -214,6 +272,9 @@ const renderMessage = (msg) => {
       ${thinkingHtml}
       <div class="chat-msg-content">${renderExplanation(parsed.explanation)}</div>
       ${renderFileList(parsed.files)}
+      ${(undo && msg.turnId && undo.turnId === msg.turnId)
+        ? '<div class="chat-undo-row"><button class="panel-cta panel-cta-sm panel-cta-secondary" data-action="undo-turn" title="Put the files back as they were before this reply">↶ Undo these changes</button></div>'
+        : ''}
       ${parsed.summary?.summary ? `<div class="chat-msg-summary">${escHtml(parsed.summary.summary)}</div>` : ''}
       <div class="chat-msg-footer">
         ${usageHtml}
@@ -248,12 +309,27 @@ const loadChatFromHistory = async (chatId, appName, setState) => {
 
     const messages = []
     for (const entry of updates) {
+      if (entry.action === 'undone') {
+        // Replay the undo as the same system note the live chat showed, so a resumed conversation
+        // (and the model, via buildPrompt) knows those changes no longer exist.
+        const files = entry.filesChanged || []
+        messages.push({
+          role: 'user',
+          note: true,
+          fromHistory: true,
+          timestamp: entry.timestamp,
+          content: 'SYSTEM NOTE: the user undid the file changes from your previous reply (' + files.join(', ') + '). Those files are back to how they were before that reply. Do not assume any of those changes exist.',
+          displayContent: 'Changes from the previous reply were undone (' + files.length + ' file' + (files.length === 1 ? '' : 's') + ').'
+        })
+        continue
+      }
       if (entry.userPrompt) {
         messages.push({
           role: 'user',
           content: entry.userPrompt,
           timestamp: entry.timestamp,
-          fromHistory: true
+          fromHistory: true,
+          author: entry.author || undefined
         })
       }
       if (entry.summary || entry.explanation) {
@@ -281,6 +357,10 @@ const loadChatFromHistory = async (chatId, appName, setState) => {
       if (!next.chat) next.chat = {}
       next.chat.loadFromHistory = false
       next.chat.messages = messages
+      next.chat.pendingAccessRequest = null
+      next.chat.pendingDataProbe = null
+      next.chat.dataProbes = null
+      next.chat.probeNotice = null
       return next
     })
   } catch (error) {
@@ -357,6 +437,10 @@ export const renderChatPanel = ({ container, state, setState, renderOptions }) =
   const prevMsgContainer = container.querySelector('#chatMessages')
   const wasNearBottom = !prevMsgContainer ||
     (prevMsgContainer.scrollHeight - prevMsgContainer.scrollTop - prevMsgContainer.clientHeight) < 80
+  const prevScrollTop = prevMsgContainer?.scrollTop || 0
+  // The previous render was still showing a reply in progress — if this render shows it finished,
+  // land on the top of that reply rather than wherever the full re-render leaves the scroll.
+  const wasAwaitingReply = !!prevMsgContainer?.querySelector('.chat-msg-streaming, .chat-msg-loading')
 
   // The two evidence-triggered escalations. Neither asks the user to predict anything: one
   // fires because the MODEL said it needed the web, the other because our own cap actually bit.
@@ -372,7 +456,7 @@ export const renderChatPanel = ({ container, state, setState, renderOptions }) =
       '<button class="panel-cta panel-cta-sm" data-action="retry-uncapped">Search more</button></div>'
   }
 
-  const messagesHtml = messages.map(renderMessage).join('')
+  const messagesHtml = messages.map((m) => renderMessage(m, chatState.undo)).join('')
   const hasMessages = messages.length > 0
   const showNewChat = hasMessages || sending
 
@@ -432,6 +516,7 @@ export const renderChatPanel = ({ container, state, setState, renderOptions }) =
       <div class="chat-messages" id="chatMessages">
         ${messagesHtml}
         ${renderAccessRequestCard(chatState)}
+        ${renderDataProbeCard(chatState)}
         ${sending
           ? (streamingContent || streamingThinking || streamingFiles)
             ? `<div class="chat-msg chat-msg-assistant chat-msg-streaming">`
@@ -453,8 +538,17 @@ export const renderChatPanel = ({ container, state, setState, renderOptions }) =
   // forceScrollToBottom: set when a prompt was just sent, so the new prompt is visible regardless
   // of where the user had scrolled. Otherwise only auto-scroll if they were already near the bottom.
   const forceScrollToBottom = !!chatState.scrollToBottom
-  if (msgContainer && (wasNearBottom || forceScrollToBottom)) {
+  const replyJustFinished = wasAwaitingReply && !sending && messages[messages.length - 1]?.role === 'assistant'
+  const latestReplyEl = replyJustFinished && msgContainer
+    ? [...msgContainer.querySelectorAll(':scope > .chat-msg-assistant')].pop()
+    : null
+  if (latestReplyEl) {
+    msgContainer.scrollTop += latestReplyEl.getBoundingClientRect().top - msgContainer.getBoundingClientRect().top
+  } else if (msgContainer && (wasNearBottom || forceScrollToBottom)) {
     msgContainer.scrollTop = msgContainer.scrollHeight
+  } else if (msgContainer && prevMsgContainer) {
+    // innerHTML rebuilt #chatMessages at scrollTop 0 — keep the user where they were.
+    msgContainer.scrollTop = prevScrollTop
   }
   if (forceScrollToBottom) {
     setState((next) => {
@@ -482,6 +576,7 @@ export const renderChatPanel = ({ container, state, setState, renderOptions }) =
           next.file.openFileContent = content
           next.file.openFolderPath = null
           next.file.fileUpdateInfo = null
+          next.file.snapshotDiff = null
           return next
         }, { sourcePanel: 'file' })
       } catch (err) {
@@ -491,6 +586,18 @@ export const renderChatPanel = ({ container, state, setState, renderOptions }) =
       }
     }
   })
+
+  const undoBtn = container.querySelector('[data-action="undo-turn"]')
+  if (undoBtn) {
+    undoBtn.onclick = async () => {
+      undoBtn.disabled = true
+      try {
+        await undoLastTurn(state, setState)
+      } finally {
+        undoBtn.disabled = false
+      }
+    }
+  }
 
   const chatLaunchBtn = container.querySelector('.launch-app-footer [data-action="launch-app"]')
   if (chatLaunchBtn) {
@@ -699,6 +806,10 @@ export const renderChatPanel = ({ container, state, setState, renderOptions }) =
         next.chat.sending = false
         next.chat.error = null
         next.chat.lastFailedMessage = null
+        next.chat.pendingAccessRequest = null
+        next.chat.pendingDataProbe = null
+        next.chat.dataProbes = null
+        next.chat.probeNotice = null
         return next
       })
     }
@@ -722,6 +833,24 @@ export const renderChatPanel = ({ container, state, setState, renderOptions }) =
       clearError()
       const currentState = { ...state, chat: { ...(state.chat || {}), error: null } }
       await denyDataAccess(currentState, setState)
+    }
+  }
+
+  // Data probe. "Look it up" must open the window synchronously in this click — no await before it.
+  const probeLookupBtn = container.querySelector('[data-action="probe-lookup"]')
+  if (probeLookupBtn) {
+    probeLookupBtn.onclick = () => {
+      probeLookupBtn.disabled = true
+      clearError()
+      startDataProbe({ ...state, chat: { ...(state.chat || {}), error: null } }, setState)
+    }
+  }
+  const probeDismissBtn = container.querySelector('[data-action="probe-dismiss"]')
+  if (probeDismissBtn) {
+    probeDismissBtn.onclick = async () => {
+      probeDismissBtn.disabled = true
+      clearError()
+      await dismissDataProbe({ ...state, chat: { ...(state.chat || {}), error: null } }, setState)
     }
   }
 

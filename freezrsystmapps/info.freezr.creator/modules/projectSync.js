@@ -17,7 +17,8 @@
 import { fetchAppHistory, updateHistoryEntry } from './historyActions.js'
 import { fetchFolderTree } from './fileTree.js'
 import { showError } from './showError.js'
-import { tsOf } from './utils.js'
+import { tsOf, recordMeta } from './utils.js'
+import { refreshSnapshotsInState } from './snapshotActions.js'
 
 const CONTEXT_DOC_NAME = 'freezr-context.md'
 // Paths managed/injected by freezr itself — never treated as user app content.
@@ -75,6 +76,7 @@ const syncContextDoc = async (appName, setState) => {
   let entryId = null
   try {
     const hist = await freezr.create('appUpdates', {
+      ...recordMeta(),
       appName,
       action: 'context_updated',
       summary,
@@ -89,7 +91,7 @@ const syncContextDoc = async (appName, setState) => {
 
   if (entryId && typeof result.content === 'string') {
     try {
-      await freezr.create('fileUpdates', { appName, path: CONTEXT_DOC_NAME, action: 'upsert', content: result.content, historyId: entryId, timestamp })
+      await freezr.create('fileUpdates', { ...recordMeta(), appName, path: CONTEXT_DOC_NAME, action: 'upsert', content: result.content, historyId: entryId, timestamp })
     } catch (err) {
       console.warn('Could not record context fileUpdate:', err)
     }
@@ -116,7 +118,7 @@ const detectExternalChanges = async (appName, setState) => {
     const ts = new Date().toISOString()
     for (const [path, content] of diskMap) {
       try {
-        await freezr.create('fileUpdates', { appName, path, action: 'baseline', content, timestamp: ts })
+        await freezr.create('fileUpdates', { ...recordMeta(), appName, path, action: 'baseline', content, timestamp: ts })
       } catch (err) {
         console.warn('Could not record baseline snapshot for ' + path + ':', err)
       }
@@ -194,6 +196,7 @@ const detectExternalChanges = async (appName, setState) => {
     try {
       const summary = summaryFor(modified, added, deleted)
       const hist = await freezr.create('appUpdates', {
+        ...recordMeta(),
         appName,
         action: 'external_change',
         summary,
@@ -211,21 +214,28 @@ const detectExternalChanges = async (appName, setState) => {
   // Record fresh snapshots so the change is diffable and not re-detected next open.
   for (const path of [...modified, ...added]) {
     try {
-      await freezr.create('fileUpdates', { appName, path, action: 'upsert', content: diskMap.get(path), historyId: entryId, timestamp: ts })
+      await freezr.create('fileUpdates', { ...recordMeta(), appName, path, action: 'upsert', content: diskMap.get(path), historyId: entryId, timestamp: ts })
     } catch (err) {
       console.warn('Could not record snapshot for ' + path + ':', err)
     }
   }
   for (const path of deleted) {
     try {
-      await freezr.create('fileUpdates', { appName, path, action: 'delete', content: '', historyId: entryId, timestamp: ts })
+      await freezr.create('fileUpdates', { ...recordMeta(), appName, path, action: 'delete', content: '', historyId: entryId, timestamp: ts })
     } catch (err) {
       console.warn('Could not record delete snapshot for ' + path + ':', err)
     }
   }
 
   showError('Update made: ' + changed.length + ' file(s) changed outside Creator — see History.', { timeoutMs: 7000 })
+  // The files moved under us: any RAM undo from the last chat turn no longer describes them, and
+  // the Versions tab's "current" marker needs re-hashing.
+  setState((next) => {
+    if (next.chat) next.chat.undo = null
+    return next
+  }, { rerender: false })
   await refreshHistory(appName, setState)
+  refreshSnapshotsInState(appName, setState)
 }
 
 export const syncProjectOnOpen = async (appName, setState) => {

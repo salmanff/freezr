@@ -241,6 +241,11 @@
   color: var(--freezr-text-muted);
 }
 
+.dev-action-row .freezrButt.dev-butt-busy {
+  opacity: 0.6;
+  cursor: progress;
+}
+
 /* ===== Input Fields ===== */
 .input {
   padding: 0.6rem 0.75rem;

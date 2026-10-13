@@ -192,6 +192,7 @@ if (typeof freezr === 'undefined') {
       noCosts: options.noCosts,
       role: options.role,
       responseType: options.responseType,
+      structuredOutput: options.structuredOutput,
       thinking: options.thinking,
       effort: options.effort,
       cache: options.cache,
@@ -294,15 +295,35 @@ if (typeof freezr === 'undefined') {
      *   [{ role: 'user', content: [{ type: 'text', text: stableDoc, cache_control: { type: 'ephemeral' } }] },
      *    { role: 'user', content: theVaryingQuestion }]. A 1h marker makes the system breakpoint 1h too.
      * @param {number} [options.timeoutMs] - How long the server may wait for this answer, in ms.
-     *   Only ever SHORTENS the wait: each connector clamps it to its own ceiling (5 min on the
-     *   local CLI connectors) and floors implausibly small values. Worth setting when the caller
-     *   has a deadline of its own — a background job that abandons a step after 4 minutes should
-     *   pass slightly less than that, so the local connector's single slot is freed when the job
-     *   gives up instead of staying held (and refusing later calls with 429) until the ceiling.
+     *   Each connector clamps it to its own ceiling (claudeLocal: 20 min, codexLocal: 5 min) and
+     *   floors implausibly small values. Two reasons to set it:
+     *   - SHORTER, when the caller has a deadline of its own — a background job that abandons a
+     *     step after 4 minutes should pass slightly less than that, so the local connector's
+     *     single slot is freed when the job gives up instead of staying held (and refusing later
+     *     calls with 429) until the default expires.
+     *   - LONGER, when you know the prompt runs long. The local-CLI default is 5 minutes; a big
+     *     analysis prompt can exceed that. NOTE the trade-off on claudeLocal: an UNSET timeoutMs
+     *     gets a smarter budget — 5 min of SILENCE, renewed by every burst of streamed output up
+     *     to 20 min — whereas an explicit number is a flat deadline, honoured exactly. So leave
+     *     it unset for a long streaming answer, and set it only when the deadline is real.
      *   A job need not pass it to get that protection: the server already bounds the wait by the
      *   job's own remaining runtime. Ignored by the API-key connectors.
+     * @param {Object} [options.structuredOutput] - NATIVE schema-constrained output: { schema, name?, description? }.
+     *   The provider itself constrains generation to your JSON Schema (OpenAI text.format, Anthropic
+     *   output_config.format), and result.response is the parsed OBJECT. This is a different thing
+     *   from responseType:'json', which asks for JSON in the prompt and then parses whatever came
+     *   back as best it can: with structuredOutput you get an object that matches the schema, or an
+     *   error — never a success carrying text that "probably" parses. strict is always on; a reply
+     *   that is not valid JSON fails with code 'structured_output_invalid' ('structured_output_truncated'
+     *   when it was cut off at max_tokens — raise max_tokens), and a model that cannot take a schema
+     *   fails BEFORE any tokens are spent with code 'capability_unsupported_on_model'. Build your
+     *   schema against the subset both providers accept: every object with additionalProperties:false
+     *   and all properties listed in required (optional fields become required-but-nullable).
+     *   Check freezr.llm.can('structuredOutput') first. Available on Claude, ChatGPT and the local
+     *   Codex CLI (which enforces the schema itself via --output-schema); not on the local Claude CLI.
      * @param {string} [options.effort] - How hard the model should work: 'low'|'medium'|'high'|'xhigh'|'max'.
-     *   Scales thinking depth AND overall token spend. Claude only; ignored elsewhere.
+     *   Scales thinking depth AND overall token spend. Honoured by Claude (output_config.effort) and
+     *   ChatGPT (reasoning.effort); ignored by the local CLI connectors.
      * @param {boolean|Object} [options.web] - Let the model reach the live web.
      *   true enables everything the provider has. For finer control:
      *   { search: true|{ maxUses, allowedDomains, blockedDomains, userLocation },
@@ -374,7 +395,11 @@ if (typeof freezr === 'undefined') {
         fileList.forEach(f => uploadData.append('file', f))
         const bodyOptions = { prompt, context: options.context, ..._buildAskBodyOptions(options) }
         uploadData.append('options', JSON.stringify(bodyOptions))
-        return _streamingAskWithRetry(url, uploadData, { ...streamOpts, uploadFile: true })
+        // `isFormData`, NOT `uploadFile`: this path goes through _streamingAsk, whose own option
+        // name is isFormData. (`uploadFile` is the CORE freezr.apiRequest name, used by transcribe
+        // below.) Sending the wrong one made _streamingAsk JSON.stringify the FormData to '{}',
+        // so every file-bearing ask came back 400 'No prompt provided'. See llmClientVoice.test.mjs.
+        return _streamingAskWithRetry(url, uploadData, { ...streamOpts, isFormData: true })
       }
 
       const bodyOptions = _buildAskBodyOptions(options)

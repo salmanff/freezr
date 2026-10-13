@@ -162,6 +162,33 @@ class AppTableCache {
 
     return false
   }
+
+  /**
+   * Recent holds at most recentCount rows (the newest, by _date_modified).
+   * It is only ever populated by a fetch of exactly recentCount rows (refresh
+   * function, or an expanded cache-miss fetch - see shouldExpandForCache and
+   * setQuery), so if it holds FEWER than recentCount rows the table is that
+   * small and Recent is the whole table.
+   */
+  _recentIsComplete(recentRecords) {
+    return recentRecords.length < (this.config.recentCount || 1000)
+  }
+
+  /**
+   * Can a slice of Recent satisfy the caller's skip/count?
+   * - a complete Recent (whole table) can answer anything
+   * - a full Recent (capped at recentCount) can only answer a page that lies
+   *   entirely inside it; a page that starts or ends beyond it must go to the
+   *   DB, otherwise the caller gets a truncated or empty page for rows that exist.
+   * With no count, callers get an adapter-capped page anyway (100 rows), so
+   * Recent's recentCount rows are at least as many as the DB would return.
+   */
+  _recentCanServe(matchingRecords, options, recentRecords = matchingRecords) {
+    if (this._recentIsComplete(recentRecords)) return true
+    const skip = options?.skip || 0
+    const count = options?.count || options?.limit || 0
+    return (skip + (count || 1)) <= matchingRecords.length
+  }
   
   /**
    * Check if cache is work-in-progress and optionally wait
@@ -256,12 +283,17 @@ class AppTableCache {
     }
     
     // 1. Check Recent cache first (fast, already sorted)
+    // Recent only holds the newest recentCount rows, so a page that reaches
+    // beyond it (skip + count > held rows) must fall through to All / DB.
     const recentRecords = this._getRecentCache()
     if (recentRecords !== null) {
-      const filtered = filterRecords(recentRecords, query, options)
-      this.stats.cacheHits++
-      cmLog('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Recent) - empty/date query', { table: this.appTable, resultCount: filtered?.length, owner: this.owner })
-      return filtered
+      if (this._recentCanServe(recentRecords, options)) {
+        const filtered = filterRecords(recentRecords, query, options)
+        this.stats.cacheHits++
+        cmLog('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Recent) - empty/date query', { table: this.appTable, resultCount: filtered?.length, owner: this.owner })
+        return filtered
+      }
+      cmLog('C-M 🔵🔵🔵🔵🔵 CACHE INSUFFICIENT (Recent) - empty/date query has', recentRecords.length, 'rows, page is beyond them', { table: this.appTable, skip: options?.skip, count: options?.count || options?.limit, owner: this.owner })
     }
     
     // 2. Check All cache if Recent doesn't exist
@@ -383,10 +415,12 @@ class AppTableCache {
         cmLog('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Recent-complete) - date query', { table: this.appTable, timestamp, resultCount: filtered?.length })
         return filtered
       }
-      // Recent cache exists but doesn't cover this timestamp
-      // Still return what we have if it matches
-      const filtered = filterRecords(recentRecords, query, options)
-      if (filtered.length > 0) {
+      // Recent cache exists but doesn't cover this timestamp - older matching
+      // rows may exist in the DB. Only serve a page that lies entirely inside
+      // what Recent holds; otherwise fall through so the DB fills the page.
+      const matching = filterRecords(recentRecords, query, {})
+      if (matching.length > 0 && this._recentCanServe(matching, options, recentRecords)) {
+        const filtered = filterRecords(matching, {}, options)
         this.stats.cacheHits++
         cmLog('C-M 🟢🟢🟢🟢🟢 CACHE HIT (Recent-partial) - date query', { table: this.appTable, timestamp, resultCount: filtered.length })
         return filtered
@@ -468,8 +502,20 @@ class AppTableCache {
       return false
     }
 
-    // Check if this is an empty query or date sort - store in Recent
+    // Check if this is an empty query or date sort - store in Recent.
+    // Recent must be the newest recentCount rows (or the whole table). A fetch
+    // with a smaller count that came back full is just a page - caching it
+    // would make later reads with a bigger count or skip come back short.
+    // A fetch with no count is capped silently by the DB adapter, so it is a
+    // page too. (shouldExpandForCache widens cache-miss fetches to recentCount.)
     if (this._isEmptyOrDateSort(query, options)) {
+      const recentCount = this.config.recentCount || 1000
+      const count = options?.count || options?.limit || 0
+      const isFullFetch = count >= recentCount || (count > 0 && results.length < count)
+      if (!isFullFetch) {
+        cmLog('C-M ⚪⚪⚪⚪⚪ CACHE SKIP (Recent) - partial page, not seeding Recent', { table: this.appTable, count, resultCount: results.length })
+        return false
+      }
       await this.setRecent(results)
       return true
     }
@@ -1021,9 +1067,23 @@ class AppTableCache {
       return { expand: false }
     }
 
-    // Don't expand if skip + count already exceeds cacheCountMax
     const skip = options.skip || 0
     const count = options.count || options.limit || 0
+
+    // Empty query (the Recent cache's domain): fetch the newest recentCount rows
+    // so Recent is seeded with a full set rather than the caller's page.
+    if (this.cacheRecent && this._isEmptyOrDateSort(query, options)) {
+      const recentCount = this.config.recentCount || 1000
+      if (skip + (count || 1) > recentCount) {
+        return { expand: false }  // page lies beyond Recent - Recent can never serve it
+      }
+      return {
+        expand: true,
+        expandedOptions: { ...options, sort: { _date_modified: -1 }, count: recentCount, skip: 0 }
+      }
+    }
+
+    // Don't expand if skip + count already exceeds cacheCountMax
     if (count && (skip + count > cacheCountMax)) {
       return { expand: false }
     }

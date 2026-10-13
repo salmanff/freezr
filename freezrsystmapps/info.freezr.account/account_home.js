@@ -2,6 +2,17 @@
 
 /* global freezr, freezrMeta, freezerRestricted, FormData */
 
+// This page is loaded as a classic script (script_files), not a module, so it
+// cannot use a static import. Dynamic import() works in classic scripts, and the
+// page CSP (script-src 'self') allows the same-origin module url. The promise is
+// cached so the module is only fetched once, on first use.
+const DEV_ACTIONS_URL = '/app/info.freezr.account/modules/devAppActions.js'
+let devActionsPromise = null
+const devActions = function () {
+  if (!devActionsPromise) devActionsPromise = import(DEV_ACTIONS_URL)
+  return devActionsPromise
+}
+
 freezr.initPageScripts = function () {
   console.log('hello from account_home.js')
 
@@ -85,7 +96,13 @@ freezr.initPageScripts = function () {
     document.getElementById('appNameFromUrl').innerText = getAppFromUrl(document.getElementById('appUrl').innerText)
   })
   if (!freezrMeta.adminUser) { document.getElementById('freezer_admin_butt').style.display = 'none' }
-  if (freezrMeta.adminUser) document.getElementById('button_tabs_dev').style.display = 'block'
+  // Dev tab: one gate, in modules/devAppActions.js, shared with the Developer
+  // Options card on the app settings page
+  devActions().then(dev => {
+    if (!dev.devOptionsAvailable()) return
+    document.getElementById('button_tabs_dev').style.display = 'block'
+    dev.fillDevActionDescriptions()
+  }).catch(err => console.warn('Could not load dev actions', err))
 
   const searchParams = new URLSearchParams(window.location.search)
   if (searchParams.get('show') === 'welcome') {
@@ -308,6 +325,7 @@ const buttons = {
     } else {
       const parts = file.name.split('.')
       if (endsWith(parts[(parts.length - 2)], '-master')) parts[(parts.length - 2)] = parts[(parts.length - 2)].slice(0, -7)
+      if (endsWith(parts[(parts.length - 2)], '-main')) parts[(parts.length - 2)] = parts[(parts.length - 2)].slice(0, -5)
       if (startsWith((parts[(parts.length - 2)]), '_v_')) {
         parts.splice(parts.length - 2, 2)
       } else {
@@ -370,90 +388,45 @@ const buttons = {
         })
     }
   },
-  updateAppFromFiles: function () {
-    const appName = document.getElementById('appNameFromFolder').value.trim()
-    if (!appName) {
-      showError('Please enter an app name')
-    } else if (!isValidAppName(appName)) {
-      showError('Invalid app name 3 - please correct the app name')
-    } else {
-      showInstallProgress(appName)
-      // Using new V2 API
-      freezr.apiRequest('POST', '/acctapi/updateAppFromFiles', { app_name: appName })
-        .then(returndata => {
-          if (returndata.error || returndata.errors) {
-            console.warn({ returndata })
-          }
-          showInstallResult(returndata)
-        })
-        .catch(error => {
-          console.warn({ error })
-          showInstallResult({ error: 'Error updating app! ' + error.message })
-        })
-    }
+  // The three dev actions themselves live in modules/devAppActions.js, shared with
+  // the Developer Options card on the app settings page.
+  updateAppFromFiles: async function () {
+    const appName = devAppNameOrWarn()
+    if (!appName) return
+    const dev = await devActions()
+    const result = await dev.updateAppFromFiles(appName, { onStart: () => showInstallProgress(appName) })
+    showInstallResult(result.returndata || { error: result.message })
   },
-  regenerateDevTokens: function () {
-    const appName = document.getElementById('appNameFromFolder').value.trim()
-    if (!appName) {
-      showError('Please enter or select an app name')
-    } else if (!isValidAppName(appName)) {
-      showError('Invalid app name - please correct the app name')
-    } else if (!window.confirm('This writes a long-lived access token into the app folder (' + appName + '/.freezr-access.local.json). Any tool that can read that folder - including an LLM or AI coding agent working on the app - gets FULL READ AND WRITE ACCESS to this app\'s data on your freezr until the token expires or is revoked.\n\nContinue?')) {
-      // user declined - do nothing
-    } else {
-      showDevTokenResult('Generating tokens for ' + appName + '...', false)
-      freezr.apiRequest('POST', '/acctapi/generateDevAccessFile', { app_name: appName })
-        .then(returndata => {
-          if (returndata.error || returndata.errors) {
-            console.warn({ returndata })
-            showDevTokenResult('Error generating tokens: ' + (returndata.error || returndata.errors), true)
-          } else {
-            showDevTokenResult('Dev tokens for ' + appName + ' written to ' + returndata.filePath +
-              ' (expires ' + (returndata.appTokenExpires || '?').slice(0, 10) + ').' +
-              (returndata.gitignoreUpdated ? ' Added the file to the app\'s .gitignore.' : ''), false)
-          }
-        })
-        .catch(error => {
-          console.warn({ error })
-          showDevTokenResult('Error generating tokens: ' + error.message, true)
-        })
-    }
+  regenerateDevTokens: async function () {
+    const appName = devAppNameOrWarn()
+    if (!appName) return
+    const dev = await devActions()
+    const result = await dev.regenerateDevTokens(appName,
+      { onStart: () => showDevTokenResult('Generating tokens for ' + appName + '...', false) })
+    if (!result.cancelled) showDevTokenResult(result.message, !result.ok)
   },
-  generateContextFile: function () {
-    const appName = document.getElementById('appNameFromFolder').value.trim()
-    if (!appName) {
-      showError('Please enter or select an app name')
-    } else if (!isValidAppName(appName)) {
-      showError('Invalid app name - please correct the app name')
-    } else {
-      showDevTokenResult('Generating context file for ' + appName + '...', false)
-      freezr.apiRequest('POST', '/acctapi/generateDevContextFile', { app_name: appName })
-        .then(returndata => {
-          if (returndata.error || returndata.errors) {
-            console.warn({ returndata })
-            showDevTokenResult('Error generating context file: ' + (returndata.error || returndata.errors), true)
-          } else {
-            const actionText = { created: 'was created in', updated: 'was updated in', uptodate: 'is already up to date in' }[returndata.action] || 'was written to'
-            // Static instruction strings only - safe for innerHTML
-            showDevTokenResult('freezr-context.md ' + actionText + ' the ' + appName + ' app folder.' + CONTEXT_FILE_INSTRUCTIONS_HTML, false, true)
-          }
-        })
-        .catch(error => {
-          console.warn({ error })
-          showDevTokenResult('Error generating context file: ' + error.message, true)
-        })
-    }
+  generateContextFile: async function () {
+    const appName = devAppNameOrWarn()
+    if (!appName) return
+    const dev = await devActions()
+    const result = await dev.generateContextFile(appName,
+      { onStart: () => showDevTokenResult('Generating context file for ' + appName + '...', false) })
+    showDevTokenResult(result.message, !result.ok, result.isHtml)
   }
 }
-// How to attach freezr-context.md to each AI assistant - mirrors the "How to use
-// this file" section at the top of the generated freezr-context.md itself.
-const CONTEXT_FILE_INSTRUCTIONS_HTML = '<div style="margin-top:0.5rem; font-weight:bold;">To make your AI coding assistant use it:</div>' +
-  '<ul style="margin:0.25rem 0 0 1.25rem; padding:0;">' +
-  '<li><b>Claude Code:</b> create a CLAUDE.md file at the app folder root containing one line &mdash; <code>@freezr-context.md</code>. It is auto-loaded every session.</li>' +
-  '<li><b>Cursor:</b> save a copy as <code>.cursor/rules/freezr.mdc</code>, or add a rule pointing to <code>freezr-context.md</code>.</li>' +
-  '<li><b>GitHub Copilot / Codex / other agents:</b> rename or symlink the file to <code>AGENTS.md</code> at the folder root.</li>' +
-  '<li><b>ChatGPT (web):</b> upload <code>freezr-context.md</code> to your conversation or Project files and tell it to follow the file when writing freezr app code.</li>' +
-  '</ul>'
+// Returns the app name typed / picked in the Dev tab, or null having shown why not
+const devAppNameOrWarn = function () {
+  const appName = document.getElementById('appNameFromFolder').value.trim()
+  if (!appName) {
+    showError('Please enter or select an app name')
+    return null
+  }
+  if (!isValidAppName(appName)) {
+    showError('Invalid app name - please correct the app name')
+    return null
+  }
+  return appName
+}
 const showDevTokenResult = function (message, isError, isTrustedHtml) {
   const box = document.getElementById('devTokenResultBox')
   if (!box) return

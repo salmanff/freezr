@@ -249,8 +249,14 @@ export async function startupSequence (app, VERSION) {
         maxAttemptsPerDevice: AUTH_RATE_LIMIT.MAX_ATTEMPTS_PER_DEVICE,
         windowMs: AUTH_RATE_LIMIT.WINDOW_MS,
         blockDurationMs: AUTH_RATE_LIMIT.BLOCK_DURATION_MS,
-        onFailure: () => {},
-        onBlock: () => {}
+        onFailure: () => {}, // each failure is already logged by sendAuthFailure (flogger.auth)
+        // A block used to be silent — the user saw "Too many requests" with nothing in the logs
+        // to say which request tripped it. Log it at auth level with the triggering request.
+        onBlock: (metaData, block) => {
+          flogger.auth('authLimitBlock: ' + block.type + ' ' + block.id + ' blocked until ' + new Date(block.until).toISOString(), {
+            reqIp: metaData.reqIp, path: metaData.path, method: metaData.method, user: metaData.user, device: metaData.device
+          })
+        }
       })
       
       // Add logging middleware

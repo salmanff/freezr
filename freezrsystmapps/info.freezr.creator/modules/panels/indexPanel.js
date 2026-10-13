@@ -1,10 +1,28 @@
 /* global freezr */
 import { labelForAction } from '../historyActions.js'
 import { renderFileTree, fetchFileContent } from '../fileTree.js'
-import { openComp } from './filePanel.js'
+import { openComp, openSnapshotCompare } from './filePanel.js'
 import { showError } from '../showError.js'
 import { formatCost, formatTokens } from '../priceService.js'
-import { escHtml } from '../utils.js'
+import { escHtml, authorTag } from '../utils.js'
+import { refreshSnapshotsInState, takeSnapshot, performRestore, updateSnapshot, deleteSnapshot, snapshotForChat, reasonLabel, formatSnapshotTs } from '../snapshotActions.js'
+import { renderMarkdownLite } from '../changeReview.js'
+
+// "user @ host" tag for an entry written by someone else or on another server (see utils.authorTag).
+const authorHtml = (entry) => {
+  const tag = authorTag(entry?.author)
+  return tag ? `<span class="idx-author-tag" title="Written by ${escHtml(tag)}">${escHtml(tag)}</span>` : ''
+}
+
+// Entries that bracket a folder rewrite (upload, restore) carry the two snapshot ids: one click
+// opens the compare view on exactly that change.
+const reviewLinkHtml = (entry) => (entry?.beforeSnapshotId && entry?.afterSnapshotId)
+  ? `<span class="idx-review-link" data-review-before="${escHtml(entry.beforeSnapshotId)}" data-review-after="${escHtml(entry.afterSnapshotId)}">↔ review changes</span>`
+  : ''
+
+const reviewBodyHtml = (entry) => (entry?.action === 'change_review' && entry.review)
+  ? `<details class="idx-review-body"><summary>Show the AI review${entry.llmModel ? ' (' + escHtml(entry.llmModel) + ')' : ''}</summary>${renderMarkdownLite(entry.review)}</details>`
+  : ''
 
 const isMobile = () => {
   const root = document.querySelector('.creator-root')
@@ -111,8 +129,10 @@ const renderHistoryEntry = (entry) => {
     : ''
   return `<div class="idx-entry">
     ${promptHtml}
-    <div class="idx-entry-summary">${escHtml(label)}</div>
+    <div class="idx-entry-summary">${escHtml(label)}${authorHtml(entry)}</div>
     ${detailHtml}
+    ${reviewLinkHtml(entry)}
+    ${reviewBodyHtml(entry)}
     <div class="idx-entry-meta">
       <span class="idx-entry-date">${escHtml(formatTimestamp(entry.timestamp || entry._date_created))}</span>
       ${usageHtml}
@@ -121,7 +141,7 @@ const renderHistoryEntry = (entry) => {
   </div>`
 }
 
-const renderHistoryTab = (history) => {
+const renderHistoryTab = (history, snapshots) => {
   if (!history || history.length === 0) {
     return '<p class="idx-empty">No chat history yet.</p>'
   }
@@ -174,7 +194,10 @@ const renderHistoryTab = (history) => {
       const promptHtml = entry.userPrompt
         ? `<div class="idx-user-prompt" title="${escHtml(entry.userPrompt)}">${escHtml(entry.userPrompt)}</div>`
         : ''
-      const hasExpandableContent = hasFiles || usageHtml || detailHtml || promptHtml
+      const reviewLink = reviewLinkHtml(entry)
+      const reviewBody = reviewBodyHtml(entry)
+      const author = authorHtml(entry)
+      const hasExpandableContent = hasFiles || usageHtml || detailHtml || promptHtml || reviewLink || reviewBody
       if (hasExpandableContent) {
         const extAttr = entry.action === 'external_change' ? ' data-external="1"' : ''
         const filesHtml = hasFiles
@@ -186,7 +209,7 @@ const renderHistoryTab = (history) => {
           <div class="idx-group-header">
             <span class="idx-group-toggle">▶</span>
             <div class="idx-group-header-text">
-              <div class="idx-item-thread">${escHtml(label)}</div>
+              <div class="idx-item-thread">${escHtml(label)}${author}</div>
               <div class="idx-item-date">${escHtml(formatTimestamp(entry.timestamp || entry._date_created))}</div>
             </div>
           </div>
@@ -194,6 +217,8 @@ const renderHistoryTab = (history) => {
             <div class="idx-entry">
               ${promptHtml}
               ${detailHtml}
+              ${reviewLink}
+              ${reviewBody}
               ${filesHtml ? `<div class="idx-files-changed">${filesHtml}</div>` : ''}
               ${usageHtml}
             </div>
@@ -201,7 +226,7 @@ const renderHistoryTab = (history) => {
         </div>`
       } else {
         html += `<div class="idx-history-item">
-          <div class="idx-item-thread">${escHtml(label)}</div>
+          <div class="idx-item-thread">${escHtml(label)}${author}</div>
           <div class="idx-item-date">${escHtml(formatTimestamp(entry.timestamp || entry._date_created))}</div>
         </div>`
       }
@@ -223,21 +248,83 @@ const renderHistoryTab = (history) => {
 
     const innerHtml = seg.entries.map(renderHistoryEntry).join('')
 
+    // The whole-app snapshot taken before this chat first changed files (see chatService) — one
+    // click restores the app to that point.
+    const chatSnap = seg.isContinuation ? null : snapshotForChat(snapshots, seg.chatId)
+    const restoreHtml = chatSnap
+      ? `<span class="idx-chat-restore" data-restore-chat="${escHtml(seg.chatId)}" title="Restore the whole app to how it was before this chat changed anything (${escHtml(formatSnapshotTs(chatSnap.timestamp))})">↩ restore to before this chat</span>`
+      : ''
+
     html += `<div class="${segClasses.join(' ')}" data-chat-id="${escHtml(seg.chatId)}">
       ${continuationHtml}
       <div class="idx-group-header">
         <span class="idx-group-toggle">▶</span>
         <div class="idx-group-header-text">
-          <div class="idx-thread-label" data-chat-id="${escHtml(seg.chatId)}">${escHtml(threadText)}${seg.isContinuation ? ' (cont.)' : ''}</div>
+          <div class="idx-thread-label" data-chat-id="${escHtml(seg.chatId)}">${escHtml(threadText)}${seg.isContinuation ? ' (cont.)' : ''}${authorHtml(seg.entries[0])}</div>
           <div class="idx-item-date">${escHtml(formatTimestamp(latestTs))}</div>
         </div>
       </div>
+      ${restoreHtml}
       <div class="idx-group-children idx-group-collapsed">${innerHtml}</div>
       ${moreHtml}
     </div>`
   }
 
   return `<div class="idx-history-list">${html}<div class="idx-history-spacer"></div></div>`
+}
+
+// ---- Versions tab: whole-app snapshots (see snapshotActions.js / snapshotController.mjs) ----
+const renderVersionsTab = (indexState, appName) => {
+  if (!appName) return '<p class="idx-empty">Select an app to see its versions.</p>'
+  if (indexState.snapshotsError) return `<p class="idx-empty">${escHtml(indexState.snapshotsError)}</p>`
+  const snaps = indexState.snapshots
+  if (!snaps) return '<p class="idx-empty">Loading versions…</p>'
+
+  const selection = indexState.versionSelection || []
+  const currentHash = indexState.snapshotsHash || null
+  const compareLabel = selection.length === 2 ? 'Compare selected' : (selection.length === 1 ? 'Compare with current' : 'Compare')
+  const toolbar = `<div class="idx-ver-toolbar">
+      <button class="panel-cta panel-cta-sm" data-action="snapshot-now" title="Save the app as it is now as a named version">📸 Save version</button>
+      <button class="panel-cta panel-cta-sm panel-cta-secondary" data-action="compare-selected" ${selection.length ? '' : 'disabled'}>${compareLabel}</button>
+      <div class="idx-ver-hint">Whole-app versions are saved automatically before a chat first changes files, before a manual edit session, before any restore, and on publish. Published and pinned (★) versions are always kept; of the rest, the latest 20 and the oldest are kept.</div>
+    </div>`
+  if (!snaps.length) return toolbar + '<p class="idx-empty">No saved versions yet.</p>'
+
+  const rows = snaps.map((s) => {
+    const id = s._id
+    const isCurrent = !!(currentHash && s.contentHash && s.contentHash === currentHash)
+    const checked = selection.includes(id) ? 'checked' : ''
+    const canEdit = !s.legacy
+    const canDelete = !s.legacy && s.reason !== 'published'
+    const canUnpin = canEdit && s.reason !== 'published'
+    const aliases = (s.aliases || []).map((a) => a.label).filter(Boolean)
+    const metaBits = [
+      `<span>${escHtml(formatSnapshotTs(s.timestamp))}</span>`,
+      `<span class="idx-ver-badge${s.reason === 'published' ? ' idx-ver-badge-published' : ''}">${escHtml(reasonLabel(s))}</span>`,
+      isCurrent ? '<span class="idx-ver-badge idx-ver-badge-current">current</span>' : '',
+      s.fileCount ? `<span>${s.fileCount} files</span>` : ''
+    ].filter(Boolean).join('')
+    const pinTitle = s.pinned
+      ? (canUnpin ? 'Pinned — always kept. Click to unpin.' : 'Published versions are always kept')
+      : 'Pin to keep this version'
+    return `<div class="idx-ver-row${isCurrent ? ' idx-ver-current' : ''}" data-snapshot-id="${escHtml(id)}">
+      <input type="checkbox" data-ver-select="${escHtml(id)}" ${checked} title="Select to compare">
+      <div class="idx-ver-main">
+        <div class="idx-ver-label">${escHtml(s.label || reasonLabel(s))}</div>
+        <div class="idx-ver-meta">${metaBits}</div>
+        ${aliases.length ? `<div class="idx-ver-aliases">same files as: ${escHtml(aliases.join(' · '))}</div>` : ''}
+        <div class="idx-ver-actions">
+          <button class="panel-cta panel-cta-xs" data-ver-action="compare-current" data-id="${escHtml(id)}">Diff vs current</button>
+          <button class="panel-cta panel-cta-xs" data-ver-action="restore" data-id="${escHtml(id)}" ${isCurrent ? 'disabled title="Already the current files"' : ''}>Restore</button>
+          ${canEdit ? `<button class="panel-cta panel-cta-xs" data-ver-action="rename" data-id="${escHtml(id)}">Rename</button>` : ''}
+          ${canDelete ? `<button class="panel-cta panel-cta-xs" data-ver-action="delete" data-id="${escHtml(id)}">Delete</button>` : ''}
+        </div>
+      </div>
+      <button class="idx-ver-pin${s.pinned ? ' is-pinned' : ''}" data-ver-action="pin" data-id="${escHtml(id)}" ${canUnpin ? '' : 'disabled'} title="${escHtml(pinTitle)}">${s.pinned ? '★' : '☆'}</button>
+    </div>`
+  }).join('')
+
+  return toolbar + `<div class="idx-history-list">${rows}</div>`
 }
 
 export const renderIndexPanel = ({ container, state, setState }) => {
@@ -249,6 +336,7 @@ export const renderIndexPanel = ({ container, state, setState }) => {
 
   const historyActive = activeTab === 'history'
   const filesActive = activeTab === 'files'
+  const versionsActive = activeTab === 'versions'
 
   const chatSending = state.chat?.sending || false
   const footerButtonsHtml = appName
@@ -265,11 +353,13 @@ export const renderIndexPanel = ({ container, state, setState }) => {
         <div class="idx-tabs">
           <button class="idx-tab ${historyActive ? 'idx-tab-active' : ''}" data-tab="history">Chat History</button>
           <button class="idx-tab ${filesActive ? 'idx-tab-active' : ''}" data-tab="files">Files</button>
+          <button class="idx-tab ${versionsActive ? 'idx-tab-active' : ''}" data-tab="versions">Versions</button>
         </div>
       </div>
       <div class="idx-tab-content">
-        ${historyActive ? renderHistoryTab(history) : ''}
+        ${historyActive ? renderHistoryTab(history, indexState.snapshots) : ''}
         ${filesActive ? renderFileTree(fileTree) : ''}
+        ${versionsActive ? renderVersionsTab(indexState, appName) : ''}
       </div>
       ${footerButtonsHtml}
     </div>
@@ -284,8 +374,132 @@ export const renderIndexPanel = ({ container, state, setState }) => {
         next.index.activeTab = tab
         return next
       })
+      if (tab === 'versions' && appName && !indexState.snapshotsLoading && (!indexState.snapshots || indexState.snapshotsFor !== appName)) {
+        refreshSnapshotsInState(appName, setState)
+      }
     }
   })
+
+  if (historyActive) {
+    container.querySelectorAll('.idx-chat-restore[data-restore-chat]').forEach((el) => {
+      el.onclick = async (e) => {
+        e.stopPropagation()
+        const snap = snapshotForChat(indexState.snapshots, el.dataset.restoreChat)
+        if (snap) await performRestore(appName, snap, setState)
+      }
+    })
+    container.querySelectorAll('.idx-review-link[data-review-before]').forEach((el) => {
+      el.onclick = async (e) => {
+        e.stopPropagation()
+        if (!appName) return
+        if (isMobile()) {
+          setState((next) => {
+            if (next.index?.ui) next.index.ui.visible = false
+            if (next.chat?.ui) next.chat.ui.visible = false
+            return next
+          }, { rerender: false })
+        }
+        await openSnapshotCompare(appName, el.dataset.reviewBefore, el.dataset.reviewAfter, setState)
+      }
+    })
+    // The review text is markup inside a collapsed group; let clicks on it through without
+    // toggling anything else.
+    container.querySelectorAll('.idx-review-body').forEach((el) => { el.onclick = (e) => e.stopPropagation() })
+  }
+
+  if (versionsActive && appName) {
+    const snaps = indexState.snapshots || []
+    const byId = (id) => snaps.find((s) => s._id === id) || null
+    const openCompare = async (a, b) => {
+      if (isMobile()) {
+        setState((next) => {
+          if (next.index?.ui) next.index.ui.visible = false
+          if (next.chat?.ui) next.chat.ui.visible = false
+          return next
+        }, { rerender: false })
+      }
+      await openSnapshotCompare(appName, a, b, setState)
+    }
+
+    const snapBtn = container.querySelector('[data-action="snapshot-now"]')
+    if (snapBtn) {
+      snapBtn.onclick = async () => {
+        const label = window.prompt('Name this version (optional):', '')
+        if (label === null) return
+        snapBtn.disabled = true
+        try {
+          const result = await takeSnapshot(appName, { reason: 'manual', label: label.trim() || undefined, pinned: true })
+          showError(result.created
+            ? 'Version saved.'
+            : 'No file changes since "' + (result.record?.label || 'the last version') + '" — that version was kept (and pinned) instead.',
+          { timeoutMs: 6000 })
+          await refreshSnapshotsInState(appName, setState)
+        } catch (err) {
+          showError(err?.message || 'Could not save version.')
+          snapBtn.disabled = false
+        }
+      }
+    }
+
+    container.querySelectorAll('input[data-ver-select]').forEach((cb) => {
+      cb.onchange = () => {
+        const id = cb.dataset.verSelect
+        setState((next) => {
+          if (!next.index) next.index = {}
+          const sel = (next.index.versionSelection || []).filter((x) => x !== id)
+          if (cb.checked) {
+            sel.push(id)
+            while (sel.length > 2) sel.shift()
+          }
+          next.index.versionSelection = sel
+          return next
+        }, { sourcePanel: 'index' })
+      }
+    })
+
+    const cmpBtn = container.querySelector('[data-action="compare-selected"]')
+    if (cmpBtn) {
+      cmpBtn.onclick = () => {
+        const sel = (indexState.versionSelection || []).map(byId).filter(Boolean)
+        if (sel.length === 2) {
+          const [older, newer] = [...sel].sort((x, y) => String(x.timestamp || '').localeCompare(String(y.timestamp || '')))
+          openCompare(older._id, newer._id)
+        } else if (sel.length === 1) {
+          openCompare(sel[0]._id, 'current')
+        }
+      }
+    }
+
+    container.querySelectorAll('[data-ver-action]').forEach((btn) => {
+      btn.onclick = async (e) => {
+        e.stopPropagation()
+        const snap = byId(btn.dataset.id)
+        if (!snap) return
+        const action = btn.dataset.verAction
+        try {
+          if (action === 'compare-current') {
+            await openCompare(snap._id, 'current')
+          } else if (action === 'restore') {
+            await performRestore(appName, snap, setState)
+          } else if (action === 'rename') {
+            const label = window.prompt('Version name:', snap.label || '')
+            if (label === null || !label.trim()) return
+            await updateSnapshot(appName, snap._id, { label: label.trim() })
+            await refreshSnapshotsInState(appName, setState)
+          } else if (action === 'pin') {
+            await updateSnapshot(appName, snap._id, { pinned: !snap.pinned })
+            await refreshSnapshotsInState(appName, setState)
+          } else if (action === 'delete') {
+            if (!window.confirm('Delete the saved version "' + (snap.label || '') + '"? This cannot be undone.')) return
+            await deleteSnapshot(appName, snap._id)
+            await refreshSnapshotsInState(appName, setState)
+          }
+        } catch (err) {
+          showError(err?.message || 'Action failed.')
+        }
+      }
+    })
+  }
 
   const launchBtn = container.querySelector('.launch-app-footer [data-action="launch-app"]')
   if (launchBtn) {

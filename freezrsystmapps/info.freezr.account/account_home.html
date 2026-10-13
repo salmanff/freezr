@@ -89,6 +89,7 @@ freezr Account Home
                 <p>Press to Install:</p>
                 <ul>
                     <li class ="feature_app" id="button_feature_com.salmanff.orbit">Orbit: A web page publishing tool</li>
+                    <li class ="feature_app" id="button_feature_com.salmanff.superlazy">Superlazy: An app that converts conversations into to-do lists</li>
                     <li class ="feature_app" id="button_feature_cards.hiper.freezr">Hiper Cards: Companion app to the <a href="https://chromewebstore.google.com/detail/hipercards-bookmarker-hig/peoooghegmfpgpafglhhibeeeeggmfhb">hiper cards browser extension</a>.</li>
                     <li class ="feature_app" id="button_feature_com.salmanff.poster">Poster: A simple blogging app</li>
                 </ul>
@@ -172,17 +173,18 @@ freezr Account Home
                     {{#user_apps}}<option value="{{app_name}}"></option>{{/user_apps}}
                 </datalist>
                 <div id="devTokenResultBox"></div>
+                <!-- Descriptions are filled in from modules/devAppActions.js (DEV_ACTION_DESCRIPTIONS) -->
                 <div class="dev-action-row">
                     <div id="button_updateAppFromFiles" class="freezrButt">Regenerate App from Files</div>
-                    <span class="dev-action-desc">Adds the app folder to your Apps list, or re-installs an existing app from its files (re-reads manifest.json, permissions and pages).</span>
+                    <span class="dev-action-desc" id="devDesc_updateAppFromFiles"></span>
                 </div>
                 <div class="dev-action-row">
                     <div id="button_regenerateDevTokens" class="freezrButt">Regenerate Tokens for App</div>
-                    <span class="dev-action-desc">Writes a long-lived API token into the app folder (.freezr-access.local.json) so dev tools and AI coding agents can read and write this app's data. <b>Warning: This gives full access to your app's data.</b></span>
+                    <span class="dev-action-desc" id="devDesc_regenerateDevTokens"></span>
                 </div>
                 <div class="dev-action-row">
                     <div id="button_generateContextFile" class="freezrButt">(re)Generate context file for LLMs</div>
-                    <span class="dev-action-desc">Copies the latest freezr-context.md into the app folder — the guidance doc that teaches AI coding assistants (Claude, Cursor, ChatGPT...) how to build freezr apps.</span>
+                    <span class="dev-action-desc" id="devDesc_generateContextFile"></span>
                 </div>
             </div>
     

@@ -37,7 +37,7 @@ import { createRawFs } from '../../../../adapters/datastore/fsConnectors/fsRawFa
 export const MAX_LIST_ENTRIES = 1000 // per single directory listing
 export const MAX_TREE_ENTRIES = 5000 // total entries across a tree walk
 export const MAX_TREE_DEPTH = 5 // listTree depth cap (list is depth 1)
-export const MAX_READ_BYTES = 100 * 1024 * 1024 // refuse larger file reads (100MB)
+export const MAX_READ_BYTES = 500 * 1024 * 1024 // refuse larger file reads (500MB)
 export const MAX_WRITE_BYTES = 50 * 1024 * 1024 // refuse larger file writes (50MB)
 
 const fsError = (message, { status = 400, code = 'fs_error' } = {}) => {

@@ -19,6 +19,7 @@ import { ensureContextDoc } from '../../creator/controllers/creatorApiController
 import { identityOf, stampEdit } from '../../../common/helpers/provenance.mjs'
 import { decryptResourceSensitiveFields } from '../services/resourceCrypto.mjs'
 import { queryTallies, summarizeTallies, resolveRange } from '../services/usageTallyService.mjs'
+import { isLocalhostRequest } from '../../connections/fs/middleware/fsContext.mjs'
 
 /**
  * Generate a one-time app password and corresponding app token
@@ -571,6 +572,8 @@ const handleGetLocalLlmCliStatus = async (req, res) => {
   return sendApiSuccess(res, {
     enabled: !!freezrPrefs.local_llm_cli_enabled,
     isAdmin: !!req.session?.logged_in_as_admin,
+    // The Resources page only shows the local-CLI cards when browsing over localhost.
+    onLocalhost: isLocalhostRequest(req),
     // Which apps may actually USE these connectors (creator only by default) — so the
     // Resources page can say so rather than leaving a working-looking key that most apps
     // silently never see. See common/helpers/localAgentPolicy.mjs.
@@ -985,8 +988,7 @@ const updateAppFromFilesController = async (req, res) => {
     return sendApiSuccess(res, result)
 
   } catch (error) {
-    console.error('❌ Error in updateAppFromFiles:', error)
-    return sendFailure(res, error, 'accountApiController.updateAppFromFiles', 500)
+    return sendFailure(res, error, { function: 'accountApiController.updateAppFromFiles', step: error.step, appName: error.appName }, 500)
   }
 }
 
@@ -1047,12 +1049,8 @@ const installAppFromZipFile = async (req, res) => {
       return sendFailure(res, 'Could not access app list database', 'accountApiController.installAppFromZipFile', 500)
     }
 
-    // Get error logger from req (should be attached by server middleware)
-    const errorLogger = res.locals?.coreLogger || {
-      log: (msg, context) => { console.log('Error logger not available, using console.log:', msg, context) },
-      error: (msg, context) => { console.error('Error logger not available, using console.error:', msg, context) },
-      warn: (msg, context) => { console.error('Error logger not available, using console.warn:', msg, context) }
-    }
+    // Request-scoped logger (set by createRequestLoggerMiddleware / the console fallback)
+    const errorLogger = res.locals.flogger
 
     // Create installation context
     const context = {
@@ -1090,8 +1088,7 @@ const installAppFromZipFile = async (req, res) => {
     return sendApiSuccess(res, result)
 
   } catch (error) {
-    console.error('❌ Error in installAppFromZipFile:', error)
-    return sendFailure(res, error, 'accountApiController.installAppFromZipFile', 500)
+    return sendFailure(res, error, { function: 'accountApiController.installAppFromZipFile', step: error.step, appName: error.appName }, 500)
   }
 }
 
@@ -1153,12 +1150,8 @@ const installAppFromUrlController = async (req, res) => {
       return sendFailure(res, 'Could not access app list database', 'accountApiController.installAppFromUrl', 500)
     }
 
-    // Get error logger from req (should be attached by server middleware)
-    const errorLogger = res.locals?.coreLogger || {
-      log: (msg, context) => { console.log('Error logger not available, using console.log:', msg, context) },
-      error: (msg, context) => { console.error('Error logger not available, using console.error:', msg, context) },
-      warn: (msg, context) => { console.error('Error logger not available, using console.warn:', msg, context) }
-    }
+    // Request-scoped logger (set by createRequestLoggerMiddleware / the console fallback)
+    const errorLogger = res.locals.flogger
 
     // Create installation context
     const context = {
@@ -1186,18 +1179,12 @@ const installAppFromUrlController = async (req, res) => {
     }
 
     // Call service function
-    const result = await installAppFromUrl(context)
+    const result = await installAppFromUrl(context) // logs its own success line
 
-    errorLogger.log('install app success 2', {
-      function: 'installAppFromUrl',
-      appUrl: context.appUrl,
-      appInstalName: context.appName
-    })
     return sendApiSuccess(res, result)
 
   } catch (error) {
-    console.error('❌ Error in installAppFromUrl:', error)
-    return sendFailure(res, error, 'accountApiController.installAppFromUrl', 500)
+    return sendFailure(res, error, { function: 'accountApiController.installAppFromUrl', step: error.step, appName: error.appName, appUrl: req.body?.app_url }, 500)
   }
 }
 

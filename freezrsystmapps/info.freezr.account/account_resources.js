@@ -291,6 +291,11 @@ const getLocalCliResource = function (provider) {
 const getClaudeLocalResource = function () { return getLocalCliResource('ClaudeLocal') }
 const getCodexLocalResource = function () { return getLocalCliResource('CodexLocal') }
 
+const isLocalhostPage = function () {
+  const h = (window.location.hostname || '').toLowerCase()
+  return h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h === '::1'
+}
+
 const loadClaudeLocalStatus = async function () {
   try {
     const resp = await freezr.apiRequest('GET', '/acctapi/getLocalLlmCliStatus')
@@ -301,6 +306,9 @@ const loadClaudeLocalStatus = async function () {
   // Non-admins never see the cards: the connectors are admin-only by policy (the server
   // enforces this at use time regardless of what the UI shows).
   if (!localCliState.isAdmin) return
+  // Local-subscription connectors are only offered when browsing on localhost. The page's
+  // own hostname is checked too, so an older server without `onLocalhost` still hides them.
+  if (!isLocalhostPage() || localCliState.onLocalhost === false) return
   redrawClaudeLocalCard()
   redrawCodexLocalCard()
 }
@@ -311,7 +319,7 @@ const redrawLocalCliCard = function (opts) {
   const statusEl = document.getElementById(opts.statusId)
   const enableButt = document.getElementById(opts.buttonId)
   if (!card || !statusEl || !enableButt) return
-  if (!localCliState.isAdmin) { card.style.display = 'none'; return }
+  if (!localCliState.isAdmin || !isLocalhostPage() || localCliState.onLocalhost === false) { card.style.display = 'none'; return }
 
   // Keep the enable-overlay disclosure honest: if SHOW_LOCAL_AGENT_IN_APPS is already set on
   // this server, the creator-only restriction is NOT in force and saying otherwise would

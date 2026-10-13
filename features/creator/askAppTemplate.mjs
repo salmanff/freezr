@@ -207,6 +207,13 @@ const renderGate = (rows, cap) => {
   const d = document.createElement('p'); d.className = 'aa-muted'
   d.textContent = (req.description || 'Your LLM asked to look at some of your data.') + ' — showing ' + rows.length + ' record' + (rows.length === 1 ? '' : 's') + ' from ' + (req.app_table || '')
   root.appendChild(d)
+  const warn = document.createElement('div')
+  warn.setAttribute('style', 'background:#fff6e5;border:1px solid #f0c36d;border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.45;margin:10px 0;color:#3a2e14')
+  const warnHead = document.createElement('strong'); warnHead.setAttribute('style', 'display:block;margin-bottom:4px')
+  warnHead.textContent = '⚠️ Prompt injection risk — only share data you entered yourself, or have read with your own eyes.'
+  const warnBody = document.createElement('div')
+  warnBody.textContent = 'Anything the assistant reads becomes text it may treat as instructions. This is called prompt injection: a record that came from somewhere else — a shared record, an imported feed, a message, anything synced from outside — can contain wording crafted to redirect the assistant.'
+  warn.appendChild(warnHead); warn.appendChild(warnBody); root.appendChild(warn)
   const pre = document.createElement('pre')
   pre.textContent = JSON.stringify(rows, null, 2)
   pre.setAttribute('style', 'background:#0f1728;color:#cdd6e6;padding:12px;border-radius:8px;max-height:52vh;overflow:auto;font-size:12px;white-space:pre-wrap;word-break:break-word')

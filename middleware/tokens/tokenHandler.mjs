@@ -14,8 +14,10 @@ const isExpired = (token) => {
   return token.expiry < (new Date().getTime() ) // + (24 * 60 * 60 * 1000)
 }
 
+// "Within a day of expiring" — refresh window. (Was `now - 1 day`, i.e. "expired more than a day
+// ago", which can never be true for a token that passed isExpired, so tokens were never renewed early.)
 const isCloseToExpiry = (token) => {
-  return token.expiry < (new Date().getTime() - (24 * 60 * 60 * 1000)) // 1 day in milliseconds to refresh
+  return token.expiry < (new Date().getTime() + (24 * 60 * 60 * 1000)) // 1 day in milliseconds to refresh
 }
 
 /**
@@ -224,8 +226,17 @@ export async function getAppTokenFromHeaderAndDoMinimalChecks(tokenDb, session, 
       const error = new Error('no user or deviceCode for getOrSetAppTokenForLoggedInUser (1)')
       throw error
     }
-    if (tokenInfo.requestor_id !== sessionUserId || tokenInfo.user_device !== deviceCode) {
+    if (tokenInfo.requestor_id !== sessionUserId) {
       throw new Error('token mismatch')
+    }
+    if (tokenInfo.user_device !== deviceCode) {
+      // SAME user, different login session: a real token from a PREVIOUS login (every login mints
+      // a new device_code, so after a re-login every still-open tab presents one of these until
+      // its page reloads). It is rejected, but flagged so the auth rate-limiter does not count it
+      // as a brute-force attempt — a handful of open tabs used to block the user's own IP.
+      const err = new Error('token mismatch')
+      err.code = 'stale_session'
+      throw err
     }
   }
   // check app

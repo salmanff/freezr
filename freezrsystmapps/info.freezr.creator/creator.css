@@ -1516,6 +1516,63 @@ a.panel-cta:visited {
   gap: 6px;
   flex-shrink: 0;
 }
+
+/* Data probe: the consent card (reuses .chat-access-banner) and the transcript record of what was shared. */
+.chat-probe-card {
+  align-items: flex-start;
+}
+.chat-probe-items {
+  margin: 4px 0 0;
+  padding-left: 16px;
+}
+.chat-probe-exact {
+  margin-top: 4px;
+}
+.chat-probe-exact summary,
+.chat-msg-probe summary {
+  cursor: pointer;
+  opacity: 0.8;
+  font-size: 11px;
+}
+.chat-probe-pre {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  max-height: 240px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 3px;
+}
+.chat-probe-notice {
+  margin: 4px 0 10px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border: 1px solid var(--border, #333);
+  border-radius: 4px;
+  opacity: 0.85;
+}
+.chat-msg-probe {
+  margin-top: 6px;
+  font-size: 12px;
+}
+.chat-probe-item {
+  margin-top: 6px;
+}
+.chat-probe-item-title {
+  font-weight: 600;
+}
+.chat-probe-q {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  opacity: 0.75;
+  word-break: break-all;
+}
+.chat-probe-error {
+  color: #fca5a5;
+}
 .panel-cta-secondary {
   background: transparent;
   border-color: var(--border, #333);
@@ -2299,3 +2356,345 @@ a.panel-cta:visited {
 .panel-link-sm:hover {
   text-decoration: underline;
 }
+
+/* ---- Versions tab (whole-app snapshots) ---- */
+.idx-ver-toolbar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--panel-border);
+}
+.idx-ver-hint {
+  flex: 1 1 100%;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+.idx-ver-row {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  padding: 7px 4px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+}
+.idx-ver-row.idx-ver-current {
+  background: rgba(96, 165, 250, 0.06);
+}
+.idx-ver-row input[type="checkbox"] {
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+.idx-ver-main {
+  flex: 1;
+  min-width: 0;
+}
+.idx-ver-label {
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.idx-ver-meta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.idx-ver-badge {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 0 5px;
+  border-radius: 3px;
+  border: 1px solid var(--panel-border);
+  color: var(--muted);
+}
+.idx-ver-badge-published {
+  border-color: rgba(34, 197, 94, 0.5);
+  color: #22c55e;
+}
+.idx-ver-badge-current {
+  border-color: rgba(96, 165, 250, 0.6);
+  color: #60a5fa;
+}
+.idx-ver-aliases {
+  font-size: 10px;
+  color: var(--muted);
+  opacity: 0.8;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+.idx-ver-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 5px;
+}
+.idx-ver-pin {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 2px;
+  opacity: 0.45;
+  flex-shrink: 0;
+}
+.idx-ver-pin.is-pinned,
+.idx-ver-pin:hover {
+  opacity: 1;
+}
+.idx-chat-restore {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--muted);
+  cursor: pointer;
+  margin: 2px 0 0 20px;
+}
+.idx-chat-restore:hover {
+  color: var(--accent, #58a6ff);
+  text-decoration: underline;
+}
+
+/* Snapshot compare view (file panel) */
+.fp-snap-head {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 4px 10px 6px;
+  border-bottom: 1px solid var(--panel-border);
+}
+.fp-snap-files {
+  border-bottom: 1px solid var(--panel-border);
+  max-height: 40%;
+  overflow: auto;
+  flex-shrink: 0;
+}
+.fp-snap-file {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.fp-snap-file:hover,
+.fp-snap-file.is-selected {
+  background: rgba(148, 163, 184, 0.1);
+}
+.fp-snap-file.is-binary {
+  cursor: default;
+}
+.fp-snap-status {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  width: 64px;
+  flex-shrink: 0;
+  text-align: center;
+  border-radius: 3px;
+  padding: 1px 0;
+}
+.fp-snap-status-added { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
+.fp-snap-status-modified { background: rgba(234, 179, 8, 0.15); color: #eab308; }
+.fp-snap-status-deleted { background: rgba(239, 68, 68, 0.15); color: #f87171; }
+.fp-snap-status-unchanged { color: var(--muted); opacity: 0.6; }
+.fp-snap-path {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fp-snap-size {
+  font-size: 10px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.fp-snap-restore-file {
+  flex-shrink: 0;
+}
+.fp-snap-empty {
+  padding: 14px 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Chat: undo + system notes */
+.chat-msg-note {
+  align-self: center;
+  max-width: 80%;
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+  text-align: center;
+  background: transparent;
+  border: 1px dashed var(--panel-border);
+}
+.chat-undo-row {
+  margin-top: 6px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Publish: progress line under the button while the zip is built and uploaded */
+.publish-status {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.publish-btn[disabled] {
+  opacity: 0.7;
+  cursor: progress;
+}
+.publish-btn .chat-spinner-inline {
+  margin: 0 4px 0 0;
+}
+
+/* App settings: foldable sub-sections (Backup & Transfer, Danger Zone) */
+.app-settings-subheader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+.app-settings-subheader label {
+  display: inline;
+  margin: 0;
+  cursor: pointer;
+}
+.app-settings-subheader:hover label {
+  color: var(--text);
+}
+.transfer-section {
+  margin-top: 12px;
+  border-top: 1px solid var(--border, #333);
+  padding-top: 10px;
+}
+.transfer-actions {
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.transfer-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Backup & Transfer: single upload drop zone (.zip = app, .json = chat) */
+.transfer-drop {
+  margin-top: 8px;
+  padding: 12px 10px;
+  border: 1px dashed var(--panel-border);
+  border-radius: 6px;
+  text-align: center;
+  cursor: pointer;
+  color: var(--muted);
+  transition: border-color 0.15s, background 0.15s;
+}
+.transfer-drop:hover,
+.transfer-drop:focus-visible,
+.transfer-drop.is-dragover {
+  border-color: var(--toggle-active-bg);
+  background: rgba(96, 165, 250, 0.08);
+  color: var(--text);
+  outline: none;
+}
+.transfer-drop.is-busy {
+  opacity: 0.5;
+  cursor: progress;
+}
+.transfer-drop-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+.transfer-drop-hint {
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+/* Provenance tag on history entries / chat messages written by someone else or elsewhere */
+.idx-author-tag,
+.chat-author-tag {
+  display: inline-block;
+  font-size: 9px;
+  text-transform: none;
+  letter-spacing: 0.2px;
+  padding: 0 5px;
+  border-radius: 3px;
+  border: 1px solid rgba(167, 139, 250, 0.5);
+  color: #a78bfa;
+  margin-left: 6px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.chat-author-tag {
+  margin: 0 0 4px;
+  display: block;
+  width: fit-content;
+}
+.idx-review-link {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--muted);
+  cursor: pointer;
+  margin: 2px 0 0 0;
+}
+.idx-review-link:hover {
+  color: var(--accent, #58a6ff);
+  text-decoration: underline;
+}
+.idx-review-body {
+  font-size: 12px;
+  line-height: 1.45;
+  margin-top: 4px;
+}
+.idx-review-body summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 11px;
+}
+.idx-review-body h3, .idx-review-body h4, .idx-review-body h5, .idx-review-body h6 {
+  font-size: 12px;
+  margin: 8px 0 2px;
+}
+.idx-review-body ul { margin: 2px 0 4px 16px; padding: 0; }
+.idx-review-body p { margin: 3px 0; }
+
+/* Explain-changes panel in the version compare view */
+.fp-review {
+  border-top: 1px solid var(--panel-border);
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  max-height: 45%;
+  overflow: auto;
+  flex-shrink: 0;
+}
+.fp-review-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.fp-review-head input {
+  flex: 1 1 200px;
+  min-width: 120px;
+  font-size: 12px;
+  padding: 3px 6px;
+}
+.fp-review-meta {
+  font-size: 10px;
+  color: var(--muted);
+  margin-left: auto;
+}
+.fp-review h3, .fp-review h4, .fp-review h5, .fp-review h6 { font-size: 12px; margin: 8px 0 2px; }
+.fp-review ul { margin: 2px 0 4px 16px; padding: 0; }
+.fp-review p { margin: 3px 0; }

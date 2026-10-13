@@ -165,6 +165,9 @@ The system uses five distinct cache types, each optimized for different access p
 **Authoritativeness**:
 If Recent cache contains records older than the query timestamp, it has ALL relevant records and can answer definitively without hitting the database.
 
+**Pagination**:
+Recent is only ever seeded with the newest `recentCount` rows (the refresh function fetches exactly that many, and a cache-miss fetch for an empty query is widened to it by `shouldExpandForCache`). A page is served from Recent only if it lies entirely inside what Recent holds (`skip + count <= rows held`); a page beyond that goes to the DB. If Recent holds fewer than `recentCount` rows, it is the whole table and answers any page. `setQuery` refuses to seed Recent from a smaller page so that a later read with a bigger `count` or `skip` cannot come back short.
+
 **Use Cases**:
 - Dashboard "recent items" lists
 - Time-based filters: `{ _date_modified: { $gt: timestamp } }`

@@ -504,8 +504,24 @@ await freezr.llm.ping(options?)
 // Send a prompt to an LLM.
 await freezr.llm.ask(prompt, options?)
 // prompt: a string, or an array of { role, content } messages for conversation
-// options: { context, provider, family, model, max_tokens, responseType, thinking, cache, files, streamBack, onDelta, onThinking, appToken, host }
+// options: { context, provider, family, model, max_tokens, responseType, structuredOutput, thinking, effort, cache, files, streamBack, onDelta, onThinking, appToken, host }
 // Fallback chain: model -> family -> defaultFamily of defaultProvider
+//
+// TWO ways to get JSON back, and they are not the same thing:
+//   responseType: 'json'       — asks for JSON in the prompt, then parses whatever came back as best
+//                                it can (fences stripped, first {...} block found). Best-effort.
+//   structuredOutput: { schema, name?, description? }
+//                              — NATIVE schema-constrained generation: the provider itself (OpenAI
+//                                text.format / Anthropic output_config.format) guarantees the reply
+//                                matches your JSON Schema, and result.response is the parsed object.
+//                                Either the reply satisfies the schema or the call fails — codes
+//                                'structured_output_invalid', 'structured_output_truncated' (cut off at
+//                                max_tokens), or 'capability_unsupported_on_model' (refused before any
+//                                token is spent). Write the schema for the subset both providers take:
+//                                additionalProperties:false on every object, every property in
+//                                required (make optional fields nullable). Check
+//                                freezr.llm.can('structuredOutput') first. Claude, ChatGPT and the local
+//                                Codex CLI support it; the local Claude CLI does not.
 //
 // cache (prompt caching): true for the provider's default 5-minute TTL, or { ttl: '1h' }.
 // Marks the END of the request's messages as a cache breakpoint, so a follow-up call whose
@@ -1119,6 +1135,38 @@ If you omit `publicid`, the server auto-generates one as `@userId/appTable/recor
 The publicid IS the full URL path — the public URL is simply `serverUrl/{publicid}` (e.g. `https://myserver.com/@alice/com.example.myapp.posts/abc123`). Do NOT prepend an extra userId or path segment to the publicid — it already contains the full path starting with `@`.
 Only admin or publisher users can set publicids which are in a different format. You can see if a user is one of these by inspecting the booleans freezr.adminUser and freezr.publisherUser.
 
+#### Published html pages under a custom publicid: the injected `<base>` and `location.hash`
+
+A file published as an html main page (`freezr.perms.shareFilePublicly(path, { fileStructure, ... })`) is normally served at its canonical publicid, `@owner/<appName>.files/<path>`. The page then sits in the same URL folder as the files published alongside it, so any relative URL it uses at run time — `fetch('slides.json')`, `<img src="pics/a.png">`, `<a href="about.html">` — resolves correctly.
+
+An admin or publisher can instead give the page a short custom `publicid` such as `why2026`, served at `https://myserver.com/why2026`. That URL has nothing to do with the page's folder, so the same relative URL would resolve to `/slides.json` and the server would answer with its not-found page. The symptom is a fetch that "succeeds" but returns html (`Unexpected token '<', "<!DOCTYPE "... is not valid JSON`). To keep relative URLs working, freezr injects a **path-only** base tag at the top of the `<head>` of a page served under a custom publicid:
+
+```html
+<base href="/@alice/com.example.site.files/projects/mysite/public/">
+```
+
+Rules:
+- Injected only when the page is served under a custom publicid. At the canonical URL no tag is added.
+- Path-only, so it works whatever host or scheme the server is reached on.
+- Skipped if the page already contains a `<base>` tag of its own — yours is honoured.
+- The css/js declared in `fileStructure` are injected as absolute URLs and are unaffected either way.
+
+**Side effect: writing to the URL.** The browser resolves a *relative* url passed to `history.pushState` / `history.replaceState` against the `<base>`, not against the address bar. A page that records state in the fragment with `history.replaceState(null, '', '#3')` would silently replace `/why2026` with the long canonical path the moment it runs. Use `location.hash`, which changes only the fragment of the URL actually showing, or build an absolute URL from `location.href`:
+
+```javascript
+// Bad under a custom publicid: '#3' is resolved against <base> and rewrites the address bar
+history.replaceState(null, '', '#3')
+
+// Good: only the fragment changes, the short URL is kept  →  https://myserver.com/why2026#3
+location.hash = '3'                      // adds a history entry and fires 'hashchange'
+history.replaceState(null, '', new URL('#3', location.href))   // same, without a new history entry
+
+// Reading it back is unaffected
+const slide = parseInt(location.hash.slice(1), 10)
+```
+
+Do not write code that depends on `location.pathname` being the file's canonical path — under a custom publicid it is the short path. Derive file URLs relative to the document (which the `<base>` makes correct) or from `document.baseURI`.
+
 **Removing public access (unpublishing):**
 When a record is published, freezr copies it into a separate `public_records` collection (under the 'public' user) so all public records live in one place. This copy reflects the record at the time of publishing, which may differ from the latest version.
 
@@ -1313,7 +1361,9 @@ const result = await freezr.llm.ask(messages, {
 - **provider**: Preferred provider — "Claude" or "ChatGPT".
 - **model**: Model shorthand like "sonnet", "o3-mini", or a full model name.
 - **max_tokens**: Maximum tokens in the response.
-- **responseType**: Set to "json" to auto-parse JSON from the LLM response.
+- **responseType**: Set to "json" to auto-parse JSON from the LLM response (best-effort: the model is asked for JSON and the reply is parsed as well as it can be).
+- **structuredOutput**: { schema, name?, description? } — NATIVE schema-constrained output. The provider guarantees the reply matches your JSON Schema and response is the parsed object; otherwise the call fails ('structured_output_invalid' / 'structured_output_truncated' / 'capability_unsupported_on_model'). Use additionalProperties:false and list every property in required. Prefer this over responseType:"json" whenever you have a schema.
+- **effort**: 'low'|'medium'|'high' — how hard the model works; honoured by both Claude and ChatGPT.
 - **thinking**: Enable extended thinking — true for default, or { budget_tokens: N } for Claude / { effort: 'low'|'medium'|'high' } for ChatGPT.
 - **files**: One or more File objects to include with the request (for multimodal models).
 

@@ -11,100 +11,15 @@ import { inspectTokenStore } from '../../../middleware/tokens/inspectTokenStore.
 import { validateAppFiles as runFileValidation } from '../services/appValidationService.mjs'
 import { askAppManifestSkeleton, askAppScaffoldFiles, askAppProtectedScaffoldFiles, ASKAPP_INDEX_MODULES, PROBE_HOOK_STUB } from '../askAppTemplate.mjs'
 import { identityOf, stampCreated, stampFork } from '../../../common/helpers/provenance.mjs'
+import { assertTargetApp } from '../services/creatorTargetGuards.mjs'
+import { SNAPSHOT_COLLECTION, normalizeFileMap, hashFileMap, newSnapshotId, authorOf } from '../services/appSnapshotService.mjs'
 
 import { fileURLToPath } from 'url'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-const buildFolderTree = async (dirPath, relativeTo) => {
-  const entries = await fs.promises.readdir(dirPath, { withFileTypes: true })
-  const tree = []
-  for (const entry of entries) {
-    const fullPath = path.join(dirPath, entry.name)
-    const relPath = path.relative(relativeTo, fullPath)
-    if (entry.isDirectory()) {
-      tree.push({ name: entry.name, path: relPath, type: 'folder', children: await buildFolderTree(fullPath, relativeTo) })
-    } else {
-      tree.push({ name: entry.name, path: relPath, type: 'file' })
-    }
-  }
-  tree.sort((a, b) => {
-    if (a.type !== b.type) return a.type === 'folder' ? -1 : 1
-    return a.name.localeCompare(b.name)
-  })
-  return tree
-}
-
-const collectFilePaths = (tree, out = []) => {
-  for (const node of tree) {
-    if (node.type === 'file') out.push(node.path)
-    else if (node.children) collectFilePaths(node.children, out)
-  }
-  return out
-}
-
-// On cloud hosts (Azure/AWS/…) the local disk under the repo root is a NON-authoritative, per-instance
-// cache — files an app owns live in the cloud store, and may be absent locally (fresh instance, eviction,
-// a best-effort local write that failed). So listing/zipping an app's files by reading the local FS
-// (fs.promises) silently misses files. These helpers read via the CONNECTOR (dsManager) for cloud
-// backends, falling back to the local FS only for the 'local'/'glitch' backends where the disk IS
-// authoritative. See freezr_askapp_sharing_summary.md (Azure file-visibility fix).
-const usesLocalDisk = (appFS) => {
-  const type = appFS && appFS.fsParams && appFS.fsParams.type
-  return !type || type === 'local' || type === 'glitch'
-}
-
-// Build a nested folder tree (same shape as buildFolderTree) from a FLAT list of relative file paths.
-const buildTreeFromPaths = (paths) => {
-  const root = []
-  const dirIndex = new Map() // relDir -> children array
-  const ensureDir = (relDir) => {
-    if (!relDir) return root
-    if (dirIndex.has(relDir)) return dirIndex.get(relDir)
-    const parts = relDir.split('/')
-    const parent = ensureDir(parts.slice(0, -1).join('/'))
-    const children = []
-    parent.push({ name: parts[parts.length - 1], path: relDir, type: 'folder', children })
-    dirIndex.set(relDir, children)
-    return children
-  }
-  for (const p of (paths || [])) {
-    if (!p) continue
-    const norm = String(p).replace(/\\/g, '/').replace(/^\/+/, '')
-    if (!norm) continue
-    const parts = norm.split('/')
-    ensureDir(parts.slice(0, -1).join('/')).push({ name: parts[parts.length - 1], path: norm, type: 'file' })
-  }
-  const sortTree = (nodes) => {
-    nodes.sort((a, b) => (a.type !== b.type ? (a.type === 'folder' ? -1 : 1) : a.name.localeCompare(b.name)))
-    for (const n of nodes) if (n.children) sortTree(n.children)
-    return nodes
-  }
-  return sortTree(root)
-}
-
-// All app file paths (relative), authoritative: connector for cloud, local FS for local/glitch.
-const listAppFilePaths = async (appFS) => {
-  if (!usesLocalDisk(appFS) && typeof appFS.readAppDir === 'function') {
-    const entries = await appFS.readAppDir('') // cloud connectors return a flat recursive list
-    return (entries || []).map((e) => String(e).replace(/\\/g, '/').replace(/^\/+/, '')).filter(Boolean)
-  }
-  const rootAbsPath = path.resolve(appFS.pathToFile(''))
-  if (!fs.existsSync(rootAbsPath)) return []
-  return collectFilePaths(await buildFolderTree(rootAbsPath, rootAbsPath)).map((p) => p.replace(/\\/g, '/'))
-}
-
-// All app files as {relPath: Uint8Array} for zipping — bytes read via readAppFile (connector-backed).
-const collectAppFileBuffers = async (appFS) => {
-  const result = {}
-  for (const rel of await listAppFilePaths(appFS)) {
-    try {
-      const buf = await appFS.readAppFile(rel, { doNotToString: true })
-      if (buf != null) result[rel] = new Uint8Array(Buffer.isBuffer(buf) ? buf : Buffer.from(buf))
-    } catch (e) { console.warn('collectAppFileBuffers: could not read', rel, e.message) }
-  }
-  return result
-}
+// Folder listing / file collection helpers live in appFileCollector.mjs (shared with snapshotController).
+import { buildFolderTree, usesLocalDisk, buildTreeFromPaths, listAppFilePaths, collectAppFileBuffers } from '../services/appFileCollector.mjs'
 
 const TEXT_EXTENSIONS = new Set(['html', 'htm', 'css', 'js', 'mjs', 'json', 'md', 'txt', 'svg', 'xml', 'csv', 'yaml', 'yml'])
 const isTextFile = (filePath) => {
@@ -848,7 +763,7 @@ export const createCreatorApiController = () => {
       const errors = []
       const srcFSCache = {}
       for (const s of sources) {
-        if (!s || !s.app || !s.path || String(s.app).includes('..') || String(s.path).includes('..')) {
+        if (!s || !s.app || !s.path || !assertTargetApp(s.app).ok || String(s.path).includes('..')) {
           errors.push({ ...(s || {}), error: 'invalid source' }); continue
         }
         try {
@@ -1044,6 +959,9 @@ export const createCreatorApiController = () => {
       if (!appName || !filePath) {
         return sendFailure(res, 'app_name and file_path are required.', 'creatorApiController.uploadAppFile', 400)
       }
+      // Multipart: the body is parsed after the route's rejectInvalidTargetApps runs, so check here.
+      const appCheck = assertTargetApp(appName)
+      if (!appCheck.ok) return sendFailure(res, appCheck.error, 'creatorApiController.uploadAppFile', appCheck.status)
       if (filePath.includes('..')) {
         return sendFailure(res, 'Invalid file path.', 'creatorApiController.uploadAppFile', 400)
       }
@@ -1251,11 +1169,28 @@ export const createCreatorApiController = () => {
         console.warn('Error migrating appUpdates:', e.message)
       }
 
+      // Snapshots follow the app too. The zips stay where they are (fileName holds the full
+      // user-files path); only the owning app name moves. A restore after a rename rewrites the
+      // manifest identifier on the way back (see appSnapshotService.alignManifestIdentifier).
+      try {
+        const snapshotsDb = await userDS.getorInitDb({ ...creatorOac, collection_name: SNAPSHOT_COLLECTION }, { freezrPrefs })
+        if (snapshotsDb) {
+          const snaps = await snapshotsDb.query({ appName: oldAppName }, {})
+          for (const record of (snaps || [])) {
+            if (record._id) await snapshotsDb.update(record._id, { appName: newAppName }, { replaceAllFields: false })
+          }
+        }
+      } catch (e) {
+        console.warn('Error migrating appSnapshots:', e.message)
+      }
+
       // Phase 6: Add rename history entry under new app name
       try {
         const appUpdatesDb = await userDS.getorInitDb({ ...creatorOac, collection_name: 'appUpdates' }, { freezrPrefs })
         if (appUpdatesDb) {
           await appUpdatesDb.create(null, {
+            uid: crypto.randomUUID(),
+            author: authorOf(req, res),
             appName: newAppName,
             action: 'renamed',
             previousAppName: oldAppName,
@@ -1418,6 +1353,33 @@ export const createCreatorApiController = () => {
         }
       }
 
+      // 5b. Register the publish zip as a snapshot too: the Versions tab lists it, it is never
+      // pruned, and it can be compared against / restored like any other snapshot.
+      try {
+        const snapshotsDb = await userDS.getorInitDb({ ...creatorOac, collection_name: SNAPSHOT_COLLECTION }, { freezrPrefs })
+        if (snapshotsDb) {
+          const normalized = normalizeFileMap(fileBuffers)
+          const snapshotId = 'pub-' + newSnapshotId()
+          await snapshotsDb.create(snapshotId, {
+            appName,
+            snapshotId,
+            reason: 'published',
+            label: 'Published v' + version,
+            version,
+            release_notes: releaseNotes || null,
+            fileName: zipFileName,
+            contentHash: hashFileMap(normalized),
+            fileCount: Object.keys(normalized).length,
+            byteSize: zipBuffer.length,
+            pinned: true,
+            aliases: [],
+            timestamp: now.toISOString()
+          }, {})
+        }
+      } catch (e) {
+        console.warn('publishApp: could not register snapshot record:', e.message)
+      }
+
       // 6. Manage public records (versioning)
       const publicRecordsDb = res.locals?.freezr?.publicRecordsDb
       if (!publicRecordsDb) return sendFailure(res, 'Could not access public records database.', FUNC, 500)
@@ -1547,6 +1509,8 @@ export const createCreatorApiController = () => {
         const appUpdatesDb = await userDS.getorInitDb({ ...creatorOac, collection_name: 'appUpdates' }, { freezrPrefs })
         if (appUpdatesDb) {
           await appUpdatesDb.create(null, {
+            uid: crypto.randomUUID(),
+            author: authorOf(req, res),
             appName,
             action: 'published',
             version,
@@ -1731,6 +1695,8 @@ export const createCreatorApiController = () => {
         const appUpdatesDb = await userDS.getorInitDb({ ...creatorOac, collection_name: 'appUpdates' }, { freezrPrefs })
         if (appUpdatesDb) {
           await appUpdatesDb.create(null, {
+            uid: crypto.randomUUID(),
+            author: authorOf(req, res),
             appName,
             action: 'unpublished',
             version: unpublishedVersion,

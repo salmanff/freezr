@@ -127,6 +127,8 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    * - Record object
    */
   router.get('/read/:app_table/:data_object_id', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, resolveRequestorDelegates, addRightsToTable, addOwnerAppTable, cepsApiController.readRecordById)
+  // Ids containing '/' (e.g. an uploaded file's path) — see dataObjectIdFromParams.
+  router.get('/read/:app_table/:data_object_start/*', setupGuard, getAppTokenInfo, apiRateLimit, addDataOwnerToContext, addOwnerPermDBs, resolveRequestorDelegates, addRightsToTable, addOwnerAppTable, cepsApiController.readRecordById)
 
   /**
    * GET /ceps/query/:app_table
@@ -175,6 +177,8 @@ export const createCepsApiRoutes = ({ dsManager, freezrPrefs, freezrStatus, logM
    */
   // Owner pinned to requestor — same reasoning as POST /ceps/write above.
   router.put('/update/:app_table/:data_object_id', setupGuard, getAppTokenInfo, rejectWritesForReadOnlyTokens, apiRateLimit, addRequestorAsDataOwner, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, cepsApiController.updateRecord)
+  // Ids containing '/' (e.g. an uploaded file's path) — see dataObjectIdFromParams.
+  router.put('/update/:app_table/:data_object_start/*', setupGuard, getAppTokenInfo, rejectWritesForReadOnlyTokens, apiRateLimit, addRequestorAsDataOwner, addOwnerPermDBs, addRightsToTable, addOwnerAppTable, cepsApiController.updateRecord)
 
   /**
    * DELETE /ceps/delete/:app_table/:data_object_id

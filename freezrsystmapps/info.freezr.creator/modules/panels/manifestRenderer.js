@@ -3,7 +3,7 @@ import { showError, clearError } from '../showError.js'
 import { addHistoryEntry, updateHistoryEntry, fetchAppHistory } from '../historyActions.js'
 import { fetchFolderTree } from '../fileTree.js'
 import { calculateProjectCost } from '../priceService.js'
-import { escHtml, updateAppFromFiles } from '../utils.js'
+import { escHtml, updateAppFromFiles, recordMeta } from '../utils.js'
 
 const MANIFEST_PATH = 'manifest.json'
 const PERMISSION_TYPES_PATH = 'modules/panels/permissionTypes.json'
@@ -186,7 +186,7 @@ export const setManifestFromObject = (appName, manifestObject, setState) => {
 
 const recordManualFileUpdate = async (appName, content, existingFileUpdateId) => {
   const timestamp = new Date().toISOString()
-  const data = { appName, path: 'manifest.json', action: 'upsert', content, timestamp }
+  const data = { ...recordMeta(), appName, path: 'manifest.json', action: 'upsert', content, timestamp }
   try {
     if (existingFileUpdateId) {
       await freezr.update('fileUpdates', existingFileUpdateId, data)

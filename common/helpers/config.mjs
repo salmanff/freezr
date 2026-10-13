@@ -239,8 +239,11 @@ export const validCollectionName = (collectionName, isFileRecord) => {
 export const tempAppNameFromFileName = (originalname) => {
   let name = ''
   const parts = originalname.split('.')
-  if (endsWith(parts[(parts.length - 2)], '-main')) {
-    parts[(parts.length - 2)] = parts[(parts.length - 2)].slice(0, -7)
+  // GitHub branch downloads are named <repo>-main.zip / <repo>-master.zip - drop the branch suffix
+  for (const suffix of ['-main', '-master']) {
+    if (endsWith(parts[(parts.length - 2)], suffix)) {
+      parts[(parts.length - 2)] = parts[(parts.length - 2)].slice(0, -suffix.length)
+    }
   }
   parts.splice(parts.length - 1, 1)
   name = parts.join('.')

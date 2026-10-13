@@ -293,9 +293,16 @@ describe('Config Module - Utility Functions', () => {
   describe('tempAppNameFromFileName', () => {
     it('should extract app name from filename', () => {
       expect(tempAppNameFromFileName('myapp.zip')).to.equal('myapp');
-      expect(tempAppNameFromFileName('myapp-main.zip')).to.equal('mya');
       expect(tempAppNameFromFileName('myapp.app')).to.equal('myapp');
-      expect(tempAppNameFromFileName('myapp-main.app')).to.equal('mya');
+    });
+
+    it('should drop a GitHub branch suffix (-main / -master)', () => {
+      expect(tempAppNameFromFileName('myapp-main.zip')).to.equal('myapp');
+      expect(tempAppNameFromFileName('myapp-main.app')).to.equal('myapp');
+      expect(tempAppNameFromFileName('myapp-master.zip')).to.equal('myapp');
+      expect(tempAppNameFromFileName('com.salmanff.orbit-main.zip')).to.equal('com.salmanff.orbit');
+      // only a trailing suffix counts
+      expect(tempAppNameFromFileName('my-mainapp.zip')).to.equal('my-mainapp');
     });
 
     it('should handle complex filenames', () => {

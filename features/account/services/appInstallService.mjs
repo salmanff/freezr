@@ -40,9 +40,108 @@ import {
 } from './accountPermissionService.mjs'
 
 /**
+ * An install failure. `message` (plus `cause`) carries the full detail for the server log;
+ * `userMessage` is what the person installing sees - no server paths or errno codes.
+ * sendFailure (adapters/http/responses.mjs) sends userMessage, code and statusCode.
+ */
+export class InstallError extends Error {
+  constructor (code, userMessage, { cause, detail, step, appName, statusCode = 500 } = {}) {
+    super(detail || userMessage, cause ? { cause } : undefined)
+    this.name = 'InstallError'
+    this.code = code
+    this.userMessage = userMessage
+    this.statusCode = statusCode
+    this.step = step
+    this.appName = appName
+  }
+}
+
+// What each install step is doing, for the message a failure shows the user
+const INSTALL_STEP_DESCRIPTIONS = {
+  extract_zip: 'unpacking the zip file',
+  check_app_name: 'checking the app name',
+  setup_app_storage: 'opening the app storage',
+  copy_app_files: 'saving the app files',
+  update_permissions: 'updating the app permissions',
+  job_bundles: 'preparing the app jobs',
+  update_app_list: 'adding the app to your app list',
+  local_functions: 'installing the app functions',
+  preload_databases: 'setting up the app databases',
+  read_manifest: 'reading the app manifest'
+}
+
+// Wrap an unexpected failure as an InstallError naming the step it failed at
+const toInstallError = (error, context, verb = 'Installing') => {
+  if (error instanceof InstallError) return error
+  const step = context.step || 'unknown'
+  const appName = context.realAppName || context.tempAppName || 'the app'
+  const doing = INSTALL_STEP_DESCRIPTIONS[step]
+  const isZipStep = step === 'extract_zip'
+  return new InstallError(
+    isZipStep ? 'zip_extract_failed' : 'install_failed',
+    `${verb} ${appName} failed${doing ? ' while ' + doing : ''}. ` +
+      (isZipStep ? 'Try again - if it keeps failing, the zip file may be damaged.' : 'The server log has the details.'),
+    { cause: error, detail: `${verb.toLowerCase()} ${appName} failed at step "${step}": ${error?.message}`, step, appName }
+  )
+}
+
+// One install / update-from-files per user+app at a time. Concurrent installs of the same app share
+// the same tempapps/<app> and apps/<app> folders, and each deletes the folder the other is extracting
+// into (seen as ENOTEMPTY / ENOENT on Azure, 2026-10-05). In-process is enough because freezr runs as
+// a single instance. A lock older than INSTALL_LOCK_STALE_MS is assumed to belong to a hung install.
+const INSTALL_LOCK_STALE_MS = 15 * 60 * 1000
+const installsInProgress = new Map() // 'userId/appName' -> { startedAt }
+
+const acquireInstallLock = (context, appName) => {
+  const key = context.userId + '/' + appName
+  if (!context.heldInstallLocks) context.heldInstallLocks = []
+  if (context.heldInstallLocks.some(held => held.key === key)) return
+  const existing = installsInProgress.get(key)
+  if (existing) {
+    const ageMs = Date.now() - existing.startedAt
+    if (ageMs < INSTALL_LOCK_STALE_MS) {
+      const ago = ageMs < 60 * 1000 ? Math.round(ageMs / 1000) + 's' : Math.round(ageMs / 60000) + ' min'
+      throw new InstallError(
+        'install_in_progress',
+        `An install of ${appName} is already running (started ${ago} ago). Wait for it to finish, then refresh the app list.`,
+        { step: 'lock', appName, statusCode: 409 }
+      )
+    }
+    console.warn('⚠️ install lock for ' + key + ' is ' + Math.round(ageMs / 60000) + ' min old - treating it as stale')
+  }
+  const entry = { startedAt: Date.now() }
+  installsInProgress.set(key, entry)
+  context.heldInstallLocks.push({ key, entry })
+}
+
+const holdsInstallLock = (context, appName) =>
+  (context.heldInstallLocks || []).some(held => held.key === context.userId + '/' + appName)
+
+const releaseInstallLocks = (context) => {
+  for (const { key, entry } of context.heldInstallLocks || []) {
+    // Only release our own entry - a stale lock may since have been taken over by a newer install
+    if (installsInProgress.get(key) === entry) installsInProgress.delete(key)
+  }
+  context.heldInstallLocks = []
+}
+
+// Temp folder cleanup never fails an install - the app is already installed (or the original error
+// is the one worth reporting), so a leftover temp folder is only worth a warning.
+const removeTempFolder = async (context) => {
+  try {
+    await deleteLocalFolderAndContents(getTempFolderPath(context))
+  } catch (err) {
+    const msg = '⚠️ could not delete temp install folder (continuing): ' + err.message
+    if (context.errorLogger?.warn) context.errorLogger.warn(msg)
+    else console.warn(msg)
+  }
+}
+
+/**
  * Installation logic for a single user
  * Pure service function - no req/res dependencies
- * 
+ * Failures are thrown as InstallError (not logged here) - the caller logs and reports them.
+ *
  * @param {Object} context - Installation context with all required dependencies
  * @returns {Promise<Object>} Installation result
  */
@@ -50,77 +149,82 @@ export const oneUserInstallationProcess = async (context) => {
   try {
     // Step 1: Validate input
     validateInput(context)
-    
+
+    // The zip / URL name decides the temp folder - lock it before touching that folder
+    context.tempAppName = tempAppNameFromFileName(context.file.originalname)
+    acquireInstallLock(context, context.tempAppName)
+
     // Step 2: Extract and process zip file
+    context.step = 'extract_zip'
     await extractAndProcessZip(context)
-    
+
     // Step 3: Validate app name and manifest
+    context.step = 'check_app_name'
     await validateAppAndManifest(context)
-    
+    // The manifest name decides the apps/ folder - lock it too if it differs from the zip name
+    acquireInstallLock(context, context.realAppName)
+
     // Step 4: Setup app filesystem
+    context.step = 'setup_app_storage'
     await setupAppFilesystem(context)
-    
+
     // Step 5: Extract files to destination
+    context.step = 'copy_app_files'
     await extractFilesToDestination(context)
-    
+
     // Step 6: Process manifest and permissions
+    context.step = 'update_permissions'
     await processManifestAndPermissions(context, true)
 
     // Step 6.5: Pre-zip each declared job's folder for serverless (the user's OWN app code, so a
     // serverless run needs no admin trust; supports Tier-2 deps). Non-fatal.
+    context.step = 'job_bundles'
     await storeJobBundles(context)
     // Step 6.6: if an admin re-installed and a trusted local job's code changed, disable its trust
     // (re-trust required). Only the trusting admin's own re-install acts.
     await untrustChangedJobsOnReinstall(context)
 
     // Step 7: Update app list
+    context.step = 'update_app_list'
     await updateAppList(context)
-    
+
     // Step 8: Handle local 3rd party serverless functions (3PFunctions) if needed
+    context.step = 'local_functions'
     await handleLocal3PFunctions(context)
-    
+
     // Step 9: Preload databases
+    context.step = 'preload_databases'
     await preloadDatabases(context)
 
     // Clean up temp folder
-    await deleteLocalFolderAndContents(getTempFolderPath(context))
-    
+    await removeTempFolder(context)
+
     return buildResponse(context)
   } catch (error) {
-    console.error('❌ oneUserInstallationProcess - error', error)
-    
-    // Clean up temp folder on error
-    try {
-      await deleteLocalFolderAndContents(getTempFolderPath(context))
-    } catch (err) {
-      console.error('❌ Error deleting temp folder', err)
-    }
-    
-    // Log error
-    context.errorLogger.error('oneUserInstallationProcess - error', {
-      error,
-      function: 'oneUserInstallationProcess',
-      appInstaled: context.realAppName,
-      tempAppName: context.tempAppName
-    })
+    // Clean up temp folder on error - unless the lock was refused, as the folder is then another
+    // install's work in progress
+    if (context.tempAppName && holdsInstallLock(context, context.tempAppName)) await removeTempFolder(context)
 
-    throw error
+    throw toInstallError(error, context)
+  } finally {
+    releaseInstallLocks(context)
   }
 }
 
 // Step 1: Validate input
 const validateInput = (context) => {
+  const invalid = (message) => new InstallError('invalid_request', message, { step: 'validate', statusCode: 400 })
   if (!context.userId) {
-    throw new Error('User ID is required')
+    throw invalid('User ID is required')
   }
   if (!context.file) {
-    throw new Error('File is required')
+    throw invalid('File is required')
   }
   if (!context.file.originalname) {
-    throw new Error('File name is required')
+    throw invalid('File name is required')
   }
   if (context.file.originalname.length < 5 || context.file.originalname.substr(-4) !== '.zip') {
-    throw new Error('File must be a zip file')
+    throw invalid('File must be a zip file')
   }
 
   const requiredProps = ['userDS', 'ownerPermsDb', 'userAppListDb']
@@ -133,9 +237,8 @@ const validateInput = (context) => {
 
 // Step 2: Extract and process zip file
 const extractAndProcessZip = async (context) => {
-  context.tempAppName = tempAppNameFromFileName(context.file.originalname)
   const tempFolderPath = getTempFolderPath(context)
-  
+
   // Clean and extract to temp folder
   await deleteLocalFolderAndContents(tempFolderPath)
   await extractZipToLocalFolder(context.file.buffer, tempFolderPath, context.tempAppName)
@@ -174,12 +277,16 @@ const validateAppAndManifest = async (context) => {
 
   // Validate app name
   if (!context.realAppName || context.realAppName.length < 1) {
-    throw new Error('App name missing - that is the name of the app zip file name before any spaces.')
+    throw new InstallError('app_name_invalid', 'App name missing - that is the name of the app zip file name before any spaces.', { step: 'check_app_name', statusCode: 400 })
   }
-  
+
   if (isSystemApp(context.realAppName) || !validAppName(context.realAppName)) {
-    console.error('❌ validateAppAndManifest - app name not allowed', { realAppName: context.realAppName, issyss: isSystemApp(context.realAppName), isvalid: validAppName(context.realAppName) })
-    throw new Error('App name not allowed: ' + context.realAppName)
+    throw new InstallError('app_name_invalid', 'App name not allowed: ' + context.realAppName, {
+      detail: 'App name not allowed: ' + context.realAppName + ' (isSystemApp: ' + isSystemApp(context.realAppName) + ', validAppName: ' + validAppName(context.realAppName) + ')',
+      step: 'check_app_name',
+      appName: context.realAppName,
+      statusCode: 400
+    })
   }
 
   // Check for app name prefix collisions to prevent cross-app data access.
@@ -195,9 +302,11 @@ const validateAppAndManifest = async (context) => {
         const existingName = existing.app_name
         if (!existingName || existingName === newName) continue
         if (newName.startsWith(existingName + '.') || existingName.startsWith(newName + '.')) {
-          throw new Error(
+          throw new InstallError(
+            'app_name_conflict',
             `App name "${newName}" conflicts with existing app "${existingName}" — ` +
-            'one name is a dot-prefix of the other, which would allow cross-app data access.'
+            'one name is a dot-prefix of the other, which would allow cross-app data access.',
+            { step: 'check_app_name', appName: newName, statusCode: 409 }
           )
         }
       }
@@ -258,8 +367,7 @@ const extractFilesToDestination = async (context) => {
   }
   
   // Clean up temp folder
-  const tempFolderPath = getTempFolderPath(context)
-  await deleteLocalFolderAndContents(tempFolderPath)
+  await removeTempFolder(context)
 }
 
 // Step 6.5: For each job the manifest declares, build a small self-contained zip of its folder
@@ -644,8 +752,11 @@ const downloadFileFromUrl = async (fileUrl) => {
     
     return buffer
   } catch (error) {
-    console.error('❌ downloadFileFromUrl - error', error)
-    throw new Error(`Failed to download file from URL: ${error.message}`)
+    throw new InstallError('download_failed', `Could not download the app zip from ${fileUrl}: ${error.message}`, {
+      cause: error,
+      step: 'download',
+      statusCode: 502
+    })
   }
 }
 
@@ -659,57 +770,37 @@ const downloadFileFromUrl = async (fileUrl) => {
  * @returns {Promise<Object>} Installation result
  */
 export const installAppFromUrl = async (context) => {
-  try {
-    // Validate URL and app name
-    if (!context.appUrl) {
-      throw new Error('App URL is required')
-    }
-    if (!context.appName) {
-      throw new Error('App name is required')
-    }
-
-    // Download file from URL
-    // console.log('📥 installAppFromUrl service - Downloading app from URL:', context.appUrl)
-    const fileBuffer = await downloadFileFromUrl(context.appUrl)
-    // console.log('📥 installAppFromUrl service - File downloaded, size:', fileBuffer.length, 'bytes')
-
-    // Create file object for installation process
-    context.file = {
-      originalname: context.appName + '.zip',
-      buffer: fileBuffer
-    }
-    context.installSource = 'installAppFromUrl'
-
-    // Call the standard installation process
-    const result = await oneUserInstallationProcess(context)
-
-    context.errorLogger.log('install app success', {
-      function: 'installAppFromUrl',
-      appUrl: context.appUrl,
-      appInstalName: context.appName
-    })
-    return result
-
-  } catch (error) {
-    console.error('❌ installAppFromUrl - error', error)
-    
-    // Log error
-    context.errorLogger.error('installAppFromUrl - error', {
-      error,
-      function: 'installAppFromUrl',
-      appUrl: context.appUrl,
-      appInstalName: context.appName
-    })
-    
-    throw error
+  // Validate URL and app name
+  if (!context.appUrl) {
+    throw new InstallError('invalid_request', 'App URL is required', { step: 'validate', statusCode: 400 })
   }
+  if (!context.appName) {
+    throw new InstallError('invalid_request', 'App name is required', { step: 'validate', statusCode: 400 })
+  }
+
+  // Download file from URL
+  const fileBuffer = await downloadFileFromUrl(context.appUrl)
+
+  // Create file object for installation process
+  context.file = {
+    originalname: context.appName + '.zip',
+    buffer: fileBuffer
+  }
+  context.installSource = 'installAppFromUrl'
+
+  // Call the standard installation process (failures are thrown as InstallError for the caller to log)
+  const result = await oneUserInstallationProcess(context)
+
+  context.errorLogger.info('install app success', {
+    function: 'installAppFromUrl',
+    appUrl: context.appUrl,
+    appInstalName: context.appName
+  })
+  return result
 }
 
 const shouldUseOffThreadExtraction = (context) => {
-  const should = context.installSource === 'installAppFromUrl' && 
-  ['dropbox', 'googleDrive', 'fdsFairOs'].includes(context.appFS.fsParams.type)
-  console.log('🔍 shouldUseOffThreadExtraction', { installSource: context.installSource, type: context.appFS.fsParams.type, should })
-  return context.installSource === 'installAppFromUrl' && 
+  return context.installSource === 'installAppFromUrl' &&
          ['dropbox', 'googleDrive', 'fdsFairOs'].includes(context.appFS.fsParams.type)
 }
 
@@ -764,8 +855,7 @@ const offThreadExtraction = async (params) => {
         setTimeout(() => {
           offThreadExtraction(params).catch(err => {
             console.error('handleOffThreadExtraction: Error in background extraction:', err)
-            params.errorLogger.error('handleOffThreadExtraction: Error in background extraction:', {
-              error: err,
+            params.errorLogger.error('handleOffThreadExtraction: Error in background extraction:', err, {
               function: 'handleOffThreadExtraction',
               appInstalName: params.appFS.appName,
               background: true
@@ -788,8 +878,7 @@ const offThreadExtraction = async (params) => {
             // Call offThreadExtraction in background (fire and forget)
             offThreadExtraction(params).catch(err => {
               console.error('handleOffThreadExtraction: Error in background extraction:', err)
-              params.errorLogger.error('handleOffThreadExtraction: Error in background extraction:', {
-                error: err,
+              params.errorLogger.error('handleOffThreadExtraction: Error in background extraction:', err, {
                 function: 'handleOffThreadExtraction',
                 appInstalName: params.appFS.appName,
                 background: true
@@ -930,8 +1019,7 @@ const handleOffThreadExtraction = (context) => {
   }).catch(err => {
     console.error('handleOffThreadExtraction: Error in background extraction:', err)
     // Log error but don't throw - this is fire-and-forget
-    context.errorLogger.error('handleOffThreadExtraction: Error in background extraction:', {
-      error: err,
+    context.errorLogger.error('handleOffThreadExtraction: Error in background extraction:', err, {
       function: 'handleOffThreadExtraction',
       appInstalName: context.realAppName,
       background: true
@@ -956,27 +1044,34 @@ export const updateAppFromFiles = async (context) => {
   try {
     // Step 1: Validate input
     validateUpdateInput(context)
-    
+    // Shares the apps/<app> folder with installs - so one at a time per user+app
+    acquireInstallLock(context, context.realAppName)
+
     // Step 2: Setup app filesystem
+    context.step = 'setup_app_storage'
     await setupAppFilesystemForUpdate(context)
-    
+
     // Step 3: Clean local folder if using cloud storage
     await cleanLocalFolderIfNeeded(context)
-    
+
     // Step 4: Read and process manifest
+    context.step = 'read_manifest'
     await readAndProcessManifest(context)
-    
+
     // Step 5: Process manifest and permissions
+    context.step = 'update_permissions'
     await processManifestAndPermissions(context, true)
 
     // Step 5.5: Rebuild each job's serverless zip from the updated files (important dev workflow —
     // edit job code locally, update-from-files, redeploy picks it up). Non-fatal.
+    context.step = 'job_bundles'
     await storeJobBundles(context)
     // Step 5.6: if an admin re-installed and a trusted local job's code changed, disable its trust
     // (re-trust required). Only the trusting admin's own re-install acts.
     await untrustChangedJobsOnReinstall(context)
 
     // Step 6: Update app list
+    context.step = 'update_app_list'
     await updateAppList(context)
 
     return {
@@ -994,32 +1089,27 @@ export const updateAppFromFiles = async (context) => {
       }
     }
   } catch (error) {
-    console.error('❌ updateAppFromFiles - error', error)
-    
-    // Log error
-    context.errorLogger.error('updateAppFromFiles - error', {
-      error,
-      function: 'updateAppFromFiles',
-      appInstalName: context.realAppName
-    })
-    
-    throw error
+    // Thrown as InstallError (not logged here) - the caller logs and reports it
+    throw toInstallError(error, context, 'Updating')
+  } finally {
+    releaseInstallLocks(context)
   }
 }
 
 // Step 1: Validate input for update
 const validateUpdateInput = (context) => {
+  const invalid = (message) => new InstallError('invalid_request', message, { step: 'validate', appName: context.realAppName, statusCode: 400 })
   if (!context.userId) {
-    throw new Error('User ID is required')
+    throw invalid('User ID is required')
   }
   if (!context.realAppName) {
-    throw new Error('App name is required')
+    throw invalid('App name is required')
   }
   if (!validAppName(context.realAppName)) {
-    throw new Error('App name is invalid: ' + context.realAppName)
+    throw invalid('App name is invalid: ' + context.realAppName)
   }
   if (isSystemApp(context.realAppName)) {
-    throw new Error('Cannot update system app: ' + context.realAppName)
+    throw invalid('Cannot update system app: ' + context.realAppName)
   }
   if (!context.userDS) {
     throw new Error('User data store is required')

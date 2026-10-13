@@ -937,6 +937,19 @@ function USER_DS (owner, env) {
 
         if (endpath.slice(-3) === '.js') res.setHeader('content-type', 'application/javascript')
         if (endpath.slice(-4) === '.css') res.setHeader('content-type', 'text/css')
+        // A cache hit or a remote-connector fetch below goes out through res.send(buffer), which
+        // has no filename to infer a type from, so Express sent application/octet-stream and the
+        // browser DOWNLOADED an html file instead of showing it (production only - the cache is
+        // off in development). Set the type from the extension up front: res.type adds the
+        // charset for text types, and res.sendFile (the local-disk branch) leaves an already-set
+        // header alone. An extension Express does not know keeps the old behaviour.
+        if (!res.getHeader('content-type') && typeof res.type === 'function') {
+          const ext = path.extname(endpath)
+          if (ext) {
+            res.type(ext)
+            if (res.getHeader('content-type') === 'application/octet-stream') res.removeHeader('content-type')
+          }
+        }
 
         // Check new cache first (for non-system apps and cacheable files)
         if (!isSystemApp && ds.cache && isCacheableFile(endpath)) {
@@ -1057,6 +1070,19 @@ function USER_DS (owner, env) {
 
         if (endpath.slice(-3) === '.js') res.setHeader('content-type', 'application/javascript')
         if (endpath.slice(-4) === '.css') res.setHeader('content-type', 'text/css')
+        // A cache hit or a remote-connector fetch below goes out through res.send(buffer), which
+        // has no filename to infer a type from, so Express sent application/octet-stream and the
+        // browser DOWNLOADED an html file instead of showing it (production only - the cache is
+        // off in development). Set the type from the extension up front: res.type adds the
+        // charset for text types, and res.sendFile (the local-disk branch) leaves an already-set
+        // header alone. An extension Express does not know keeps the old behaviour.
+        if (!res.getHeader('content-type') && typeof res.type === 'function') {
+          const ext = path.extname(endpath)
+          if (ext) {
+            res.type(ext)
+            if (res.getHeader('content-type') === 'application/octet-stream') res.removeHeader('content-type')
+          }
+        }
 
         // Check new cache first (for non-system apps and cacheable files)
         if (!isSystemApp && ds.cache && isCacheableFile(endpath)) {
@@ -1350,6 +1376,19 @@ function USER_DS (owner, env) {
 
         if (endpath.slice(-3) === '.js') res.setHeader('content-type', 'application/javascript')
         if (endpath.slice(-4) === '.css') res.setHeader('content-type', 'text/css')
+        // A cache hit or a remote-connector fetch below goes out through res.send(buffer), which
+        // has no filename to infer a type from, so Express sent application/octet-stream and the
+        // browser DOWNLOADED an html file instead of showing it (production only - the cache is
+        // off in development). Set the type from the extension up front: res.type adds the
+        // charset for text types, and res.sendFile (the local-disk branch) leaves an already-set
+        // header alone. An extension Express does not know keeps the old behaviour.
+        if (!res.getHeader('content-type') && typeof res.type === 'function') {
+          const ext = path.extname(endpath)
+          if (ext) {
+            res.type(ext)
+            if (res.getHeader('content-type') === 'application/octet-stream') res.removeHeader('content-type')
+          }
+        }
 
         // Helper to track local file copy (using userCache, not CacheManager directly)
         const trackLocalFileCopy = (size = 0) => {

@@ -69,7 +69,11 @@ export const createAppPageRoutes = ({ dsManager, freezrPrefs, freezrStatus }) =>
    */
   const redirectToIndex = (req, res) => {
     // onsole.log('redirectToIndex', req.path)
-    res.redirect('/apps' + req.path + '/index')
+    // Carry the query string across: req.path excludes it, so e.g. /apps/<app>?freezr_probe=… would
+    // otherwise lose its parameter. Only "?…" is appended to a same-origin path — the host can't change.
+    const queryStart = req.originalUrl.indexOf('?')
+    const query = queryStart >= 0 ? req.originalUrl.slice(queryStart) : ''
+    res.redirect('/apps' + req.path + '/index' + query)
   }
   
   /**

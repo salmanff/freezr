@@ -5,6 +5,33 @@ export const escHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&l
 // Records are fetched sorted by _date_modified (the Azure/Cosmos-indexed field),
 // then re-sorted locally by the creator's logical `timestamp` (ISO string) to
 // preserve app ordering. Falls back to _date_modified when timestamp is missing.
+// Creator-owned identity for every history record (appUpdates / fileUpdates). The datastore _id is
+// not fully ours (unified-db setups qualify ids with app/user), so chat export/import dedups on
+// this instead and only falls back to _id for records that predate it.
+export const newRecordUid = () => (globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : (Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12)))
+
+// uid + author for a new history record. Author is WHO wrote it and WHERE (user + server), kept
+// across export/import so a merged history shows whose entries are whose.
+export const recordMeta = () => ({
+  uid: newRecordUid(),
+  author: {
+    user: (typeof freezrMeta !== 'undefined' && freezrMeta && freezrMeta.userId) || null,
+    server: (typeof freezrMeta !== 'undefined' && freezrMeta && freezrMeta.serverAddress) || (typeof window !== 'undefined' ? window.location.origin : null)
+  }
+})
+
+// Short "user @ host" for an author object; empty when it is the current user on this server.
+export const authorTag = (author) => {
+  if (!author || !author.user) return ''
+  const me = (typeof freezrMeta !== 'undefined' && freezrMeta) ? freezrMeta : {}
+  const here = me.serverAddress || (typeof window !== 'undefined' ? window.location.origin : '')
+  const sameUser = author.user === me.userId
+  const sameServer = !author.server || !here || String(author.server).replace(/\/$/, '') === String(here).replace(/\/$/, '')
+  if (sameUser && sameServer) return ''
+  const host = author.server ? String(author.server).replace(/^https?:\/\//, '').replace(/\/$/, '') : ''
+  return author.user + (host && !sameServer ? ' @ ' + host : '')
+}
+
 export const tsOf = (r) => {
   const t = Date.parse(r && r.timestamp)
   return Number.isNaN(t) ? ((r && r._date_modified) || 0) : t
@@ -93,29 +120,15 @@ export const logLlmResult = (label, result) => {
 
 // --- AI access to this app (freezr_creator_selfcheck_plan_v1.md Part A/B) ---
 //
-// Files access is a standing per-app setting (DEFAULT ON): when on, each chat turn is given a
-// short-lived inspect token + URL so the assistant can fetch this app's page/source files
-// (used by providers able to fetch, and by any external agent the user hands the token to).
-// DATA access is never standing — the assistant must ask, and the user clicks Allow, per request.
-//
-// NOTE: deliberately NOT exposed in the UI. An app-builder assistant reading the app's own source
-// is simply what building means, so offering it as a choice would confuse more than it protects
-// (the meaningful consent is over DATA, which is asked for per request). The switch is kept as a
-// mechanism — set localStorage 'freezr_creator_files_access_<app>' to 'off' to disable it for an
-// app — so the capability can be revoked without a code change if a reason ever appears.
-const FILES_ACCESS_KEY = (appName) => 'freezr_creator_files_access_' + (appName || '_')
-export const getFilesAccessSetting = (appName) => {
-  try { return window.localStorage.getItem(FILES_ACCESS_KEY(appName)) !== 'off' } catch (e) { return true }
-}
-export const setFilesAccessSetting = (appName, isOn) => {
-  try {
-    if (isOn) window.localStorage.removeItem(FILES_ACCESS_KEY(appName))
-    else window.localStorage.setItem(FILES_ACCESS_KEY(appName), 'off')
-  } catch (e) { /* non-fatal */ }
-}
+// No token is ever put in a prompt: a token in a model's context is one injected web_fetch away
+// from leaking, and the connectors cannot fetch URLs anyway (self-check plan, B4). The chat
+// assistant looks at data through a data probe (dataProbe.js) and is given this app's permission
+// state as text (fetchGrantedMap). Inspection tokens remain for the manual "AI Inspection Token"
+// panel (a credential the user deliberately hands to an external agent) and for reading the
+// sample behind a write access_request, where the token never leaves the function that mints it.
+// See xplanations/freezr_creator_data_access_plan.md.
 
-// Mint a short-lived inspection token. `dataAccess` is 'read' | 'write' and only ever passed
-// after an explicit user consent click (see the access_request flow in chatService.js).
+// Mint a short-lived inspection token. `dataAccess` is 'read' | 'write'.
 export const mintInspectionToken = async (appName, { includeFiles = true, includeData = false, dataAccess = 'read', ttlMinutes } = {}) => {
   const body = { app_name: appName, include_files: includeFiles, include_data: includeData, data_access: dataAccess }
   if (ttlMinutes) body.ttl_minutes = ttlMinutes
@@ -124,19 +137,18 @@ export const mintInspectionToken = async (appName, { includeFiles = true, includ
   return result
 }
 
-// Files-only tokens are handed to the assistant on every chat turn, so reuse one until it is
-// close to expiry rather than minting per turn. Data tokens are never cached — each one is
-// bound to a specific consent click.
-const REUSE_IF_MINUTES_LEFT = 5
-const filesTokenCache = {}
-export const getFilesAccessToken = async (appName) => {
-  const cached = filesTokenCache[appName]
-  if (cached && (new Date(cached.expiresAt).getTime() - Date.now()) > REUSE_IF_MINUTES_LEFT * 60 * 1000) {
-    return cached
+// Pings the app's permission status (which of its declared permissions the user has granted).
+// Returns a map name -> granted(bool). A permission that is outdated/removed counts as NOT granted.
+// Ordinary creator auth — no token for the model involved.
+export const fetchGrantedMap = async (appName) => {
+  const r = await freezr.apiRequest('GET', '/feps/permissions/getall/' + encodeURIComponent(appName))
+  const list = Array.isArray(r) ? r : ((r && (r.perms || r.permissions || r.data)) || [])
+  const map = {}
+  for (const rec of list) {
+    const n = rec && (rec.name || rec.permission_name)
+    if (n) map[n] = !!rec.granted && rec.status !== 'removed' && !rec.outDated
   }
-  const minted = await mintInspectionToken(appName, { includeFiles: true, includeData: false })
-  filesTokenCache[appName] = minted
-  return minted
+  return map
 }
 
 export const saveFileToBackend = async (appName, filePath, content, action = 'upsert') => {

@@ -227,7 +227,40 @@ export const CAPABILITIES = {
   cache: { automatic: true }, // OpenAI caches on its own; nothing for a caller to set
   images: { generate: 'raster' },
   // The first capability where ChatGPT can and Claude cannot. See transcribe() / speak().
-  voice: { stt: true, tts: true }
+  voice: { stt: true, tts: true },
+  // Responses API `text.format` (json_schema, strict) — the provider constrains generation to
+  // the caller's schema. Declared at tier 1; a named model that rejects it is learned at tier 3
+  // by runWithDegrades and narrows to false. Added 2026-09-19.
+  structuredOutput: true
+}
+
+// The API's wording when it will not take a schema. Only consulted while the request actually
+// carries one (params.text.format), so a stray "schema" in an unrelated error cannot misfire.
+export const isStructuredOutputRejection = (err) => {
+  const msg = ((err && (err.message || String(err))) || '').toLowerCase()
+  return msg.includes('json_schema') || msg.includes('text.format') || msg.includes('response_format') ||
+    msg.includes('structured output') || msg.includes('schema')
+}
+
+// Same split as the Anthropic connector (see its classifyStructuredRejection for the reasoning):
+// a MODEL that refuses the feature is remembered; a SCHEMA the provider will not accept is the
+// caller's problem and must never poison the model's memo. OpenAI's schema errors read like
+// "Invalid schema for response_format 'x': In context=('properties', 'a'), 'minimum' is not
+// permitted" — the caller needs that sentence, so it travels back verbatim.
+export const classifyStructuredRejection = (err) => {
+  const msg = ((err && (err.message || String(err))) || '').toLowerCase()
+  const aboutModel = /(not supported|unsupported|not available|does not support)[^.]{0,60}\bmodel\b/.test(msg) ||
+    /\bmodel\b[^.]{0,60}(not supported|unsupported|does not support|not available)/.test(msg) ||
+    /structured outputs? (is|are) not (supported|available)/.test(msg)
+  return aboutModel ? 'model' : 'schema'
+}
+
+export const schemaRejectedError = (model, err) => {
+  const e = new Error(model + ' rejected the response schema: ' + ((err && err.message) || String(err)))
+  e.code = 'structured_output_schema_rejected'
+  e.status = 400
+  e.model = model
+  return e
 }
 
 // TIER 3 memo: verdicts LEARNED by trying, written by the degrade ladder in runWithDegrades.
@@ -268,7 +301,7 @@ export const getCapabilities = async ({ apiKey, model } = {}) => {
   }
   resolved.web = web
 
-  for (const key of ['vision', 'documents', 'effort']) {
+  for (const key of ['vision', 'documents', 'effort', 'structuredOutput']) {
     const memo = readProbeMemo(model, key)
     resolved[key] = memo === undefined ? UNKNOWN : memo
   }
@@ -499,17 +532,26 @@ The format must be exactly:
   }
 }
 Use the exact model ID strings I provided as keys.
-If you are unsure of the exact price for a model, omit that model instead of guessing 0.
-Never use 0 as a placeholder price unless the model is genuinely free.`
+If you do not KNOW a model's current published price, OMIT that model entirely — do not estimate
+it, infer it from its family, or use 0 as a placeholder. A wrong price is worse than no price:
+omitted models are reported as unpriced, guessed ones are billed as if they were true.`
 }
 
+// A GUESSED PRICE IS WORSE THAN NO PRICE. This fallback only runs when the official source does
+// not cover a model — i.e. exactly when the model is new and least likely to be known. Asking for
+// a "best estimate" produced $15/$60 per MTok for gpt-5.6-luna against a published $0.20/$1.20: a
+// 75x error, stored as fact and billed into every cost report downstream, silently. An unknown
+// model must come back UNKNOWN; the caller already turns that into `lookup_failed`, which surfaces
+// as "unpriced" instead of a number nobody can audit.
 const makeSingleModelPricingPrompt = (modelId) => {
-  return `You are a helpful assistant that provides current API pricing information.
-Return ONLY a valid JSON object (no markdown, no explanation) with the per-million-token pricing in USD for model "${modelId}".
-The format must be exactly:
+  return `You are a pricing lookup. Report only the CURRENT PUBLISHED per-million-token price in USD for model "${modelId}".
+Return ONLY a valid JSON object (no markdown, no explanation), in exactly this format:
 { "input": <price_per_million_input_tokens>, "output": <price_per_million_output_tokens> }
-If you are unsure of the exact price for "${modelId}", provide your best estimate based on the model family it belongs to.
-Never return 0 unless the model is genuinely free.`
+If you do not KNOW the current published price for "${modelId}" — because it is newer than your
+information, or because prices have changed since — return exactly { "unknown": true } instead.
+Do NOT estimate, do NOT infer from the model family, and do NOT interpolate from similar models:
+a wrong price is worse than no price, because it is billed as if it were true. Returning
+{ "unknown": true } is the correct, expected answer for any model you are not sure about.`
 }
 
 const fetchTextFromUrl = async (url) => {
@@ -690,6 +732,7 @@ export const getPricing = async ({ apiKey, targetModel = null }) => {
   }
 
   let models = null
+  if (parsed && parsed.unknown === true) return null // the model said it does not know — believe it
   if (targetModel && parsed) {
     if (parsed.input !== undefined && parsed.output !== undefined) {
       models = { [targetModel]: { input: parsed.input, output: parsed.output } }
@@ -987,7 +1030,7 @@ export const isResponsesUnsupported = (err) => {
 }
 
 const capabilityError = (model, capability) => {
-  const err = new Error(model + ' cannot reach the web')
+  const err = new Error(model + (capability === 'web' ? ' cannot reach the web' : ' does not support ' + capability))
   err.code = 'capability_unsupported_on_model'
   err.capability = capability
   err.model = model
@@ -1207,7 +1250,7 @@ export const streamAndCollect = async (client, params, { onEvent = null } = {}) 
  * Lossy on purpose — there is no web tool over there, which is why runWithDegrades settles
  * the web question BEFORE dropping to this transport.
  */
-const responsesParamsToChat = (params) => {
+export const responsesParamsToChat = (params) => {
   const contentFor = (content) => {
     if (typeof content === 'string' || !Array.isArray(content)) return content
     return content.map(part => {
@@ -1227,6 +1270,21 @@ const responsesParamsToChat = (params) => {
   const chat = { model: params.model, messages, stream: true, stream_options: { include_usage: true } }
   if (params.max_output_tokens) chat.max_completion_tokens = params.max_output_tokens
   if (params.reasoning?.effort && params.reasoning.effort !== 'none') chat.reasoning_effort = params.reasoning.effort
+  // The schema constraint MUST survive the transport change — dropping it here would return
+  // unconstrained text while the caller believes it was constrained. Same schema, the Chat
+  // Completions spelling: text.format -> response_format.json_schema.
+  const fmt = params.text?.format
+  if (fmt && fmt.type === 'json_schema') {
+    chat.response_format = {
+      type: 'json_schema',
+      json_schema: {
+        name: fmt.name,
+        ...(fmt.description !== undefined ? { description: fmt.description } : {}),
+        schema: fmt.schema,
+        strict: fmt.strict !== false
+      }
+    }
+  }
   return chat
 }
 
@@ -1319,6 +1377,8 @@ export const runWithDegrades = async (client, params, { web = null, model = null
         }
         if (params.reasoning) rememberProbe(model, 'effort', true)
       }
+      // Learned on either transport: the fallback carries the schema too (responsesParamsToChat).
+      if (params.text?.format) rememberProbe(model, 'structuredOutput', true)
       return { ...collected, webDropped, viaChatCompletions }
     } catch (err) {
       const emsg = ((err && (err.message || String(err))) || '').toLowerCase()
@@ -1355,6 +1415,21 @@ export const runWithDegrades = async (client, params, { web = null, model = null
         rememberProbe(model, 'effort', false)
         delete params.reasoning
         continue
+      }
+
+      // TIER 3, rung 4: this model will not take a schema. NOT a degrade — a caller who sent a
+      // schema must get it honoured or an error, never text that merely looks like JSON. So the
+      // request is not retried without it; the verdict is memoized and the capability error
+      // travels back with its structure (the controller turns it into a 400 / error event).
+      if (params.text?.format && isStructuredOutputRejection(err)) {
+        console.warn('[freezr openai] ' + params.model + ' rejected the response schema (' +
+          (err && err.message) + ') — failing the request rather than answering unconstrained')
+        // the caller's schema at fault: report it verbatim, remember nothing about the model
+        if (classifyStructuredRejection(err) === 'schema') throw schemaRejectedError(params.model, err)
+        rememberProbe(model, 'structuredOutput', false)
+        const capErr = capabilityError(params.model, 'structuredOutput')
+        capErr.message += ' (' + ((err && err.message) || '') + ')'
+        throw capErr
       }
 
       throw err
@@ -1428,7 +1503,7 @@ const buildResponseInput = (prompt, role, files) => {
 }
 
 /** One request builder for ask() and askStream(), so an option cannot ship in only one. */
-export const buildResponseParams = ({ model, prompt, context, max_tokens, role, thinking, effort, files, web }) => {
+export const buildResponseParams = ({ model, prompt, context, max_tokens, role, thinking, effort, files, web, structuredOutput }) => {
   const params = {
     model,
     input: buildResponseInput(prompt, role, files),
@@ -1441,6 +1516,20 @@ export const buildResponseParams = ({ model, prompt, context, max_tokens, role, 
   const reasoning = buildReasoningConfig(thinking, effort)
   if (reasoning) params.reasoning = reasoning
 
+  // Native structured output (2026-09-19): the provider constrains generation to the schema.
+  // Only when the caller asked — a request without the option is byte-identical to before.
+  if (structuredOutput && structuredOutput.schema) {
+    params.text = {
+      format: {
+        type: 'json_schema',
+        name: structuredOutput.name || 'freezr_response',
+        ...(structuredOutput.description !== undefined ? { description: structuredOutput.description } : {}),
+        schema: structuredOutput.schema,
+        strict: true
+      }
+    }
+  }
+
   const tools = buildWebTools(web)
   if (tools) {
     params.tools = tools
@@ -1451,7 +1540,7 @@ export const buildResponseParams = ({ model, prompt, context, max_tokens, role, 
   return params
 }
 
-export const ask = async ({ apiKey, prompt, context, model, max_tokens, role, responseType, thinking, cache, effort, files, web }) => {
+export const ask = async ({ apiKey, prompt, context, model, max_tokens, role, responseType, thinking, cache, effort, files, web, structuredOutput }) => {
   const client = new OpenAI({ apiKey })
   // `effort` counts as asking to reason, not just `thinking` — they land on the same
   // reasoning config, so a caller who passed only effort was picking the default model as if
@@ -1460,7 +1549,7 @@ export const ask = async ({ apiKey, prompt, context, model, max_tokens, role, re
   // `cache` is accepted and ignored: OpenAI caches long prefixes on its own with nothing for a
   // caller to set, which is what CAPABILITIES.cache = { automatic: true } says.
   const webOption = normalizeWebOption(web)
-  const params = buildResponseParams({ model: modelToUse, prompt, context, max_tokens, role, thinking, effort, files, web: webOption })
+  const params = buildResponseParams({ model: modelToUse, prompt, context, max_tokens, role, thinking, effort, files, web: webOption, structuredOutput })
 
   const collected = await runWithDegrades(client, params, { web: webOption, model: modelToUse })
   const { textResponse, thinkingResponse, usage, stopReason, rawStopReason, toolsUsed, citations, webDropped } = collected
@@ -1498,11 +1587,11 @@ export const ask = async ({ apiKey, prompt, context, model, max_tokens, role, re
  *
  * Same params as ask() except responseType is ignored (raw text is always yielded).
  */
-export async function * askStream ({ apiKey, prompt, context, model, max_tokens, role, thinking, cache, effort, files, web }) {
+export async function * askStream ({ apiKey, prompt, context, model, max_tokens, role, thinking, cache, effort, files, web, structuredOutput }) {
   const client = new OpenAI({ apiKey })
   const modelToUse = await resolveModel(client, model, thinking || effort)
   const webOption = normalizeWebOption(web)
-  const params = buildResponseParams({ model: modelToUse, prompt, context, max_tokens, role, thinking, effort, files, web: webOption })
+  const params = buildResponseParams({ model: modelToUse, prompt, context, max_tokens, role, thinking, effort, files, web: webOption, structuredOutput })
 
   // The stream loop, the degrade ladder and the web collection all live in
   // runWithDegrades/streamAndCollect, shared with ask(). Duplicating them here is how the

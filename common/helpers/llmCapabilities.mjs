@@ -27,9 +27,8 @@ export const UNKNOWN = 'unknown'
  * Only keys freezr actually routes belong here — nothing is declared that isn't wired.
  *
  * Not in the vocabulary yet, in rough order of value when someone builds them:
- * embeddings (OpenAI yes / Anthropic no), codeExecution, structuredOutput (both have
- * native schema-constrained output; responseType:'json' is prompt-parsed today),
- * moderation (OpenAI, free), mcp (hosted MCP connectors on both).
+ * embeddings (OpenAI yes / Anthropic no), codeExecution, moderation (OpenAI, free),
+ * mcp (hosted MCP connectors on both).
  */
 export const CAPABILITY_KEYS = [
   'web', // { search, fetch } — reach the live web
@@ -39,7 +38,12 @@ export const CAPABILITY_KEYS = [
   'effort', // output_config.effort dial
   'cache', // { explicit, ttl } vs { automatic }
   'images', // { generate: 'svg' | 'raster' }
-  'voice' // { stt, tts } — reserved; no provider wired yet
+  'voice', // { stt, tts } — reserved; no provider wired yet
+  // Native schema-constrained generation: the PROVIDER guarantees the reply matches a JSON
+  // Schema (OpenAI `text.format`, Anthropic `output_config.format`). A different thing from
+  // responseType:'json', which asks for JSON in the prompt and parses whatever comes back; a
+  // connector that only does the latter must NOT declare this. Added 2026-09-19.
+  'structuredOutput'
 ]
 
 const isPlainObject = (v) => Boolean(v) && typeof v === 'object' && !Array.isArray(v)
@@ -73,6 +77,62 @@ export const resolveCapability = (capabilities, path) => {
     return node
   }
   return node || false
+}
+
+// ── structuredOutput: the request option and the strict parse ────────────────────────────
+//
+// Both live here rather than in the controller because they are pure, both sides of the
+// boundary need the same reading of them, and they must be unit-testable without a server.
+//
+// THE RULE THIS OPTION EXISTS TO KEEP: a caller who supplies a schema either gets a reply that
+// satisfies it or an error — never a success carrying text that "probably" parses. So `strict`
+// cannot be turned off, and the parser has none of the fence-stripping, brace-hunting tolerance
+// that responseType:'json' has. A caller who does not pass the option is untouched by any of
+// this: normalizeStructuredOutput returns null and nothing downstream looks further.
+
+const STRUCTURED_OUTPUT_DEFAULT_NAME = 'freezr_response'
+
+const invalidStructuredOption = (message) => {
+  const err = new Error('structuredOutput: ' + message)
+  err.code = 'structured_output_invalid_option'
+  return err
+}
+
+/**
+ * Normalize the `structuredOutput` request option.
+ *   absent / null / false            -> null (nothing asked for; every existing path is unchanged)
+ *   { schema, name?, description? }  -> { name, description?, schema, strict: true }
+ * Throws (code 'structured_output_invalid_option') on a malformed option, so the controller can
+ * answer 400 before any connector is called or any token is spent. `name` is clamped to
+ * OpenAI's accepted form (letters, digits, _ and -, at most 64) — the stricter of the two
+ * providers; Anthropic ignores it.
+ */
+export const normalizeStructuredOutput = (opt) => {
+  if (opt === undefined || opt === null || opt === false) return null
+  if (!isPlainObject(opt)) throw invalidStructuredOption('must be an object { schema, name?, description? }')
+  if (!isPlainObject(opt.schema)) throw invalidStructuredOption('schema must be a JSON Schema object')
+  if (opt.strict === false) throw invalidStructuredOption("strict:false is not supported — the option exists to guarantee the schema; use responseType:'json' for best-effort parsing")
+  const rawName = (opt.name === undefined || opt.name === null) ? STRUCTURED_OUTPUT_DEFAULT_NAME : String(opt.name)
+  const name = rawName.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64) || STRUCTURED_OUTPUT_DEFAULT_NAME
+  const out = { name, schema: opt.schema, strict: true }
+  if (opt.description !== undefined && opt.description !== null) out.description = String(opt.description).slice(0, 500)
+  return out
+}
+
+/**
+ * Strict parse of a structured reply. Returns { ok: true, value } or { ok: false, error }.
+ * An object is accepted as-is (a connector may already have parsed); a string must be EXACTLY
+ * one JSON document — no fences, no prose around it. Anything else is a failure the caller must
+ * surface, never a success.
+ */
+export const parseStructuredOutput = (response) => {
+  if (response !== null && typeof response === 'object') return { ok: true, value: response }
+  if (typeof response !== 'string' || !response.trim()) return { ok: false, error: 'the model returned no JSON' }
+  try {
+    return { ok: true, value: JSON.parse(response) }
+  } catch (e) {
+    return { ok: false, error: 'the reply is not valid JSON (' + (e && e.message) + ')' }
+  }
 }
 
 /** True when a resolved value means "go ahead" — including UNKNOWN, which means "try it". */

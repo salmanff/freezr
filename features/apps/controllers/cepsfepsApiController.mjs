@@ -15,7 +15,7 @@ import { getOrigIdWithOatRemoved } from '../../../adapters/datastore/dbConnector
 import { SYSTEM_PERMS } from '../../../common/helpers/config.mjs'
 import { getAllSystemPermissionsForApp } from '../../../common/helpers/systemPermissions.mjs'
 import { encryptResourceSensitiveFields } from '../../account/services/resourceCrypto.mjs'
-import { isPermitted, resolveCapability, checkCapabilities, normalizeWebOption } from '../services/llmCapabilityService.mjs'
+import { isPermitted, resolveCapability, checkCapabilities, normalizeWebOption, normalizeStructuredOutput, parseStructuredOutput } from '../services/llmCapabilityService.mjs'
 import { sanitizeModelKeys, unsanitizeModelKeys, canonicalizeModelMap, normalizePricingModels, makeEmptyTokensUsed, getModelFamily, findModelPrice, isLookupFailedForModel, applyPriceToTokensUsed, IMAGE_PRICING_SUFFIX, findImageModelPrice, applyImagePriceToTokensUsed, AUDIO_PRICING_SUFFIX, findAudioModelPrice, applyAudioPriceToTokensUsed } from '../services/llmCostService.mjs'
 import { recordUsage, queryTallies, summarizeTallies, utcDay } from '../../account/services/usageTallyService.mjs'
 
@@ -66,6 +66,20 @@ export const resolveAskTimeoutMs = (req, options = {}) => {
   const jobDeadline = Number(req?.headers?.['x-freezr-job-deadline'])
   if (Number.isFinite(jobDeadline) && jobDeadline > 0) candidates.push(Math.max(1, jobDeadline - Date.now()))
   return candidates.length > 0 ? Math.min(...candidates) : undefined
+}
+
+/**
+ * The record id a read / update / delete route addressed.
+ *
+ * Record ids can contain '/': an uploaded file's id is its path (projects/p/draft/index.html). A
+ * plain /:data_object_id route matches ONE path segment, so those routes also exist as
+ * /:data_object_start/* and the id is rejoined here. It is rebuilt from the route params, which
+ * Express has already decoded — not from req.path, which is still percent-encoded and would turn
+ * "my file.pdf" into "my%20file.pdf".
+ */
+export const dataObjectIdFromParams = (params = {}) => {
+  if (params.data_object_start) return params.data_object_start + (params[0] ? '/' + params[0] : '')
+  return params.data_object_id
 }
 
 const BLOCKED_QUERY_OPERATORS = ['$where', '$function', '$accumulator', '$expr']
@@ -266,11 +280,7 @@ export const createCepsApiController = () => {
     const isCeps = startsWith(req.baseUrl, '/ceps')
     const replaceAllFields = isCeps ? true : (options.replaceAllFields === 'true' || options.replaceAllFields === true)
     const isQueryBasedUpdate = (!isCeps && !req.params.data_object_id && req.body.q && req.body.keys)
-    if (req.params.data_object_start) {
-      // onsole.log('      🔑 updateRecord data_object_start', { data_object_start: req.params.data_object_start, path: req.path })
-      const parts = req.path.split('/').slice(3)
-      req.params.data_object_id = parts.join('/')
-    }
+    if (req.params.data_object_start) req.params.data_object_id = dataObjectIdFromParams(req.params)
     const dataObjectId = (req.params.data_object_id || write._id)
     // console.log('updateRecord', { req, requrl: req.url,isCeps, dataObjectId, replaceAllFields, options })
     const appTableDb = res.locals.freezr.appTableDb
@@ -356,7 +366,7 @@ export const createCepsApiController = () => {
   const readRecordById = async (req, res) => {
     // onsole.log('readRecordById', { req: req.params })
     
-    const dataObjectId = req.params.data_object_id
+    const dataObjectId = dataObjectIdFromParams(req.params)
     const appTableDb = res.locals.freezr.appTableDb
 
     const mayBeCanRead = res.locals.freezr.rightsToTable.own_record 
@@ -699,9 +709,7 @@ export const createCepsApiController = () => {
   const deleteRecords = async (req, res) => {
     // Get data_object_id or ensure delete query
     if (req.params.data_object_start) {
-      // onsole.log('      🔑 deleteRecords data_object_start', { data_object_start: req.params.data_object_start, path: req.path })
-      const parts = req.path.split('/').slice(3)
-      req.params.data_object_id = parts.join('/')
+      req.params.data_object_id = dataObjectIdFromParams(req.params)
     } else if (!req.params.data_object_id) {
       // onsole.log('NO DATA ID - DELEE BY QUERY ')
       if (!req.body?.q) {
@@ -1334,6 +1342,8 @@ export const createCepsApiController = () => {
                 accessiblesObject.original_record = originalRecord
               }
               if (isHtmlMainPage) { // assumes && allowedGrantees.includes('_public') && helpers.endsWith(appTableId, '.files')
+                // An existing record may have been created by a plain share - make the flag follow THIS request.
+                accessiblesObject.isHtmlMainPage = true
                 if (req.body.fileStructure) accessiblesObject.fileStructure = req.body.fileStructure
                 if (req.body.meta !== undefined) accessiblesObject.meta = req.body.meta || null
                 // recOriginalIdStr has the unified-DB `<owner>__<appTable>__` prefix removed,
@@ -1365,6 +1375,10 @@ export const createCepsApiController = () => {
                   }
                 }
               } else if (existingPublicRecord) {
+                // A plain (non-main-page) share is authoritative: a record once published as an html
+                // main page would otherwise keep the flag forever and keep being served wrapped in
+                // the page skeleton (with its stale html_page snapshot) after being re-shared as a file.
+                accessiblesObject.isHtmlMainPage = false
                 accessiblesObject._date_published = req.body.pubDate || existingPublicRecord._date_published
                 accessiblesObject.doNotList = existingPublicRecord.doNotList
                 if (hasPrivateFeed) {
@@ -3658,6 +3672,15 @@ export const createCepsApiController = () => {
       // Web access. Normalized here so the gate, the connector and the meta all read the
       // same shape (true -> { search: true, fetch: true }).
       const web = normalizeWebOption(options.web !== undefined ? options.web : req.body?.web)
+      // Native structured output (2026-09-19). Validated HERE so a malformed option is a 400
+      // before any connector runs or any token is spent. null when absent — and then nothing
+      // downstream looks at it, so every caller that does not pass it is untouched.
+      let structuredOutput = null
+      try {
+        structuredOutput = normalizeStructuredOutput(options.structuredOutput !== undefined ? options.structuredOutput : req.body?.structuredOutput)
+      } catch (optErr) {
+        return res.status(400).json({ success: false, error: optErr.message, code: optErr.code || 'structured_output_invalid_option' })
+      }
       // Per-request wait, bounded by the caller's ask and by the calling job's remaining
       // budget. Connectors clamp it to their own ceiling/floor — see resolveAskTimeoutMs.
       const timeoutMs = resolveAskTimeoutMs(req, options)
@@ -3785,20 +3808,35 @@ export const createCepsApiController = () => {
       // note in common/helpers/llmCapabilities.mjs), which is what keeps freezr out of the
       // business of maintaining a per-model feature table.
       let webUnavailable = []
-      if (web) {
-        const required = []
-        if (web.search) required.push('web.search')
-        if (web.fetch) required.push('web.fetch')
+      if (web || structuredOutput) {
         const providerCapabilities = await collectProviderCapabilities(llmResources, resolvedModel)
-        const gate = checkCapabilities({
-          required,
-          optional: web.optional,
-          providerCapabilities,
-          provider: resource.provider,
-          model: resolvedModel
-        })
-        if (!gate.ok) return res.status(400).json(gate.error)
-        webUnavailable = gate.unavailable
+        if (web) {
+          const required = []
+          if (web.search) required.push('web.search')
+          if (web.fetch) required.push('web.fetch')
+          const gate = checkCapabilities({
+            required,
+            optional: web.optional,
+            providerCapabilities,
+            provider: resource.provider,
+            model: resolvedModel
+          })
+          if (!gate.ok) return res.status(400).json(gate.error)
+          webUnavailable = gate.unavailable
+        }
+        // Gated separately from web on purpose: a schema is NEVER optional. `web.optional`
+        // must not be able to waive it, and a connector that does not declare it (the local
+        // CLIs) is refused here rather than being prompted to "please emit JSON".
+        if (structuredOutput) {
+          const gate = checkCapabilities({
+            required: ['structuredOutput'],
+            optional: false,
+            providerCapabilities,
+            provider: resource.provider,
+            model: resolvedModel
+          })
+          if (!gate.ok) return res.status(400).json(gate.error)
+        }
       }
 
 
@@ -3882,6 +3920,7 @@ export const createCepsApiController = () => {
             effort: effort || undefined,
             cache: cache || null,
             web: web || null,
+            structuredOutput: structuredOutput || null,
             files: (files && files.length > 0) ? files : null,
             // local-CLI connector config ({ binaryPath }) from the resource record;
             // key-based connectors ignore it
@@ -3907,7 +3946,37 @@ export const createCepsApiController = () => {
 
           if (doneResult) {
             let finalResponse = doneResult.response
-            if (responseType === 'json' && typeof finalResponse === 'string') {
+            if (structuredOutput) {
+              // STRICT: the caller supplied a schema, so the reply is either the object or an
+              // error — never a success carrying a string. Truncation is named as such so the
+              // app can raise max_tokens instead of blaming the model's JSON.
+              const strict = parseStructuredOutput(finalResponse)
+              if (!strict.ok) {
+                const truncated = doneResult.stopReason === 'max_tokens'
+                console.error('❌ llmAsk (streaming): structured output ' + (truncated ? 'truncated' : 'invalid'),
+                  resource.provider, doneResult.model, strict.error)
+                writeSSE({
+                  type: 'error',
+                  success: false,
+                  code: truncated ? 'structured_output_truncated' : 'structured_output_invalid',
+                  error: truncated
+                    ? 'the reply was cut off at max_tokens before the JSON was complete'
+                    : 'structured output: ' + strict.error,
+                  stopReason: doneResult.stopReason || null,
+                  model: doneResult.model || null,
+                  meta: {
+                    provider: doneResult.provider,
+                    model: doneResult.model,
+                    modelFamily: doneResult.family,
+                    stopReason: doneResult.stopReason || null,
+                    rawUsage: doneResult.rawUsage
+                  }
+                })
+                await meterLlmUsage(res, { resource, connector, model: doneResult.model || resolvedModel, kind: 'ask', outcome: 'error' })
+                return res.end()
+              }
+              finalResponse = strict.value
+            } else if (responseType === 'json' && typeof finalResponse === 'string') {
               finalResponse = _tryParseJson(finalResponse)
             }
 
@@ -4006,15 +4075,36 @@ export const createCepsApiController = () => {
         model: resolvedModel,
         max_tokens: max_tokens || null,
         role: role || null,
-        responseType: responseType || null,
+        // With a schema the connector must hand back RAW text so the strict parse below is the
+        // only parse — the connector's tolerant JSON mode would mask a non-conforming reply.
+        responseType: structuredOutput ? null : (responseType || null),
         thinking: thinking === false ? false : (thinking || null),
         effort: effort || undefined,
         cache: cache || null,
         web: web || null,
+        structuredOutput: structuredOutput || null,
         files: (files && files.length > 0) ? files : null,
         local: resource.local || null,
         timeoutMs
       })
+
+      let nonStreamResponse = result.response
+      if (structuredOutput) {
+        const strict = parseStructuredOutput(nonStreamResponse)
+        if (!strict.ok) {
+          const truncated = result.stopReason === 'max_tokens'
+          console.error('❌ llmAsk: structured output ' + (truncated ? 'truncated' : 'invalid'), resource.provider, result.model, strict.error)
+          await meterLlmUsage(res, { resource, connector, model: result.model || resolvedModel, kind: 'ask', outcome: 'error' })
+          return res.status(502).json({
+            success: false,
+            code: truncated ? 'structured_output_truncated' : 'structured_output_invalid',
+            error: truncated ? 'the reply was cut off at max_tokens before the JSON was complete' : 'structured output: ' + strict.error,
+            stopReason: result.stopReason || null,
+            model: result.model || null
+          })
+        }
+        nonStreamResponse = strict.value
+      }
 
       let pricingRecord = pricingDb ? await getPricingRecord(pricingDb, resource.provider) : null
       let price = null
@@ -4036,7 +4126,7 @@ export const createCepsApiController = () => {
 
       const reply = {
         success: true,
-        response: result.response,
+        response: nonStreamResponse,
         meta: {
           provider: result.provider,
           model: result.model,

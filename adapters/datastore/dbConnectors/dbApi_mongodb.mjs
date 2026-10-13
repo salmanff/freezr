@@ -191,31 +191,9 @@ MONGO_FOR_FREEZR.prototype.create_async = async function (id, entity, options) {
 }
 
 MONGO_FOR_FREEZR.prototype.update_multi_records_async = async function (idOrQuery, updatesToEntity) {
-  let updateMultiple = true
-  if (typeof idOrQuery === 'string') {
-    updateMultiple = false
-    if (hasUnifiedStrategy(this.env.dbParams, this.oat.owner)) {
-      idOrQuery = getRevisedIdWithOatAdded(idOrQuery, this.oat)
-    }
-    idOrQuery = { _id: getRealObjectId(idOrQuery) }
-  } else if (ObjectId.isValid(idOrQuery)) {
-    updateMultiple = false
-    idOrQuery = { _id: idOrQuery }
-  } else if (idOrQuery._id) {
-    updateMultiple = false
-    if (!ObjectId.isValid(idOrQuery._id)) {
-      if (typeof idOrQuery._id === 'string') {
-        if (hasUnifiedStrategy(this.env.dbParams, this.oat.owner)) {
-          idOrQuery._id = getRevisedIdWithOatAdded(idOrQuery._id, this.oat)
-        }
-        idOrQuery._id = getRealObjectId(idOrQuery._id)
-      } else {
-        console.warn('Can only have objectids and strings when querying _id')
-      }
-    }
-  } else if (idOrQuery.$and || idOrQuery.$or) {
-    console.warn('currently cannot do $and and $or of _ids - need to add objectIds iteratively')
-  }
+  const normalized = normalizeIdFilter(this, idOrQuery)
+  idOrQuery = normalized.filter
+  const updateMultiple = !normalized.single
 
   const { coll, collName, release } = await getMongoContext(this)
   try {
@@ -264,24 +242,9 @@ MONGO_FOR_FREEZR.prototype.replace_record_by_id_async = async function (id, upda
 }
 
 MONGO_FOR_FREEZR.prototype.query_async = async function (idOrQuery, options = {}) {
-  let findMultiple = true
-  if (!idOrQuery) {
-    idOrQuery = {}
-  } else if (typeof idOrQuery === 'string') {
-    if (hasUnifiedStrategy(this.env.dbParams, this.oat.owner)) {
-      idOrQuery = getRevisedIdWithOatAdded(idOrQuery, this.oat)
-    }
-    idOrQuery = { _id: getRealObjectId(idOrQuery) }
-    findMultiple = false
-  } else if (idOrQuery._id) {
-    if (typeof idOrQuery._id === 'string') {
-      if (hasUnifiedStrategy(this.env.dbParams, this.oat.owner)) {
-        idOrQuery._id = getRevisedIdWithOatAdded(idOrQuery._id, this.oat)
-      }
-      idOrQuery._id = getRealObjectId(idOrQuery._id)
-    }
-    findMultiple = false
-  }
+  const normalized = normalizeIdFilter(this, idOrQuery)
+  idOrQuery = normalized.filter
+  const findMultiple = !normalized.single
   if (hasUnifiedStrategy(this.env.dbParams, this.oat.owner)) {
     idOrQuery.__owner = this.oat.owner
     idOrQuery.__appTable = fullOACName(this.oat, false)
@@ -320,20 +283,9 @@ MONGO_FOR_FREEZR.prototype.query_async = async function (idOrQuery, options = {}
 }
 
 MONGO_FOR_FREEZR.prototype.delete_record_async = async function (idOrQuery, options = {}) {
-  let deleteMultiple = true
-  if (typeof idOrQuery === 'string') {
-    if (hasUnifiedStrategy(this.env.dbParams, this.oat.owner)) {
-      idOrQuery = getRevisedIdWithOatAdded(idOrQuery, this.oat)
-    }
-    idOrQuery = { _id: getRealObjectId(idOrQuery) }
-    deleteMultiple = false
-  } else if (idOrQuery._id && typeof idOrQuery._id === 'string') {
-    if (hasUnifiedStrategy(this.env.dbParams, this.oat.owner)) {
-      idOrQuery._id = getRevisedIdWithOatAdded(idOrQuery._id, this.oat)
-    }
-    idOrQuery._id = getRealObjectId(idOrQuery._id)
-    deleteMultiple = false
-  }
+  const normalized = normalizeIdFilter(this, idOrQuery)
+  idOrQuery = normalized.filter
+  const deleteMultiple = !normalized.single
 
   const { coll, collName, release } = await getMongoContext(this)
   try {
@@ -543,6 +495,51 @@ const getRealObjectId = function (objectId) {
   return realId
 }
 
+// Turn the `_id`s in a caller's filter into what is actually stored.
+//
+// In unified-DB mode every stored _id carries an `<owner>__<appTable>__` prefix, so a
+// caller's plain id has to be prefixed before Mongo sees it. The old code only did this
+// for a bare string `_id`; `{ _id: { $in: [...] } }`, `$or` of ids and the like went to
+// Mongo unprefixed and silently matched nothing (NeDB, with no prefixes, was fine - so
+// apps that work locally broke on a unified Mongo install). This handles:
+//   - a string id (or an ObjectId) → one record
+//   - `_id: { $in | $nin: [...] }`, `_id: { $eq | $ne: x }`
+//   - `$or` / `$and` / `$nor` clauses, recursively
+// Returns a NEW filter (the caller's object is left alone - the cache layer keys on the
+// original query) plus `single`: true only when the filter pins exactly one _id, which is
+// what decides findOne/updateOne/deleteOne versus the Many variants.
+const normalizeIdFilter = function (self, idOrQuery) {
+  const unified = hasUnifiedStrategy(self.env.dbParams, self.oat.owner)
+  const reviseOne = (id) => {
+    if (typeof id !== 'string') return id
+    return getRealObjectId(unified ? getRevisedIdWithOatAdded(id, self.oat) : id)
+  }
+  const reviseIdClause = (clause) => {
+    if (typeof clause === 'string') return reviseOne(clause)
+    if (clause && typeof clause === 'object' && !(clause instanceof ObjectId)) {
+      const out = { ...clause }
+      for (const op of ['$in', '$nin']) if (Array.isArray(out[op])) out[op] = out[op].map(reviseOne)
+      for (const op of ['$eq', '$ne']) if (op in out) out[op] = reviseOne(out[op])
+      return out
+    }
+    return clause
+  }
+  const walk = (q) => {
+    if (!q || typeof q !== 'object' || Array.isArray(q)) return q
+    const out = { ...q }
+    if (out._id !== undefined) out._id = reviseIdClause(out._id)
+    for (const op of ['$or', '$and', '$nor']) if (Array.isArray(out[op])) out[op] = out[op].map(walk)
+    return out
+  }
+
+  if (!idOrQuery) return { filter: {}, single: false }
+  if (typeof idOrQuery === 'string') return { filter: { _id: reviseOne(idOrQuery) }, single: true }
+  if (idOrQuery instanceof ObjectId) return { filter: { _id: idOrQuery }, single: true }
+  const filter = walk(idOrQuery)
+  const single = typeof filter._id === 'string' || filter._id instanceof ObjectId
+  return { filter, single }
+}
+
 const appTablesFilter = function (dbList, appOrTableNameOrNames, userId) {
   let list = []
   dbList.forEach(name => {
@@ -583,6 +580,8 @@ export { dbConnectionString }
 
 // Exposed for unit tests only - see test/unit/datastore/cosmosIndexMemo.test.mjs
 export const __indexMemoInternals = { indexedCollections, indexMemoKey, targetNamesFor }
+// Exposed for unit tests only - see test/unit/datastore/mongoIdFilter.test.mjs
+export const __idFilterInternals = { normalizeIdFilter }
 
 // Interface
 export default MONGO_FOR_FREEZR

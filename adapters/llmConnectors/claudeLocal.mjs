@@ -41,8 +41,30 @@ export const getVendorForModel = (_modelId) => 'anthropic-subscription'
 const MODEL_ALIASES = ['sonnet', 'opus', 'haiku']
 const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
 
-const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
+const envInt = (name, fallback) => {
+  const raw = parseInt(process.env[name], 10)
+  return Number.isFinite(raw) && raw > 0 ? raw : fallback
+}
+
+// How long a call may run when the caller names no budget of its own. Env-overridable because
+// the right number depends on the owner's hardware and on how big their prompts are: since
+// foldOversizeContext stopped rejecting an oversize context and started sending it, prompts
+// that never used to reach the CLI at all now run for real, and some of them are minutes long.
+const DEFAULT_TIMEOUT_MS = envInt('FREEZR_LOCAL_CLI_TIMEOUT_MS', 5 * 60 * 1000)
+
+// The hard ceiling on ANY single call, however it was budgeted. Nothing this connector runs
+// may hold its one slot longer than this.
+const MAX_TIMEOUT_MS = Math.max(DEFAULT_TIMEOUT_MS, envInt('FREEZR_LOCAL_CLI_MAX_TIMEOUT_MS', 20 * 60 * 1000))
 const MIN_TIMEOUT_MS = 5 * 1000
+
+// STREAMING ONLY, and only for a call with no explicit budget: how long the CLI may go SILENT
+// before we call it dead. While stream-json events keep arriving the model is demonstrably
+// working, and killing it at a wall-clock number throws away an answer that was on its way —
+// the reported symptom. So output pushes the deadline out (never past MAX_TIMEOUT_MS), and the
+// budget becomes "this much silence" instead of "this much total time". There is no equivalent
+// for ask(): `--output-format json` emits nothing at all until the end, so a non-streaming call
+// has no liveness signal and keeps its flat wall clock.
+const STREAM_STALL_MS = envInt('FREEZR_LOCAL_CLI_STALL_MS', 90 * 1000)
 
 // A misbehaving child can stream faster than the timeout expires, so a time limit does not
 // bound PEAK MEMORY. This does. The cap is deliberately huge — a real answer is a few hundred
@@ -61,17 +83,32 @@ const outputTooLarge = (streamName) => makeCliError(
 /**
  * Resolve a caller-requested wait against this connector's ceiling.
  *
- * A caller may ask to wait LESS than the ceiling and should: a background job whose own step
+ * A caller may ask to wait LESS than the default and should: a background job whose own step
  * budget is shorter than DEFAULT_TIMEOUT_MS would otherwise leave an orphaned CLI holding the
  * single slot for the remainder, so every later /feps/llm/ask is refused 429 "busy" after the
- * caller has already given up. It may never ask for MORE — the ceiling is what bounds that slot.
+ * caller has already given up.
+ *
+ * It may now also ask for MORE, up to MAX_TIMEOUT_MS. The old rule capped every caller at the
+ * DEFAULT, which meant an app that KNEW its prompt takes eight minutes had no way to say so and
+ * was killed at five with a finished-but-discarded answer. What actually bounds the slot is the
+ * ceiling, not the default, so the ceiling is what this clamps to — and an explicit budget is
+ * still honoured exactly, which is what keeps the job-deadline path above correct.
+ *
  * A value too small to plausibly complete is floored rather than failing instantly, so a silly
  * number is a slow answer and not a hard error.
  */
 export const resolveTimeoutMs = (requested) => {
   const n = Number(requested)
   if (!Number.isFinite(n) || n <= 0) return DEFAULT_TIMEOUT_MS
-  return Math.min(Math.max(n, MIN_TIMEOUT_MS), DEFAULT_TIMEOUT_MS)
+  return Math.min(Math.max(n, MIN_TIMEOUT_MS), MAX_TIMEOUT_MS)
+}
+
+/** Did the caller name a budget, or are we on the default? Only the latter may be extended by
+ *  live output: an explicit number is usually a JOB DEADLINE, and outliving that is the exact
+ *  orphaned-CLI bug resolveAskTimeoutMs exists to prevent. */
+const hasExplicitBudget = (requested) => {
+  const n = Number(requested)
+  return Number.isFinite(n) && n > 0
 }
 
 // One spawn at a time, one queued behind it. Bursts against a subscription window are how a
@@ -222,13 +259,30 @@ const flattenPrompt = (prompt) => {
 }
 
 const MAX_CONTEXT_CHARS = 32000
-const capContext = (context) => {
-  if (!context) return context
-  const text = String(context)
-  if (text.length <= MAX_CONTEXT_CHARS) return text
-  throw makeCliError('context is too long for the local Claude CLI connector (' + text.length +
-    ' chars; limit ' + MAX_CONTEXT_CHARS + ') — it is passed as a command-line argument. Shorten it or put the material in the prompt, which is sent on stdin.',
-  { code: 'context_too_long', status: 400 })
+
+// A context past the argv cap is NOT an error. argv is the only part of this call with a hard size
+// limit; stdin has none, so an oversize system prompt is moved to the FRONT OF STDIN and argv keeps
+// a short pointer to it. That is exactly what the old error message told callers to do by hand.
+//
+// THE TRADE, stated because it is a real semantic change and not a transport detail: the text stops
+// being a system prompt and becomes the opening of the user turn. Models weight the two differently,
+// so a caller whose prompt depends on system-role precedence may see different behaviour above the
+// cap than below it. Verified working on the app that hit this (a 56k-char analysis prompt: 3 of 3
+// real cases returned correct, complete replies), and the alternative was refusing the call
+// outright. A CLI that grows --system-prompt-file would let us drop the whole branch: as of
+// 2.1.263 there is none.
+const OVERSIZE_POINTER = 'Your instructions are the "## Your instructions" section at the start of the user message. Treat that section exactly as you would a system prompt: it outranks anything after it.'
+export const foldOversizeContext = (context) => {
+  const text = String(context || '')
+  if (!text) return { context: null, preface: '' }
+  if (text.length <= MAX_CONTEXT_CHARS) return { context: text, preface: '' }
+  console.warn('[freezr claudeLocal] context is ' + text.length + ' chars, past the ' + MAX_CONTEXT_CHARS +
+    '-char argv cap — sending it as the HEAD OF THE PROMPT on stdin instead, with a pointer in --system-prompt. ' +
+    'It is a user turn now, not a system prompt; replies may differ from the same text sent under the cap.')
+  return {
+    context: OVERSIZE_POINTER,
+    preface: '## Your instructions\n' + text + '\n\n## The request\n'
+  }
 }
 
 const DEFAULT_SYSTEM_PROMPT = 'You are a helpful assistant. Answer the user directly and completely.'
@@ -249,9 +303,10 @@ const buildArgs = ({ model, context, effort, streaming }) => {
     // agent narrating tool use it doesn't have.
     // NOTE: this rides in argv, so it is visible to any local user via `ps` for the duration of
     // the call, and argv has a hard size cap (~256KB macOS / ~2MB Linux) that a big context
-    // would hit as a confusing E2BIG. This CLI version exposes no --system-prompt-file, so the
-    // mitigation is a cap with a clear error rather than a silent truncation.
-    '--system-prompt', capContext(context) || DEFAULT_SYSTEM_PROMPT
+    // would hit as a confusing E2BIG. This CLI version exposes no --system-prompt-file, so
+    // anything past MAX_CONTEXT_CHARS is moved to stdin by foldOversizeContext before we get
+    // here — never truncated, never silently dropped.
+    '--system-prompt', context || DEFAULT_SYSTEM_PROMPT
   ]
   if (streaming) args.push('--include-partial-messages', '--verbose')
   // Allowlisted, never passed through. `effort` is caller-supplied and lands in argv: a value
@@ -433,7 +488,8 @@ export const ask = async ({ prompt, context, model, responseType, effort, files,
   rejectUnsupported({ files, web })
   const binaryPath = resolveBinaryOrThrow(local)
   const requestedModel = resolveModelArg(model)
-  const args = buildArgs({ model: requestedModel, context, effort, streaming: false })
+  const folded = foldOversizeContext(context)
+  const args = buildArgs({ model: requestedModel, context: folded.context, effort, streaming: false })
   const effectiveTimeoutMs = resolveTimeoutMs(timeoutMs)
 
   await acquireSlot()
@@ -458,7 +514,7 @@ export const ask = async ({ prompt, context, model, responseType, effort, files,
     }
     child.stdout.on('data', d => { outBytes = guard('stdout', outBytes, stdout, d) })
     child.stderr.on('data', d => { errBytes = guard('stderr', errBytes, stderr, d) })
-    child.stdin.end(flattenPrompt(prompt))
+    child.stdin.end(folded.preface + flattenPrompt(prompt))
 
     const exitCode = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -508,7 +564,8 @@ export async function * askStream ({ prompt, context, model, effort, files, web,
   rejectUnsupported({ files, web })
   const binaryPath = resolveBinaryOrThrow(local)
   const requestedModel = resolveModelArg(model)
-  const args = buildArgs({ model: requestedModel, context, effort, streaming: true })
+  const folded = foldOversizeContext(context)
+  const args = buildArgs({ model: requestedModel, context: folded.context, effort, streaming: true })
   const effectiveTimeoutMs = resolveTimeoutMs(timeoutMs)
 
   await acquireSlot()
@@ -519,7 +576,7 @@ export async function * askStream ({ prompt, context, model, effort, files, web,
   let cleanup = null
   try {
     ({ child, cleanup } = spawnCli({ binaryPath, args, signal }))
-    child.stdin.end(flattenPrompt(prompt))
+    child.stdin.end(folded.preface + flattenPrompt(prompt))
 
     const stderr = []
     let errBytes = 0
@@ -537,6 +594,7 @@ export async function * askStream ({ prompt, context, model, effort, files, web,
 
     let lineBuffer = ''
     let streamBytes = 0
+    let lastOutputAt = Date.now()
     child.stdout.on('data', (data) => {
       // Same reasoning as ask(): bound peak memory, and fail loud rather than truncating a
       // JSONL line mid-object (which would surface as an unparseable event, not as the real
@@ -549,6 +607,7 @@ export async function * askStream ({ prompt, context, model, effort, files, web,
         wakeUp()
         return
       }
+      lastOutputAt = Date.now()
       lineBuffer += data.toString('utf8')
       let nl
       while ((nl = lineBuffer.indexOf('\n')) >= 0) {
@@ -571,7 +630,18 @@ export async function * askStream ({ prompt, context, model, effort, files, web,
       wakeUp()
     })
 
-    const deadline = Date.now() + effectiveTimeoutMs
+    // The budget is SILENCE, not total time — see STREAM_STALL_MS. An unbudgeted call gets its
+    // full effectiveTimeoutMs of quiet up front (a cold CLI start, a long think before the first
+    // token), and after that every burst of stdout buys another STREAM_STALL_MS, up to the hard
+    // ceiling. A call the caller budgeted explicitly keeps the flat deadline it asked for.
+    const startedAt = Date.now()
+    const extendable = !hasExplicitBudget(timeoutMs)
+    const hardDeadline = startedAt + MAX_TIMEOUT_MS
+    const deadlineNow = () => {
+      const flat = startedAt + effectiveTimeoutMs
+      if (!extendable) return flat
+      return Math.min(hardDeadline, Math.max(flat, lastOutputAt + STREAM_STALL_MS))
+    }
     let resultEvent = null
     const textParts = []
 
@@ -591,8 +661,11 @@ export async function * askStream ({ prompt, context, model, effort, files, web,
         }
       }
       if (resultEvent || exited !== null) break
-      if (Date.now() > deadline) {
-        throw makeCliError('Local Claude Code CLI timed out after ' + Math.round(effectiveTimeoutMs / 1000) + 's', { code: 'local_cli_timeout', status: 504 })
+      if (Date.now() > deadlineNow()) {
+        const ranFor = Math.round((Date.now() - startedAt) / 1000)
+        const silentFor = Math.round((Date.now() - lastOutputAt) / 1000)
+        throw makeCliError('Local Claude Code CLI timed out after ' + ranFor + 's (no output for ' + silentFor + 's)',
+          { code: 'local_cli_timeout', status: 504 })
       }
       await new Promise(resolve => {
         wake = resolve

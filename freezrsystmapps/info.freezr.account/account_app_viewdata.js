@@ -60,7 +60,7 @@ freezr.initPageScripts = function () {
 function cacheElements () {
   const ids = [
     'app_name', 'appSettings', 'collection_names', 'getCollectionData',
-    'backUpData', 'loading', 'paginationControls', 'all_data',
+    'backUpData', 'backUpAllData', 'loading', 'paginationControls', 'all_data',
     'bottomPagination', 'backup_status', 'warnings', 'headerChooser',
     'pageInfo', 'pageInfoBottom', 'recordCount', 'pageNumbers',
     'prevPage', 'nextPage', 'prevPageBottom', 'nextPageBottom', 'fetchMore',
@@ -75,6 +75,7 @@ function setupEventListeners () {
   elements.collection_names.addEventListener('change', handleCollectionChange)
   elements.getCollectionData.addEventListener('click', fetchCollectionData)
   elements.backUpData.addEventListener('click', startBackup)
+  elements.backUpAllData.addEventListener('click', startBackupAll)
   elements.prevPage.addEventListener('click', () => navigatePage(-1))
   elements.nextPage.addEventListener('click', () => navigatePage(1))
   elements.prevPageBottom.addEventListener('click', () => navigatePage(-1))
@@ -186,6 +187,8 @@ function populateTableDropdown (tables) {
   elements.collection_names.innerHTML = tables
     .map(table => `<option value="${table}">${table}</option>`)
     .join('')
+  // Backing up all tables doesn't need any data to be fetched first
+  elements.backUpAllData.style.display = tables.length > 0 ? 'inline-block' : 'none'
 }
 
 function handleCollectionChange () {
@@ -636,21 +639,24 @@ async function handleDeleteRecord (recordId, callback) {
 
 // Backup functionality
 function startBackup () {
+  runBackup([state.collection.name])
+}
+
+function startBackupAll () {
+  const tables = (state.meta.appTables || []).filter(Boolean)
+  if (tables.length === 0) {
+    showError('No data tables found for this app')
+    return
+  }
+  runBackup(tables)
+}
+
+async function runBackup (tables) {
   // Hide data view elements
   elements.headerChooser.style.display = 'none'
   elements.paginationControls.style.display = 'none'
   elements.bottomPagination.style.display = 'none'
   elements.all_data.innerHTML = ''
-
-  // Initialize backup state
-  state.backup = {
-    name: state.collection.name,
-    firstRetrievedDate: Date.now(),
-    lastRetrievedDate: Date.now(),
-    data: [],
-    part: 1,
-    retrievedAll: false
-  }
 
   // Clear collection state
   state.collection = {
@@ -661,89 +667,99 @@ function startBackup () {
     currentPage: 1
   }
 
+  const title = tables.length === 1
+    ? tables[0]
+    : `${state.meta.appName} - all tables (${tables.length})`
+
   // Show backup status
   elements.backup_status.style.display = 'block'
   elements.backup_status.innerHTML = `
-    <h2>Backing Up: ${state.backup.name}</h2>
+    <h2>Backing Up: ${title}</h2>
     <div class="backup-log" id="backupLog"></div>
   `
 
   addBackupLog('Starting backup...')
-  retrieveBackupData()
+
+  for (const tableName of tables) {
+    await backupOneTable(tableName)
+  }
+
+  finishBackup()
+}
+
+// Backs up one table, saving one file per FILE_SIZE_MAX-sized part
+async function backupOneTable (tableName) {
+  state.backup = {
+    name: tableName,
+    firstRetrievedDate: Date.now(),
+    lastRetrievedDate: Date.now(),
+    data: [],
+    part: 1,
+    retrievedAll: false
+  }
+
+  addBackupLog(`Table: ${tableName}`)
+
+  let totalRetrieved = 0
+
+  while (!state.backup.retrievedAll) {
+    let records
+    try {
+      records = await retrieveBackupData()
+    } catch (error) {
+      console.warn('Error retrieving backup data for ' + tableName, error)
+      addBackupLog(`Error - could not retrieve data from ${tableName}`, 'error')
+      return
+    }
+
+    // Handle wrapped results - support both array and object with results
+    records = Array.isArray(records) ? records : (records?.results || [])
+
+    if (records.length > 0) {
+      // Track the newest date (max) for the first batch in each file part
+      if (state.backup.data.length === 0) {
+        state.backup.firstRetrievedDate = getMaxDate(records, 0)
+      }
+
+      // Track the oldest date (min) for querying older records
+      state.backup.lastRetrievedDate = getMinDate(records, state.backup.lastRetrievedDate)
+      state.backup.data = state.backup.data.concat(records)
+      totalRetrieved += records.length
+
+      addBackupLog(`Retrieved ${records.length} records (total: ${totalRetrieved})`)
+    }
+
+    state.backup.retrievedAll = records.length < BACKUP_RETRIEVE_COUNT
+
+    // Save a file when done, or when the pending data has grown big enough
+    if (state.backup.data.length > 0 &&
+      (state.backup.retrievedAll || JSON.stringify(state.backup.data).length > FILE_SIZE_MAX)) {
+      const fileName = saveBackupFile()
+      const lastDate = new Date(state.backup.lastRetrievedDate)
+      const firstDate = new Date(state.backup.firstRetrievedDate)
+
+      addBackupLog(`Created file: "${fileName}"`, 'success')
+      addBackupLog(`Data range: ${lastDate.toLocaleDateString()} ${lastDate.toLocaleTimeString()} to ${firstDate.toLocaleDateString()} ${firstDate.toLocaleTimeString()}`)
+
+      // Reset for next file part - firstRetrievedDate will be set from next batch
+      state.backup.part++
+      state.backup.data = []
+
+      // Give the browser a moment between downloads
+      await new Promise(resolve => setTimeout(resolve, 300))
+    }
+  }
+
+  if (totalRetrieved === 0) addBackupLog(`No data found in ${tableName}`)
 }
 
 async function retrieveBackupData () {
-  try {
-    const query = { _date_modified: { $lt: state.backup.lastRetrievedDate } }
-    const options = { count: BACKUP_RETRIEVE_COUNT }
+  const query = { _date_modified: { $lt: state.backup.lastRetrievedDate } }
+  const options = { count: BACKUP_RETRIEVE_COUNT }
 
-    // Build proper app table name
-    let appTable = state.backup.name
-    if (state.meta.isPublicApp) {
-      options.owner_id = 'public'
-      appTable = 'info.freezr.public.' + state.backup.name
-    }
+  if (state.meta.isPublicApp) options.owner_id = 'public'
 
-    const data = await freezr.query(appTable, query, options)
-    
-    handleBackupData(null, data)
-  } catch (error) {
-    handleBackupData(error, null)
-  }
-}
-
-function handleBackupData (error, returnData) {
-  // Handle wrapped results - support both array and object with results
-  const records = Array.isArray(returnData) ? returnData : (returnData?.results || returnData || [])
-
-  if (error || !records) {
-    addBackupLog('Error - could not retrieve data', 'error')
-    return
-  }
-
-  if (!Array.isArray(records) || records.length === 0) {
-    if (state.backup.data.length === 0) {
-      addBackupLog('No data found in this table', 'error')
-      addBackupLog('Refresh page to try again')
-    } else {
-      finishBackup()
-    }
-    return
-  }
-
-  // Update backup state
-  state.backup.retrievedAll = records.length < BACKUP_RETRIEVE_COUNT
-  
-  // Track the newest date (max) for the first batch in each file part
-  if (state.backup.data.length === 0) {
-    state.backup.firstRetrievedDate = getMaxDate(records, 0)
-  }
-  
-  // Track the oldest date (min) for querying older records
-  state.backup.lastRetrievedDate = getMinDate(records, state.backup.lastRetrievedDate)
-  state.backup.data = state.backup.data.concat(records)
-
-  addBackupLog(`Retrieved ${records.length} records (total: ${state.backup.data.length})`)
-
-  // Check if we need to save a file
-  if (state.backup.retrievedAll || JSON.stringify(state.backup.data).length > FILE_SIZE_MAX) {
-    const fileName = saveBackupFile()
-    const lastDate = new Date(state.backup.lastRetrievedDate)
-    const firstDate = new Date(state.backup.firstRetrievedDate)
-
-    addBackupLog(`Created file: "${fileName}"`, 'success')
-    addBackupLog(`Data range: ${lastDate.toLocaleDateString()} ${lastDate.toLocaleTimeString()} to ${firstDate.toLocaleDateString()} ${firstDate.toLocaleTimeString()}`)
-
-    // Reset for next file part - firstRetrievedDate will be set from next batch
-    state.backup.part++
-    state.backup.data = []
-  }
-
-  if (!state.backup.retrievedAll) {
-    retrieveBackupData()
-  } else {
-    finishBackup()
-  }
+  return freezr.query(state.backup.name, query, options)
 }
 
 function finishBackup () {

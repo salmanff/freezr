@@ -18,11 +18,15 @@ export const SESSION_CONFIG = {
  * Auth rate limiting configuration
  */
 export const AUTH_RATE_LIMIT = {
-  /** Maximum failed attempts per IP before blocking */
-  MAX_ATTEMPTS_PER_IP: 3,
+  /** Maximum failed attempts per IP before blocking.
+   *  20, not 3: a single app page with a token that just went stale (re-login, token deleted)
+   *  fires several parallel API calls at once, each a counted failure — at 3 one such burst
+   *  blocked the user's own IP for 5 minutes (seen on prod 2026-09-16). Brute-force protection
+   *  at 20/min is still ample; a real attacker never has a valid-looking token to begin with. */
+  MAX_ATTEMPTS_PER_IP: 20,
   
   /** Maximum failed attempts per device before blocking */
-  MAX_ATTEMPTS_PER_DEVICE: 3,
+  MAX_ATTEMPTS_PER_DEVICE: 20,
   
   /** Time window for counting attempts (1 minute) */
   WINDOW_MS: 60 * 1000,
@@ -82,6 +86,9 @@ export const REQUEST_WATCHDOG = {
     '/acctapi/fsMigration',             // copies a user's whole file store
     '/acctapi/dbMigration',             // copies a user's whole database
     '/acctapi/app_install_from_zipfile', // upload + unpack + install
+    '/acctapi/app_install_from_url',    // download + unpack + install - a 503 here while the install
+                                        // carried on made users retry into a concurrent install
+    '/adminapi/install_app_for_users',  // one install per selected user, sequentially
     '/jobs/run'                         // job execution, incl. cloud runners
   ]
 }

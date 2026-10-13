@@ -1,6 +1,6 @@
 /* global freezr */
 
-import { tsOf } from './utils.js'
+import { tsOf, recordMeta } from './utils.js'
 
 export const fetchAppHistory = async (appName, options = {}) => {
   try {
@@ -17,7 +17,7 @@ export const fetchAppHistory = async (appName, options = {}) => {
 
 export const addHistoryEntry = async (appName, action, extra = {}) => {
   try {
-    const entry = { appName, action, timestamp: new Date().toISOString(), ...extra }
+    const entry = { ...recordMeta(), appName, action, timestamp: new Date().toISOString(), ...extra }
     const result = await freezr.create('appUpdates', entry)
     const _id = result?._id || result?.id || null
     return { ...entry, _id }
@@ -68,7 +68,11 @@ const ACTION_LABELS = {
   context_updated: 'Reference doc updated',
   published: 'App published',
   unpublished: 'App unpublished',
-  renamed: 'App renamed'
+  renamed: 'App renamed',
+  restored: 'Restored from version',
+  undone: 'Chat changes undone',
+  uploaded: 'App uploaded',
+  chat_imported: 'Chat history imported'
 }
 
 export const labelForAction = (action) => ACTION_LABELS[action] || action || 'Unknown'

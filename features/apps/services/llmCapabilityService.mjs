@@ -16,10 +16,12 @@ import {
   resolveCapability,
   isPermitted,
   isConfirmed,
-  normalizeWebOption
+  normalizeWebOption,
+  normalizeStructuredOutput,
+  parseStructuredOutput
 } from '../../../common/helpers/llmCapabilities.mjs'
 
-export { UNKNOWN, CAPABILITY_KEYS, resolveCapability, isPermitted, isConfirmed, normalizeWebOption }
+export { UNKNOWN, CAPABILITY_KEYS, resolveCapability, isPermitted, isConfirmed, normalizeWebOption, normalizeStructuredOutput, parseStructuredOutput }
 
 export const CAPABILITY_ERROR = 'capability_unsupported'
 export const CAPABILITY_ERROR_ON_MODEL = 'capability_unsupported_on_model'

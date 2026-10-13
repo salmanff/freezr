@@ -49,5 +49,24 @@ app: {
       <div id="standAloneApps"></div>
     </div>
 
+    <!-- Section 4: Developer Options (admin users only) -->
+    <div class="freezr-card" id="devCard" style="display: none;">
+      <h3 style="margin-bottom: 1rem;">Developer Options</h3>
+      <div>Regenerate this app from the files in its folder, and write out the files an AI coding assistant needs to work on it.</div>
+      <div id="devTokenResultBox"></div>
+      <div class="dev-action-row">
+        <div id="button_dev_updateAppFromFiles" class="freezrButt">Regenerate App from Files</div>
+        <span class="dev-action-desc" id="devDesc_updateAppFromFiles"></span>
+      </div>
+      <div class="dev-action-row">
+        <div id="button_dev_regenerateDevTokens" class="freezrButt">Regenerate Tokens for App</div>
+        <span class="dev-action-desc" id="devDesc_regenerateDevTokens"></span>
+      </div>
+      <div class="dev-action-row">
+        <div id="button_dev_generateContextFile" class="freezrButt">(re)Generate context file for LLMs</div>
+        <span class="dev-action-desc" id="devDesc_generateContextFile"></span>
+      </div>
+    </div>
+
   </div>
 </div>

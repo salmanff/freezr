@@ -16,6 +16,45 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const SYSTEM_APPS_PATH = path.resolve(__dirname, '../../../freezrsystmapps')
 
+/**
+ * The <base> tag an html main page needs when served under a CUSTOM public id, or '' if none.
+ *
+ * At its canonical id (@owner/app.files/projects/x/public/index.html) a published page sits in the
+ * same URL folder as the files it ships with, so a relative URL it uses at run time -
+ * fetch('slides.json'), <img src="pics/a.png"> - resolves correctly. Under a custom short id
+ * (/why2026) the same relative URL resolves against the site root and the server answers with its
+ * not-found page: the fetch "succeeds" and hands the page html instead of its file.
+ *
+ * So for a custom id we point the document at the canonical folder. The href is PATH-ONLY on
+ * purpose: it then works whatever host or scheme the server is reached on. Declared css/js are
+ * unaffected (they are injected as absolute URLs). A page that already declares a <base> is left
+ * alone - that is the author being explicit, and a second tag would be ignored anyway.
+ *
+ * Side effect page authors must know (documented in freezr-context.md): a RELATIVE url given to
+ * history.pushState/replaceState resolves against this base too, so a page that writes '#3' to
+ * the URL should set location.hash instead.
+ *
+ * @param {string} publicId - the id the page is being served under
+ * @param {object} publicRecord - the public record (data_owner, original_app_table, original_record_id, html_page)
+ * @returns {string} '<base href="/@owner/app.files/.../">' or ''
+ */
+export const publicBaseTagFor = (publicId, publicRecord) => {
+  if (!publicId || !publicRecord) return ''
+  const owner = publicRecord.data_owner
+  const appTable = publicRecord.original_app_table
+  if (!owner || !appTable || !endsWith(appTable, '.files')) return ''
+  // Legacy records may carry the unified-DB prefix inside original_record_id - strip it (no-op on clean ids)
+  const filePath = getOrigIdWithOatRemoved(publicRecord.original_record_id?.toString(), { owner, app_table: appTable })
+  if (!filePath || typeof filePath !== 'string') return ''
+  const canonicalId = '@' + owner + '/' + appTable + '/' + filePath
+  if (canonicalId === publicId) return ''
+  if (/<base\b/i.test(publicRecord.html_page || '')) return ''
+  const folder = canonicalId.slice(0, canonicalId.lastIndexOf('/') + 1)
+  // encodeURI keeps '/', '@', '.', '-' and '_' and encodes spaces and quotes, so the value is safe
+  // both as a URL and inside the attribute's double quotes.
+  return '<base href="' + encodeURI('/' + folder) + '">'
+}
+
 let _appCardTemplateCache = null
 const getAppCardTemplate = async () => {
   if (_appCardTemplateCache) return _appCardTemplateCache
@@ -284,6 +323,9 @@ const renderPublicObjectPage = async (req, res, publicId, options = {}) => {
       }
       if (meta.image) metaTags += `<meta property="og:image" content="${escapeHtml(meta.image)}">`
     }
+    // Under a custom public id, pin the page's relative URLs to its canonical folder. Goes first
+    // in <head> (via META_TAGS) so it is the document's first <base> and therefore the one used.
+    metaTags = publicBaseTagFor(publicId, publicRecord) + metaTags
 
     const pageOptions = {
       page_title: (meta?.title) || fileStructure.name || publicId,

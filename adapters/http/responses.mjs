@@ -155,11 +155,17 @@ export function sendFailure(res, err, context = 'unknown', statusCode = 500) {
   // regardless of the caller's default status code.
   if (errorObj.code === 'MIGRATION_LOCK') statusCode = 503;
 
+  // An error carrying a userMessage (eg InstallError) keeps its server detail (paths, errno) in the
+  // log, and sends the user the readable message, a machine-readable code and its own status.
+  const userMessage = errorObj.userMessage
+  if (userMessage && errorObj.statusCode) statusCode = errorObj.statusCode;
+
   if (typeof context === 'string') {
     context = { function: context }
   }
 
-  res.locals.flogger.error(message, context);
+  // Passing the cause as an Error arg keeps its message and stack in the log event
+  res.locals.flogger.error(message, context, ...(errorObj.cause instanceof Error ? [errorObj.cause] : []));
 
   if (alreadyAnswered(res)) return res
 
@@ -170,7 +176,8 @@ export function sendFailure(res, err, context = 'unknown', statusCode = 500) {
     // Send standardized error response
     res.status(statusCode).json({
       success: false,
-      error: message
+      error: userMessage || message,
+      ...(userMessage && errorObj.code && { code: errorObj.code })
     })
   }
 }

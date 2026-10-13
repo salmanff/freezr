@@ -9,9 +9,11 @@ import { sendFailure } from '../../adapters/http/responses.mjs'
 import { createCreatorPageController } from './controllers/creatorPageController.mjs'
 import { createCreatorApiController } from './controllers/creatorApiController.mjs'
 import { createInspectController } from './controllers/inspectController.mjs'
+import { createSnapshotController } from './controllers/snapshotController.mjs'
 import { createAccountApiController } from '../account/controllers/accountApiController.mjs'
 import { createAddTokenDb } from '../account/middleware/accountContext.mjs'
 import { createAddTrustedJobsDbIfAdmin } from '../jobs/middleware/jobsContext.mjs'
+import { rejectInvalidTargetApps } from './services/creatorTargetGuards.mjs'
 
 export const createCreatorPageRoutes = ({ dsManager, freezrPrefs, freezrStatus }) => {
   const router = Router()
@@ -106,7 +108,9 @@ export const createCreatorApiRoutes = ({ dsManager, freezrPrefs, freezrStatus })
     getAndCheckCreatorAppTokenInfo,
     addCreatorAppAsReqParam,
     addUserDSAndAppFS,
-    isLoggedInCreatorAppRequest
+    isLoggedInCreatorAppRequest,
+    // After auth, so an unauthenticated caller gets 401 rather than a validation error.
+    rejectInvalidTargetApps
   ]
 
   const addPublicRecordsDb = createAddPublicRecordsDB(dsManager, freezrPrefs, freezrStatus)
@@ -136,6 +140,24 @@ export const createCreatorApiRoutes = ({ dsManager, freezrPrefs, freezrStatus })
   // freezr_creator_selfcheck_plan_v1.md Part A. Needs the token DB for the data-scope mint.
   const addTokenDb = createAddTokenDb(dsManager, freezrPrefs, freezrStatus)
   router.post('/create_inspection_token', ...sharedMiddleware, addTokenDb, creatorApiController.createInspectionToken)
+
+  // Whole-app snapshots (the History panel's Versions tab). Take / list / compare / pin / delete use
+  // the shared chain; restore also re-installs from files, so it takes the same extra DBs as
+  // update_app_from_files. See controllers/snapshotController.mjs.
+  const snapshotController = createSnapshotController()
+  router.post('/snapshot_app', ...sharedMiddleware, snapshotController.createSnapshot)
+  router.get('/app_snapshots', ...sharedMiddleware, snapshotController.listSnapshots)
+  router.post('/compare_snapshots', ...sharedMiddleware, snapshotController.compareSnapshots)
+  router.post('/restore_snapshot', ...sharedMiddleware, addOwnerPermsDb, addPublicManifestsDb, addTrustedJobsDbIfAdmin, snapshotController.restoreSnapshot)
+  router.post('/update_snapshot', ...sharedMiddleware, snapshotController.updateSnapshot)
+  router.post('/delete_snapshot', ...sharedMiddleware, snapshotController.deleteSnapshot)
+  router.post('/delete_app_snapshots', ...sharedMiddleware, snapshotController.deleteAppSnapshots)
+  // Backup & Transfer (app settings): download the app / chat history, upload either back.
+  // upload_app_zip re-installs from files like restore, so it takes the same extra DBs.
+  router.get('/download_app_zip', ...sharedMiddleware, snapshotController.downloadAppZip)
+  router.get('/download_chat', ...sharedMiddleware, snapshotController.downloadChat)
+  router.post('/upload_app_zip', ...sharedMiddleware, upload.single('file'), addOwnerPermsDb, addPublicManifestsDb, addTrustedJobsDbIfAdmin, snapshotController.uploadAppZip)
+  router.post('/upload_chat', ...sharedMiddleware, upload.single('file'), snapshotController.uploadChat)
 
   router.get('/:action', ...sharedMiddleware, createRouteDispatcher(VALID_GET_ACTIONS, creatorApiController))
   router.post('/:action', ...sharedMiddleware, createRouteDispatcher(VALID_POST_ACTIONS, creatorApiController))

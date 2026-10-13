@@ -1311,7 +1311,11 @@ describe('FEPS Endpoints Integration Tests', function () {
       const permissionName = 'read_files' // Adjust based on your permission structure
       const filePath = uploadedFileId
       
-      const response = await auth.get(`/feps/getuserfiletoken/${permissionName}/${appName}/${userId}/${filePath}`)
+      // The route is /getuserfiletoken/:permission_name/:app_name/:user_id and takes the file as a
+      // ?file= QUERY param (fepsApiRoutes.mjs:446). Passing it as a 4th path segment does not match
+      // the route at all — the request falls through to the public catch-all GET /* and comes back
+      // as a 200 HTML page, so the assertion below fails on a string of markup.
+      const response = await auth.get(`/feps/getuserfiletoken/${permissionName}/${appName}/${userId}?file=${encodeURIComponent(filePath)}`)
       // console.log('      🔑 getuserfiletoken response', { response })
       if (response.ok) {
         expect(response.data).to.have.property('fileToken')
@@ -1567,11 +1571,17 @@ describe('FEPS Multi-User Tests', function () {
   it('should allow user to create record in their own space', async function () {
     if (!primaryAuth) this.skip()
     
+    // /feps/write takes a WRAPPED body: record data under `_entity`, with top-level keys
+    // (owner_id, permission_name, upsert…) as control parameters — see freezrApiV2.js:175.
+    // A flat ceps-style body means no record data at all, and a field named `owner` is then read
+    // as the data-owner user id (addDataOwnerToContext), which 500s when it is not a real user.
     const response = await primaryAuth.post(`/feps/write/${appTable}`, {
-      title: 'Primary user FEPS record',
-      owner: 'primary'
+      _entity: {
+        title: 'Primary user FEPS record',
+        owner: 'primary'
+      }
     })
-    
+
     expect(response.ok).to.be.true
     primaryRecordId = response.data._id
   })
@@ -1583,9 +1593,12 @@ describe('FEPS Multi-User Tests', function () {
     // This test verifies data isolation
     // Note: FEPS doesn't have a query endpoint exposed, so we can't directly test this
     // But we can verify that users can create their own records
+    // Wrapped body, as above — record data under `_entity`.
     const secondaryResponse = await secondaryAuth.post(`/feps/write/${appTable}`, {
-      title: 'Secondary user FEPS record',
-      owner: 'secondary'
+      _entity: {
+        title: 'Secondary user FEPS record',
+        owner: 'secondary'
+      }
     })
     
     expect(secondaryResponse.ok).to.be.true

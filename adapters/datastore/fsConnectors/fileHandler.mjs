@@ -7,7 +7,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 
 // Import fflate for ZIP operations
-import { unzip, unzipSync } from 'fflate'
+import { unzipSync } from 'fflate'
 
 // Import new modular helpers - use ES module imports for new .mjs files
 import { validAppName, isSystemApp, isAskAppName, FREEZR_USER_FILES_DIR } from '../../../common/helpers/config.mjs'
@@ -48,38 +48,19 @@ const fullLocalPathTo = (partialPath) => {
 }
 
 // Delete local folder and contents
+// fs.promises.rm: async (doesn't block the event loop on slow disks), `force` makes a missing
+// folder / already-deleted file a no-op, and `maxRetries` retries EBUSY/ENOTEMPTY/EPERM - which
+// network-mounted disks (eg Azure App Service's SMB /home) can return transiently.
 const deleteLocalFolderAndContents = async (folderPath) => {
   if (!folderPath) {
     throw new Error('Folder path is required')
   }
 
-  return new Promise((resolve, reject) => {
-    if (!fs.existsSync(folderPath)) {
-      resolve() // Folder doesn't exist, nothing to delete
-      return
-    }
-
-    const deleteRecursive = (dirPath) => {
-      if (fs.existsSync(dirPath)) {
-        fs.readdirSync(dirPath).forEach((file) => {
-          const curPath = path.join(dirPath, file)
-          if (fs.lstatSync(curPath).isDirectory()) {
-            deleteRecursive(curPath)
-          } else {
-            fs.unlinkSync(curPath)
-          }
-        })
-        fs.rmdirSync(dirPath)
-      }
-    }
-
-    try {
-      deleteRecursive(folderPath)
-      resolve()
-    } catch (error) {
-      reject(new Error(`Failed to delete folder ${folderPath}: ${error.message}`))
-    }
-  })
+  try {
+    await fs.promises.rm(folderPath, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
+  } catch (error) {
+    throw new Error(`Failed to delete folder ${folderPath}: ${error.message}`, { cause: error })
+  }
 }
 
 // Extract zip to local folder
@@ -137,8 +118,7 @@ const extractZipToLocalFolder = async (zipBuffer, targetPath, appName) => {
       await fs.promises.writeFile(fullFilePath, content)
     }
   } catch (error) {
-    console.error('extractZipToLocalFolder error', { targetPath, appName, error })
-    throw new Error(`Failed to extract zip to ${targetPath}: ${error.message}`)
+    throw new Error(`Failed to extract zip to ${targetPath}: ${error.message}`, { cause: error })
   }
 }
 

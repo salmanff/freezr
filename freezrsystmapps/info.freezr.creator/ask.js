@@ -4,7 +4,7 @@
 // response parser + edit resolver (CodeMirror is lazy-loaded, never pulled in here).
 // See freezr_askapps_plan_v1.md §5.
 import { parseFreezrResponse, extractStreamDisplay, resolveEditFiles } from './modules/chatService.js'
-import { saveFileToBackend, updateAppFromFiles } from './modules/utils.js'
+import { saveFileToBackend, updateAppFromFiles, fetchGrantedMap } from './modules/utils.js'
 import { API_REFERENCE } from './modules/longTexts/apiReference.js'
 import { STAGE1_SYSTEM, buildStage1UserMessage, STAGE2_SYSTEM, buildStage2UserMessage } from './modules/longTexts/askPrompts.js'
 import { calculateCostFromTokensUsed, formatCost, formatTokens } from './modules/priceService.js'
@@ -161,18 +161,6 @@ const beginStream = (label) => {
 // Clears the RIGHT panel for a NEW prompt (the LEFT chat keeps the full history). Log rebuilds lazily.
 const resetActivity = () => { currentLogLine = null; if (activity()) activity().innerHTML = '' }
 
-// Pings the app's permission status (which of its declared permissions the user has granted).
-// Returns a map name -> granted(bool). A permission that is outdated/removed counts as NOT granted.
-const fetchGrantedMap = async (appName) => {
-  const r = await freezr.apiRequest('GET', '/feps/permissions/getall/' + encodeURIComponent(appName))
-  const list = Array.isArray(r) ? r : ((r && (r.perms || r.permissions || r.data)) || [])
-  const map = {}
-  for (const rec of list) {
-    const n = rec && (rec.name || rec.permission_name)
-    if (n) map[n] = !!rec.granted && rec.status !== 'removed' && !rec.outDated
-  }
-  return map
-}
 
 // Appends the result card (right panel) — does NOT clear the log above it. Once the page is ready we
 // check which permissions are already granted and, in the card: show each as Granted or an Accept

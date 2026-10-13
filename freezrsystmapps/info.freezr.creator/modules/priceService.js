@@ -24,7 +24,7 @@ const summarizeTokensUsed = (tokensUsed) => {
 // Fallback path used only when a record has token counts but no stored `cost`.
 export const calculateCostFromTokensUsed = (tokensUsed) => summarizeTokensUsed(tokensUsed)
 
-const COSTED_ACTIONS = new Set(['chat', 'image_generation'])
+const COSTED_ACTIONS = new Set(['chat', 'image_generation', 'change_review'])
 
 export const calculateEntryCost = (entry, options = {}) => {
   const recalculateFromTokens = options.recalculateFromTokens === true

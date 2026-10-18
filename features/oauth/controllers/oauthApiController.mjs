@@ -11,6 +11,7 @@ import {
   deleteState,
   MAX_STATE_TIME_MS
 } from '../services/oauthService.mjs'
+import crypto from 'crypto'
 import { writeConnectionRecord } from '../services/connectionWriter.mjs'
 import { startsWith, randomText, expiryDatePassed } from '../../../common/helpers/utils.mjs'
 import { APP_TOKEN_OAC, FREEZR_DEFAULT_AUTH_PROVIDER } from '../../../common/helpers/config.mjs'
@@ -209,6 +210,39 @@ const parsePartnerUrl = (urlStr) => {
   } catch (_) { return null }
 }
 
+// Browser binding: a state must only be usable from the browser that started the flow.
+// The session can't carry that for anonymous visitors (e.g. a partner freezr serving
+// another freezr's user) — FreezrSessionStore never persists a session without a
+// logged-in user. So the state record holds a random nonce that the starting browser
+// also gets as a short-lived HttpOnly cookie. Unlike the state, the nonce never
+// appears in a URL. SameSite=Lax (not Strict) so it survives the return from the
+// provider's consent screen; it is useless without the matching state.
+const OAUTH_BIND_COOKIE = 'freezr_oauth_bind'
+const OAUTH_BIND_COOKIE_PATH = '/oauth'
+
+const bindStateToBrowser = (req, res, stateParams) => {
+  stateParams.browser_binding = crypto.randomBytes(32).toString('hex')
+  res.cookie(OAUTH_BIND_COOKIE, stateParams.browser_binding, {
+    httpOnly: true,
+    secure: req.secure,
+    sameSite: 'lax',
+    path: OAUTH_BIND_COOKIE_PATH,
+    maxAge: MAX_STATE_TIME_MS
+  })
+}
+
+const stateMatchesBrowser = (req, state, stateParams) => {
+  if (req.session?.oauth_state === state) return true
+  const expected = stateParams?.browser_binding
+  const presented = req.cookies?.[OAUTH_BIND_COOKIE]
+  if (typeof expected !== 'string' || typeof presented !== 'string') return false
+  const a = Buffer.from(expected)
+  const b = Buffer.from(presented)
+  return a.length === b.length && crypto.timingSafeEqual(a, b)
+}
+
+const clearBrowserBinding = (res) => res.clearCookie(OAUTH_BIND_COOKIE, { path: OAUTH_BIND_COOKIE_PATH })
+
 /**
  * Handle get_new_state action.
  * Creates OAuth state and returns redirect URL to third party OAuth provider.
@@ -358,6 +392,7 @@ const handleGetNewState = async (req, res, oauthorDb, cacheManager) => {
       stateParams.scopes = provider.scopesFor(access)
     }
 
+    bindStateToBrowser(req, res, stateParams)
     storeState(cacheManager, stateParams)
     req.session.oauth_state = stateParams.state
 
@@ -427,6 +462,7 @@ const handleGetNewState = async (req, res, oauthorDb, cacheManager) => {
     }
   }
 
+  bindStateToBrowser(req, res, stateParams)
   storeState(cacheManager, stateParams)
   req.session.oauth_state = stateParams.state
 
@@ -473,7 +509,7 @@ const handleValidateState = async (req, res, oauthorDb, cacheManager, deps = {})
     })
   }
 
-  if (req.session.oauth_state !== state) {
+  if (!stateMatchesBrowser(req, state, stateParams)) {
     return sendAuthFailure(res, {
       message: 'State mismatch - session state does not match',
       type: 'auth_error',
@@ -587,6 +623,7 @@ const handleValidateState = async (req, res, oauthorDb, cacheManager, deps = {})
 
     deleteState(cacheManager, state)
     req.session.oauth_state = null
+    clearBrowserBinding(res)
 
     res.locals.freezr.permGiven = true
     return sendApiSuccess(res, transferPayload)
@@ -621,6 +658,7 @@ const handleValidateState = async (req, res, oauthorDb, cacheManager, deps = {})
   // Clean up state
   deleteState(cacheManager, state)
   req.session.oauth_state = null
+  clearBrowserBinding(res)
 
   res.locals.freezr.permGiven = true
   return sendApiSuccess(res, toSend)
@@ -702,6 +740,7 @@ const handleConnectionPurpose = async (req, res, stateParams, cacheManager, deps
   // Clean up state
   deleteState(cacheManager, stateParams.state)
   req.session.oauth_state = null
+  clearBrowserBinding(res)
 
   res.locals.freezr.permGiven = true
   return sendApiSuccess(res, {
@@ -721,7 +760,7 @@ const handleConnectionPurpose = async (req, res, stateParams, cacheManager, deps
  *
  * Returns display-safe info about an in-flight transfer flow for the partner_confirm page
  * to render. Returns 404 if the state is unknown / expired. The caller's session must own
- * this state (matches req.session.oauth_state) — otherwise refuse.
+ * this state (session or browser-binding cookie — see stateMatchesBrowser) — otherwise refuse.
  *
  * No tokens / clientId / secret are ever included in the response.
  */
@@ -734,7 +773,7 @@ const handleTransferInfo = async (req, res, cacheManager) => {
   if (!sp || !sp.is_provider_transfer) {
     return sendFailure(res, 'No transfer state found (may have expired)', 'transfer_info', 404)
   }
-  if (req.session.oauth_state !== state) {
+  if (!stateMatchesBrowser(req, state, sp)) {
     return sendFailure(res, 'state does not match session', 'transfer_info', 403)
   }
   if (!isStateValid(sp)) {
@@ -770,7 +809,7 @@ const handleTransferProceed = async (req, res, cacheManager) => {
   if (!sp || !sp.is_provider_transfer) {
     return sendFailure(res, 'No transfer state found (may have expired)', 'transfer_proceed', 404)
   }
-  if (req.session.oauth_state !== state) {
+  if (!stateMatchesBrowser(req, state, sp)) {
     return sendFailure(res, 'state does not match session', 'transfer_proceed', 403)
   }
   if (!isStateValid(sp)) {

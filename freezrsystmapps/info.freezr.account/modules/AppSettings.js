@@ -485,9 +485,15 @@ const makePermissionElementFrom = function (permissionObject, currentAppName, me
 
   return dg.div(
     { className: 'permissionRow' },
-    dg.div( // header
+    dg.div( // header: perm name in bold, then the request sentence in normal weight
       { class: 'freezer_BoxTitle' },
-      (currentAppName + ' is asking to: "' + (permissionObject.description ? (permissionObject.description + '" (' + permissionObject.name + ')') : (permissionObject.name + '"')))
+      dg.b(permissionObject.name || ''),
+      dg.span(
+        { style: { 'font-weight': 'normal' } },
+        ' ' + currentAppName + (permissionObject.description
+          ? ' is asking to: "' + permissionObject.description + '"'
+          : ' is asking for this permission')
+      )
     ),
     dg.div( // button and description
       { className: 'permissionGrid', style: { display: 'grid', 'grid-template-columns': 'auto 1fr', gap: '0.75rem', 'align-items': 'start' } },

@@ -45,10 +45,19 @@ export const createLogoutAction = (dsManager) => {
       }
       // return res.redirect('/account/login')
 
-      const theDs = dsManager.users.fradmin 
+      const theDs = dsManager.users.fradmin
+      if (!theDs) {
+        // freezr not set up yet (e.g. stale cookie from a previous server) - nothing to log out of
+        return res.redirect(dsManager.freezrIsSetup ? '/account/login' : '/register/firstSetUp')
+      }
 
-      const appFS = await theDs.getorInitAppFS('info.freezr.account', {})
-    
+      let appFS
+      try {
+        appFS = await theDs.getorInitAppFS('info.freezr.account', {})
+      } catch (fsErr) {
+        console.error('❌ Error getting account appFS on logout', { function: 'createLogoutAction', error: fsErr })
+      }
+
       if (!appFS) {
         console.error('❌ appFS not found ...')
         return res.status(500).send('Internal server error - appFS oe page not available')
